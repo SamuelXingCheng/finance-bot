@@ -27,19 +27,24 @@ class GeminiService {
     public function parseTransaction(string $text): ?array {
         $systemInstruction = "You are a professional financial assistant. Your task is to accurately parse the user's spending or income text and convert it into a valid JSON object based ONLY on the provided schema. Infer the 'type' (expense or income) based on the context. If the text clearly indicates income (e.g., 'received salary'), use 'income'. Otherwise, assume 'expense'. If no category is clearly stated, use 'Miscellaneous'.";
 
+        // **************** 最終錯誤修正區塊 ****************
+        // 修正：將系統指令與用戶輸入合併，以繞過 API 結構限制
+        $mergedText = $systemInstruction . "\n\nUser input: " . $text;
+        
         $data = [
             'contents' => [
                 [
                     'role' => 'user',
-                    'parts' => [['text' => $text]]
+                    'parts' => [['text' => $mergedText]] // <-- 傳遞合併後的指令
                 ]
             ],
-            'config' => [
-                'systemInstruction' => $systemInstruction,
-                'responseMimeType' => 'application/json', // 設定輸出為 JSON
+            'generationConfig' => [ 
+                // 結構化輸出的配置
+                'responseMimeType' => 'application/json',
                 'responseSchema' => $this->transactionSchema
             ]
         ];
+        // **********************************************
 
         $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
