@@ -18,7 +18,9 @@ class Database {
             $this->conn = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (\PDOException $e) {
             error_log("Database Connection Error: " . $e->getMessage());
-            die("Database connection failed. Please check logs.");
+            // 移除 die()，改為拋出例外。
+            // 這允許 webhook.php 即使在連線失敗時，也能繼續執行到最後一行。
+            throw new \Exception("PDO Connection Failed: " . $e->getMessage()); 
         }
     }
 

@@ -9,15 +9,22 @@
 // ----------------------------------------------------
 function loadEnv($path = __DIR__ . '/.env') {
     if (!file_exists($path)) {
-        // 在本地開發時，如果 .env 不存在，拋出錯誤
-        // 在正式環境中，可能需要改為從系統環境變數中讀取
         error_log("FATAL: The .env file not found at: {$path}");
         die("Configuration failed. .env file missing.");
     }
 
-    $lines = file($path, FILE_IGNORE_EMPTY_LINES | FILE_SKIP_NEW_LINES);
+    // 移除 FILE_IGNORE_EMPTY_LINES | FILE_SKIP_NEW_LINES 旗標，
+    // 改為使用 file() 基礎讀取，並在迴圈中手動處理空行和註釋。
+    $lines = file($path); 
+
     foreach ($lines as $line) {
         $line = trim($line);
+        
+        // 增加檢查：跳過空行
+        if (empty($line)) {
+            continue; 
+        }
+
         if (strpos($line, '#') === 0) {
             continue; // 跳過註釋
         }
