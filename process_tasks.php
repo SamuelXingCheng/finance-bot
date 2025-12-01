@@ -104,18 +104,18 @@ try {
            ->execute([':result' => $jsonString, ':id' => $taskId]);
 
         // 4.6. 推送成功通知
-        $lineService->pushMessage($lineUserId, 
-            "🎉 記帳完成！成功記錄 {$successCount} 筆交易 (任務ID: {$taskId})。\n請查看您的記帳明細。"
-        );
+        // $lineService->pushMessage($lineUserId, 
+        //     "🎉 記帳完成！成功記錄 {$successCount} 筆交易 (任務ID: {$taskId})。\n請查看您的記帳明細。"
+        // );
         
     } else {
         // 4.7. 解析失敗或返回空結果
         $dbConn->prepare("UPDATE gemini_tasks SET status = 'FAILED' WHERE id = :id")
            ->execute([':id' => $taskId]);
            
-        $lineService->pushMessage($lineUserId, 
-            "❌ 記帳失敗！AI 助手無法解析您的訊息。請試著用簡單的「目的 金額」格式。"
-        );
+        // $lineService->pushMessage($lineUserId, 
+        //     "❌ 記帳失敗！AI 助手無法解析您的訊息。請試著用簡單的「目的 金額」格式。"
+        // );
     }
 
 } catch (Throwable $e) {

@@ -11,118 +11,85 @@ class GeminiService {
         $this->apiKey = GEMINI_API_KEY;
         $this->model = GEMINI_MODEL;
         
-        // 定義我們希望 Gemini 輸出的交易數據結構 (JSON Schema)
+        // 修正後的 Schema：根類型為 Array
         $this->transactionSchema = [
-            'type' => 'object',
-            'properties' => [
-                'amount' => ['type' => 'number', 'description' => '交易金額，必須是正數'],
-                'category' => ['type' => 'string', 'description' => '交易類別，例如: Food, Transport, Salary, Bills'],
-                'description' => ['type' => 'string', 'description' => '詳細描述或備註'],
-                'type' => ['type' => 'string', 'enum' => ['expense', 'income'], 'description' => '交易類型：收入(income)或支出(expense)'],
-            ],
-            'required' => ['amount', 'category', 'type']
+            'type' => 'array', 
+            'items' => [
+                'type' => 'object',
+                'properties' => [
+                    'amount' => ['type' => 'number', 'description' => '交易金額，必須是正數'],
+                    'category' => ['type' => 'string', 'description' => '交易類別，例如: Food, Transport, Salary, Bills'],
+                    'description' => ['type' => 'string', 'description' => '詳細描述或備註'],
+                    'type' => ['type' => 'string', 'enum' => ['expense', 'income'], 'description' => '交易類型：收入(income)或支出(expense)'],
+                ],
+                'required' => ['amount', 'category', 'type']
+            ]
         ];
     }
 
     public function parseTransaction(string $text): ?array {
-        // 使用 Heredoc 語法定義多行字串，避免逸出錯誤
+        // 強化版 System Instruction
         $systemInstruction = <<<EOD
-    Your sole job is to act as a structured data conversion engine. You MUST output a JSON ARRAY of objects conforming to the provided schema.
+--- 核心指令：專業結構化數據轉換引擎 ---
 
-    設定：你是一位熟悉台灣生活、年輕人用語的專業記帳助手。請將用戶輸入拆解為一筆或多筆交易，並嚴格遵循以下規則：
+你的唯一職責是將用戶輸入的中文內容轉換為嚴格符合指定 JSON 結構的數據陣列。
 
-    == EXAMPLE 1 (結構範例) ==
-    User Input: 昨天買了飲料70，晚餐150，還給媽媽5000
-    Output:
-    [
-    {
-        "amount": 70,
-        "category": "Food",
-        "description": "飲料",
-        "type": "expense"
-    },
-    {
-        "amount": 150,
-        "category": "Food",
-        "description": "晚餐",
-        "type": "expense"
-    },
-    {
-        "amount": 5000,
-        "category": "Allowance",
-        "description": "還給媽媽",
-        "type": "expense"
-    }
-    ]
+**【指令優先級：最高】**
+1. **必須強制輸出 JSON 陣列：** 你的輸出必須是包含多個交易物件的列表 `[{...}, {...}]`。
+2. **必須完整拆分：** 用戶的一句話可能包含多個不同的消費或收入，請務必將它們拆分成獨立的項目。例如：「午餐100，晚餐200」必須變成兩個物件。
+3. **必須有明確金額：** 如果輸入中沒有數字金額，請直接輸出空陣列 `[]`。
 
-    == EXAMPLE 2 (複雜中文解析範例) ==
-    User Input: 昨天早餐59元吐司, 午餐120便當, 晚餐70麵, 50健身房
-    Output:
-    [
-    {
-        "amount": 59,
-        "category": "Food",
-        "description": "早餐吐司",
-        "type": "expense"
-    },
-    {
-        "amount": 120,
-        "category": "Food",
-        "description": "午餐便當",
-        "type": "expense"
-    },
-    {
-        "amount": 70,
-        "category": "Food",
-        "description": "晚餐麵",
-        "type": "expense"
-    },
-    {
-        "amount": 50,
-        "category": "Entertainment",
-        "description": "健身房",
-        "type": "expense"
-    }
-    ]
-    ========================
+設定：你是一位熟悉台灣生活、年輕人用語的專業記帳助手。請嚴格遵循以下規則：
 
-    規則 1 (Type 類型判斷):
-    - 判定為 'income' (收入) 的關鍵詞：'薪水', '發薪', '領錢', '獎金', '年終', '股利', '股息', '中獎', '發票', '入帳', '轉帳給我', '賣東西', '二手賣出', '零用錢', '乾爹給的', '退稅', '補助', '有人還錢'.
-    - 其他所有情況皆預設為 'expense' (支出)。
+== EXAMPLE 1 (多筆拆分範例) ==
+User Input: 買了全聯的菜 350，搭了 Uber 100，還有欠我的 200 塊老王剛還我
+Output:
+[
+  {"amount": 350, "category": "Shopping", "description": "全聯的菜", "type": "expense"},
+  {"amount": 100, "category": "Transport", "description": "搭 Uber", "type": "expense"},
+  {"amount": 200, "category": "Allowance", "description": "老王還錢", "type": "income"}
+]
 
-    規則 2 (Category 類別判斷 - 台灣習慣):
-    - Food: 早餐, 午餐, 晚餐, 飲料, 手搖飲, 咖啡, 聚餐, 叫外送.
-    - Transport: 捷運, 公車, 悠遊卡, TPASS, 計程車, Uber, 加油, 停車費.
-    - Entertainment: 電影, KTV, 訂閱, 課金, 遊戲, 旅遊, 健身房.
-    - Shopping: 網購, 蝦皮, 全聯, 7-11, 買衣服, 日用品.
-    - Bills: 房租, 水電, 電話費.
-    - Investment: 股票, 定存.
-    - Medical: 看醫生.
-    - Education: 買書, 課程.
-    - Miscellaneous (雜項): 其他.
+== EXAMPLE 2 (單筆範例) ==
+User Input: 昨天買了飲料70
+Output:
+[
+  {"amount": 70, "category": "Food", "description": "飲料", "type": "expense"}
+]
+========================
 
-    規則 3 (Description 備註邏輯):
-    - 請從輸入中提取具體的「店名」、「品項」或「用途」作為備註。
-    EOD;
+規則 1 (Type 類型判斷):
+- income: 薪水, 發薪, 領錢, 獎金, 股利, 發票中獎, 還錢, 轉帳給我.
+- expense: 其他所有消費.
 
-        // **************** 最終錯誤修正區塊 ****************
-        // 修正：將系統指令與用戶輸入合併，以繞過 API 結構限制
+規則 2 (Category 類別判斷 - 台灣習慣):
+- Food: 吃飯, 飲料, 聚餐.
+- Transport: 交通, 加油, 停車.
+- Entertainment: 娛樂, 訂閱, 遊戲.
+- Shopping: 購物, 日用品.
+- Bills: 帳單, 房租.
+- Investment: 投資.
+- Medical: 醫療.
+- Education: 書, 課程.
+- Miscellaneous: 其他.
+
+規則 3: 請提取具體品項作為 description。
+EOD;
+
         $mergedText = $systemInstruction . "\n\nUser input: " . $text;
         
         $data = [
             'contents' => [
                 [
                     'role' => 'user',
-                    'parts' => [['text' => $mergedText]] // <-- 傳遞合併後的指令
+                    'parts' => [['text' => $mergedText]]
                 ]
             ],
             'generationConfig' => [ 
-                // 結構化輸出的配置
                 'responseMimeType' => 'application/json',
                 'responseSchema' => $this->transactionSchema
             ]
         ];
-        // **********************************************
 
         $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -142,21 +109,16 @@ class GeminiService {
         }
 
         $responseData = json_decode($response, true);
-        
-        // 檢查並提取 JSON 文本
         $jsonText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? null;
         
         if ($jsonText) {
-            // 【修正點】：將 JSON 字串解析回 PHP 陣列，符合 ?array 宣告
             $resultArray = json_decode($jsonText, true);
-            
-            // 進行一次額外檢查，防止模型返回的 JSON 是無效的
             if (is_array($resultArray)) {
                 return $resultArray;
             }
         }
         
-        return null; // 如果 API 失敗、無回應或返回的 JSON 無效，則返回 null
+        return null;
     }
 }
 ?>
