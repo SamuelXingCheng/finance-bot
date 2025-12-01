@@ -121,5 +121,45 @@ class LineService {
             error_log("LINE Flex Reply Error: HTTP $httpCode, Response: $response");
         }
     }
+    /**
+     * 【新增】主動推送 Flex Message
+     * @param string $userId 接收者的 Line User ID
+     * @param string $altText 訊息替代文字
+     * @param array $contents Flex Bubble 結構
+     * @return bool 推送是否成功
+     */
+    public function pushFlexMessage(string $userId, string $altText, array $contents): bool {
+        $postData = [
+            'to' => $userId,
+            'messages' => [
+                [
+                    'type' => 'flex',
+                    'altText' => $altText,
+                    'contents' => $contents
+                ]
+            ],
+        ];
+
+        $ch = curl_init('https://api.line.me/v2/bot/message/push'); // 使用 PUSH 端點
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postData));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $this->channelAccessToken,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            error_log("LINE Flex Push Error: HTTP $httpCode, Response: $response");
+            return false;
+        }
+        return true;
+    }
+    
 }
 ?>

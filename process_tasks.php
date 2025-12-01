@@ -103,19 +103,91 @@ try {
         $dbConn->prepare("UPDATE gemini_tasks SET status = 'COMPLETED', result_json = :result WHERE id = :id")
            ->execute([':result' => $jsonString, ':id' => $taskId]);
 
-        // 4.6. 推送成功通知
-        // $lineService->pushMessage($lineUserId, 
-        //     "🎉 記帳完成！成功記錄 {$successCount} 筆交易 (任務ID: {$taskId})。\n請查看您的記帳明細。"
-        // );
+
+        // ----------------------------------------------------
+        // 4.6. 【核心】推送 Flex Message 成功通知
+        // ----------------------------------------------------
+        
+        // --- 1. 定義中文對照表 (確保與 webhook.php 一致) ---
+        $categoryMap = [
+            'Food' => '飲食', 'Transport' => '交通', 'Entertainment' => '娛樂', 
+            'Shopping' => '購物', 'Bills' => '帳單', 'Investment' => '投資', 
+            'Medical' => '醫療', 'Education' => '教育', 'Miscellaneous' => '雜項', 
+            'Allowance' => '津貼', 'Salary' => '薪水'
+        ];
+        
+        // --- 2. 動態生成交易明細列表 ---
+        $detailContents = [];
+        
+        foreach ($resultData as $idx => $tx) {
+            $desc = $tx['description'] ?? '未分類項目';
+            // 確保金額格式化
+            $amt = number_format($tx['amount'] ?? 0); 
+            $catKey = $tx['category'] ?? 'Miscellaneous';
+            $date = $tx['date'] ?? 'N/A'; 
+            $currency = $tx['currency'] ?? 'TWD';
+            
+            // 獲取中文名稱 (Category Sanitization 確保了 $catKey 是有效的英文 Key)
+            $cleanCategoryName = $categoryMap[$catKey] ?? $catKey; 
+            
+            // 根據類型決定顏色
+            $amountColor = ($tx['type'] ?? 'expense') === 'income' ? '#1DB446' : '#FF334B';
+
+            // 添加一筆交易的 Box 結構
+            $detailContents[] = [
+                'type' => 'box', 
+                'layout' => 'vertical', 
+                'margin' => 'md',
+                'contents' => [
+                    // 第一行: 類別與品項名稱
+                    ['type' => 'text', 'text' => "【{$cleanCategoryName}】 {$desc}", 'weight' => 'bold', 'size' => 'sm'],
+                    // 第二行: 金額與日期 (確認 AI 推斷的資訊)
+                    ['type' => 'box', 'layout' => 'baseline', 'margin' => 'xs',
+                        'contents' => [
+                            ['type' => 'text', 'text' => "💵 \${$amt} {$currency}", 'size' => 'sm', 'color' => $amountColor, 'flex' => 0],
+                            ['type' => 'text', 'text' => "📅 {$date}", 'size' => 'xs', 'color' => '#AAAAAA', 'align' => 'end']
+                        ]
+                    ],
+                    ['type' => 'separator', 'margin' => 'md']
+                ]
+            ];
+        }
+        
+        // --- 3. 組裝完整的 Flex Bubble ---
+        $flexPayload = [
+            'type' => 'bubble',
+            'size' => 'kilo',
+            // Header: 標題與筆數 (綠色成功背景)
+            'header' => [
+                'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'backgroundColor' => '#27AE60',
+                'contents' => [
+                    ['type' => 'text', 'text' => "🎉 記帳成功 ({$successCount}筆)", 'weight' => 'bold', 'size' => 'md', 'color' => '#FFFFFF'],
+                ]
+            ],
+            // Body: 明細列表
+            'body' => [
+                'type' => 'box', 'layout' => 'vertical', 'spacing' => 'sm',
+                'contents' => $detailContents
+            ],
+            // Footer: 確認訊息
+            'footer' => [
+                'type' => 'box', 'layout' => 'vertical',
+                'contents' => [
+                    ['type' => 'text', 'text' => '數據已存入資料庫，感謝您的使用。', 'color' => '#AAAAAA', 'align' => 'center', 'size' => 'xs']
+                ]
+            ]
+        ];
+
+        // 4. 發送 Flex Message
+        $altText = "🎉 成功記錄 {$successCount} 筆交易";
+        $lineService->pushFlexMessage($lineUserId, $altText, $flexPayload);
         
     } else {
-        // 4.7. 解析失敗或返回空結果
+        // 4.7. 解析失敗或返回空結果 (使用純文字推送失敗通知)
         $dbConn->prepare("UPDATE gemini_tasks SET status = 'FAILED' WHERE id = :id")
            ->execute([':id' => $taskId]);
            
-        // $lineService->pushMessage($lineUserId, 
-        //     "❌ 記帳失敗！AI 助手無法解析您的訊息。請試著用簡單的「目的 金額」格式。"
-        // );
+        $lineService->pushMessage($lineUserId, "❌ 記帳失敗！AI 助手無法解析您的訊息。");
     }
 
 } catch (Throwable $e) {

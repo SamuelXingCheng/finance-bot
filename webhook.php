@@ -207,7 +207,7 @@ try {
                         $stmt->execute([':lineUserId' => $lineUserId, ':text' => $text]);
 
                         // 設定立即回覆的文本 (稍微簡化，減少打擾)
-                        $replyText = "✅ (接收中...)";
+                        $replyText = "✅ (已收到記帳資訊，您可繼續操作功能，AI辨識整理後通知您，...)";
 
                     } catch (Throwable $e) {
                         error_log("Failed to insert task for user {$lineUserId}: " . $e->getMessage());
