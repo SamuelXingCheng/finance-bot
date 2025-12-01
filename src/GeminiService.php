@@ -27,83 +27,83 @@ class GeminiService {
     public function parseTransaction(string $text): ?array {
         // 使用 Heredoc 語法定義多行字串，避免逸出錯誤
         $systemInstruction = <<<EOD
-Your sole job is to act as a structured data conversion engine. You MUST output a JSON ARRAY of objects conforming to the provided schema.
+    Your sole job is to act as a structured data conversion engine. You MUST output a JSON ARRAY of objects conforming to the provided schema.
 
-設定：你是一位熟悉台灣生活、年輕人用語的專業記帳助手。請將用戶輸入拆解為一筆或多筆交易，並嚴格遵循以下規則：
+    設定：你是一位熟悉台灣生活、年輕人用語的專業記帳助手。請將用戶輸入拆解為一筆或多筆交易，並嚴格遵循以下規則：
 
-== EXAMPLE 1 (結構範例) ==
-User Input: 昨天買了飲料70，晚餐150，還給媽媽5000
-Output:
-[
-{
-    "amount": 70,
-    "category": "Food",
-    "description": "飲料",
-    "type": "expense"
-},
-{
-    "amount": 150,
-    "category": "Food",
-    "description": "晚餐",
-    "type": "expense"
-},
-{
-    "amount": 5000,
-    "category": "Allowance",
-    "description": "還給媽媽",
-    "type": "expense"
-}
-]
+    == EXAMPLE 1 (結構範例) ==
+    User Input: 昨天買了飲料70，晚餐150，還給媽媽5000
+    Output:
+    [
+    {
+        "amount": 70,
+        "category": "Food",
+        "description": "飲料",
+        "type": "expense"
+    },
+    {
+        "amount": 150,
+        "category": "Food",
+        "description": "晚餐",
+        "type": "expense"
+    },
+    {
+        "amount": 5000,
+        "category": "Allowance",
+        "description": "還給媽媽",
+        "type": "expense"
+    }
+    ]
 
-== EXAMPLE 2 (複雜中文解析範例) ==
-User Input: 昨天早餐59元吐司, 午餐120便當, 晚餐70麵, 50健身房
-Output:
-[
-{
-    "amount": 59,
-    "category": "Food",
-    "description": "早餐吐司",
-    "type": "expense"
-},
-{
-    "amount": 120,
-    "category": "Food",
-    "description": "午餐便當",
-    "type": "expense"
-},
-{
-    "amount": 70,
-    "category": "Food",
-    "description": "晚餐麵",
-    "type": "expense"
-},
-{
-    "amount": 50,
-    "category": "Entertainment",
-    "description": "健身房",
-    "type": "expense"
-}
-]
-========================
+    == EXAMPLE 2 (複雜中文解析範例) ==
+    User Input: 昨天早餐59元吐司, 午餐120便當, 晚餐70麵, 50健身房
+    Output:
+    [
+    {
+        "amount": 59,
+        "category": "Food",
+        "description": "早餐吐司",
+        "type": "expense"
+    },
+    {
+        "amount": 120,
+        "category": "Food",
+        "description": "午餐便當",
+        "type": "expense"
+    },
+    {
+        "amount": 70,
+        "category": "Food",
+        "description": "晚餐麵",
+        "type": "expense"
+    },
+    {
+        "amount": 50,
+        "category": "Entertainment",
+        "description": "健身房",
+        "type": "expense"
+    }
+    ]
+    ========================
 
-規則 1 (Type 類型判斷):
-- 判定為 'income' (收入) 的關鍵詞：'薪水', '發薪', '領錢', '獎金', '年終', '股利', '股息', '中獎', '發票', '入帳', '轉帳給我', '賣東西', '二手賣出', '零用錢', '乾爹給的', '退稅', '補助', '有人還錢'.
-- 其他所有情況皆預設為 'expense' (支出)。
+    規則 1 (Type 類型判斷):
+    - 判定為 'income' (收入) 的關鍵詞：'薪水', '發薪', '領錢', '獎金', '年終', '股利', '股息', '中獎', '發票', '入帳', '轉帳給我', '賣東西', '二手賣出', '零用錢', '乾爹給的', '退稅', '補助', '有人還錢'.
+    - 其他所有情況皆預設為 'expense' (支出)。
 
-規則 2 (Category 類別判斷 - 台灣習慣):
-- Food: 早餐, 午餐, 晚餐, 飲料, 手搖飲, 咖啡, 聚餐, 叫外送.
-- Transport: 捷運, 公車, 悠遊卡, TPASS, 計程車, Uber, 加油, 停車費.
-- Entertainment: 電影, KTV, 訂閱, 課金, 遊戲, 旅遊, 健身房.
-- Shopping: 網購, 蝦皮, 全聯, 7-11, 買衣服, 日用品.
-- Bills: 房租, 水電, 電話費.
-- Investment: 股票, 定存.
-- Medical: 看醫生.
-- Education: 買書, 課程.
-- Miscellaneous (雜項): 其他.
+    規則 2 (Category 類別判斷 - 台灣習慣):
+    - Food: 早餐, 午餐, 晚餐, 飲料, 手搖飲, 咖啡, 聚餐, 叫外送.
+    - Transport: 捷運, 公車, 悠遊卡, TPASS, 計程車, Uber, 加油, 停車費.
+    - Entertainment: 電影, KTV, 訂閱, 課金, 遊戲, 旅遊, 健身房.
+    - Shopping: 網購, 蝦皮, 全聯, 7-11, 買衣服, 日用品.
+    - Bills: 房租, 水電, 電話費.
+    - Investment: 股票, 定存.
+    - Medical: 看醫生.
+    - Education: 買書, 課程.
+    - Miscellaneous (雜項): 其他.
 
-規則 3 (Description 備註邏輯):
-- 請從輸入中提取具體的「店名」、「品項」或「用途」作為備註。
-EOD;
+    規則 3 (Description 備註邏輯):
+    - 請從輸入中提取具體的「店名」、「品項」或「用途」作為備註。
+    EOD;
 
         // **************** 最終錯誤修正區塊 ****************
         // 修正：將系統指令與用戶輸入合併，以繞過 API 結構限制
@@ -147,11 +147,16 @@ EOD;
         $jsonText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? null;
         
         if ($jsonText) {
-            // 返回解析後的 PHP 陣列
-            return json_decode($jsonText, true);
+            // 【修正點】：將 JSON 字串解析回 PHP 陣列，符合 ?array 宣告
+            $resultArray = json_decode($jsonText, true);
+            
+            // 進行一次額外檢查，防止模型返回的 JSON 是無效的
+            if (is_array($resultArray)) {
+                return $resultArray;
+            }
         }
         
-        return null;
+        return null; // 如果 API 失敗、無回應或返回的 JSON 無效，則返回 null
     }
 }
 ?>

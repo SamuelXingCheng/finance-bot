@@ -5,14 +5,14 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 // ----------------------------------------------------
-// 1. 載入服務與環境 (這裡如果發生錯誤，Bot 會靜默)
+// 1. 載入服務與環境 (確保路徑正確)
 // ----------------------------------------------------
 require_once 'config.php';
 require_once 'src/Database.php';
 require_once 'src/UserService.php';
 require_once 'src/LineService.php';
-require_once 'src/GeminiService.php';
-require_once 'src/TransactionService.php'; // <-- 確保這個檔案已存在於 src/
+// 注意：這裡不再需要 require_once 'src/GeminiService.php'; 
+// 因為它只會被後台 Worker 使用
 
 // ----------------------------------------------------
 // 2. 核心邏輯 Try-Catch 保護 (防止 Bot 靜默崩潰)
@@ -24,11 +24,12 @@ try {
     // ----------------------------------------------------
     // 3. 服務初始化 (必須在 try 區塊內，因為這會進行 DB 連線)
     // ----------------------------------------------------
-    $db = Database::getInstance(); 
+    $db = Database::getInstance(); // 獲取 Database 單例
+    $dbConn = $db->getConnection(); // 獲取 PDO 連線
+    
     $userService = new UserService();
     $lineService = new LineService(); // 實例化 LineService，供錯誤回覆使用
-    $geminiService = new GeminiService();
-    $transactionService = new TransactionService();
+    // 舊版的 $geminiService 和 $transactionService 在這裡不再需要實例化
 
     // ----------------------------------------------------
     // 4. 接收與驗證 LINE 傳送的資料
@@ -70,32 +71,26 @@ try {
             // 處理文字訊息
             if ($event['type'] === 'message' && $event['message']['type'] === 'text') {
                 $text = trim($event['message']['text']);
-                
-                // 核心邏輯：呼叫 Gemini 進行自然語言解析
-                $transactionData = $geminiService->parseTransaction($text);
+                $replyText = "";
 
-                if ($transactionData && !empty($transactionData['amount'])) {
-                    
-                    // 將資料寫入資料庫
-                    $success = $transactionService->addTransaction($dbUserId, $transactionData); 
-                    
-                    if ($success) {
-                        $currency = defined('DEFAULT_CURRENCY_SYMBOL') ? DEFAULT_CURRENCY_SYMBOL : '元';
-                        $replyText = "✅ 記帳成功！\n" .
-                                     "類型: " . ($transactionData['type'] == 'expense' ? '支出' : '收入') . "\n" .
-                                     "金額: " . $transactionData['amount'] . " {$currency}\n" .
-                                     "類別: {$transactionData['category']}\n" .
-                                     "備註: " . ($transactionData['description'] ?? '無');
-                                     
-                        // TODO: 檢查預算警示 (BudgetService)
-                    } else {
-                        $replyText = "❌ 抱歉，資料庫寫入失敗。";
-                    }
-                    
-                } else {
-                    $replyText = "不好意思，我無法解析您的記帳內容「{$text}」，或內容不包含金額。";
+                // --- 異步核心邏輯：將任務快速推入佇列 (Producer 邏輯) ---
+                try {
+                    $stmt = $dbConn->prepare(
+                        "INSERT INTO gemini_tasks (line_user_id, user_text, status) 
+                         VALUES (:lineUserId, :text, 'PENDING')"
+                    );
+                    $stmt->execute([':lineUserId' => $lineUserId, ':text' => $text]);
+
+                    // 設定立即回覆的文本
+                    $replyText = "✅ 訊息已收錄：\"{$text}\"。AI 助手正在後台解析中，完成後將主動通知您！";
+
+                } catch (Throwable $e) {
+                    // 記錄資料庫寫入失敗的錯誤
+                    error_log("Failed to insert task for user {$lineUserId}: " . $e->getMessage());
+                    $replyText = "系統忙碌，無法將您的記帳訊息加入處理佇列。請稍後再試。";
                 }
                 
+                // 立即回覆 Line，避免 Webhook 超時
                 $lineService->replyMessage($replyToken, $replyText);
                 
             } elseif ($event['type'] === 'follow' && $replyToken) {
@@ -130,4 +125,3 @@ try {
         $lineService->replyMessage($replyToken, "系統發生致命錯誤，請稍後再試或聯繫客服。錯誤代碼: #SERVER_E");
     }
 }
-?>
