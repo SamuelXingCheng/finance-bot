@@ -206,17 +206,38 @@ try {
                         );
                         $stmt->execute([':lineUserId' => $lineUserId, ':text' => $text]);
 
-                        // 設定立即回覆的文本 (稍微簡化，減少打擾)
-                        $replyText = "✅ (已收到記帳資訊，您可繼續操作功能，AI辨識整理後通知您，...)";
+                        // 【修改點】：使用 Flex Message 替換純文字回覆
+                        $flexPayload = [
+                            'type' => 'bubble',
+                            'body' => [
+                                'type' => 'box',
+                                'layout' => 'vertical',
+                                'contents' => [
+                                    ['type' => 'text', 'text' => '✅ 記帳已送出', 'weight' => 'bold', 'color' => '#1DB446', 'size' => 'md'],
+                                    ['type' => 'text', 'text' => "內容： {$text}", 'margin' => 'sm', 'size' => 'xs', 'color' => '#555555'],
+                                    ['type' => 'text', 'text' => 'AI 助手正在後台解析中，您可繼續操作功能，稍後通知您。', 'margin' => 'md', 'size' => 'sm', 'wrap' => true],
+                                ]
+                            ]
+                        ];
+                        
+                        // 立即回覆 Line，避免 Webhook 超時
+                        $lineService->replyFlexMessage($replyToken, "記帳已送出", $flexPayload);
+
+                        // 由於使用了 Flex 專屬方法，我們在成功時不需要再執行後面的 $lineService->replyMessage
+                        break; 
 
                     } catch (Throwable $e) {
                         error_log("Failed to insert task for user {$lineUserId}: " . $e->getMessage());
-                        $replyText = "系統忙碌，請稍後再試。";
+                        $replyText = "系統忙碌，無法將您的記帳訊息加入處理佇列。請稍後再試。";
+                        // 失敗時，退回使用純文字回覆
+                        $lineService->replyMessage($replyToken, $replyText);
                     }
                 }
                 
-                // 立即回覆 Line
-                $lineService->replyMessage($replyToken, $replyText);
+                // 由於成功的路徑已經 break，這裡只剩下失敗或無效指令的路徑
+                if (!isset($flexPayload)) {
+                    $lineService->replyMessage($replyToken, $replyText);
+                }
                 
             } elseif ($event['type'] === 'follow' && $replyToken) {
                  // 處理追蹤事件
