@@ -11,7 +11,7 @@ class GeminiService {
         $this->apiKey = GEMINI_API_KEY;
         $this->model = GEMINI_MODEL;
         
-        // 修正後的 Schema：根類型為 Array
+        // 修正後的 Schema：根類型為 Array，並擴增 date, currency 欄位
         $this->transactionSchema = [
             'type' => 'array', 
             'items' => [
@@ -21,14 +21,21 @@ class GeminiService {
                     'category' => ['type' => 'string', 'description' => '交易類別，例如: Food, Transport, Salary, Bills'],
                     'description' => ['type' => 'string', 'description' => '詳細描述或備註'],
                     'type' => ['type' => 'string', 'enum' => ['expense', 'income'], 'description' => '交易類型：收入(income)或支出(expense)'],
+                    
+                    'date' => ['type' => 'string', 'description' => '交易日期，必須是 YYYY-MM-DD 格式，從輸入中推斷。若無時間提示，請使用今日日期。'],
+                    'currency' => ['type' => 'string', 'description' => '貨幣代碼，例如 TWD, USD, JPY。若未提及，預設為 TWD。'],
                 ],
-                'required' => ['amount', 'category', 'type']
+                // 擴增 'required' 列表
+                'required' => ['amount', 'category', 'type', 'date', 'currency'] 
             ]
         ];
     }
 
     public function parseTransaction(string $text): ?array {
-        // 強化版 System Instruction
+        // 取得當前日期，用於 AI 推斷日期的預設值
+        $today = date('Y-m-d');
+        
+        // 強化版 System Instruction (日期推斷以當前日期為準)
         $systemInstruction = <<<EOD
 --- 核心指令：專業結構化數據轉換引擎 ---
 
@@ -36,25 +43,27 @@ class GeminiService {
 
 **【指令優先級：最高】**
 1. **必須強制輸出 JSON 陣列：** 你的輸出必須是包含多個交易物件的列表 `[{...}, {...}]`。
-2. **必須完整拆分：** 用戶的一句話可能包含多個不同的消費或收入，請務必將它們拆分成獨立的項目。例如：「午餐100，晚餐200」必須變成兩個物件。
+2. **必須完整拆分：** 用戶的一句話可能包含多個不同的消費或收入，請務必將它們拆分成獨立的項目。
 3. **必須有明確金額：** 如果輸入中沒有數字金額，請直接輸出空陣列 `[]`。
+4. **必須推斷日期：** 根據輸入中的時間指示 (例如 '昨天', '上週')，將交易日期轉換為 **YYYY-MM-DD** 格式。**如果輸入中沒有任何日期提示，請使用今天的日期：{$today}。**
+5. **必須指定貨幣：** 如果用戶沒有提及貨幣種類，請預設使用 **TWD** 作為貨幣代碼。
 
 設定：你是一位熟悉台灣生活、年輕人用語的專業記帳助手。請嚴格遵循以下規則：
 
-== EXAMPLE 1 (多筆拆分範例) ==
-User Input: 買了全聯的菜 350，搭了 Uber 100，還有欠我的 200 塊老王剛還我
+== EXAMPLE 1 (多筆拆分範例，包含日期/貨幣) ==
+User Input: 昨天買了飲料70，晚餐150，還給媽媽5000
 Output:
 [
-  {"amount": 350, "category": "Shopping", "description": "全聯的菜", "type": "expense"},
-  {"amount": 100, "category": "Transport", "description": "搭 Uber", "type": "expense"},
-  {"amount": 200, "category": "Allowance", "description": "老王還錢", "type": "income"}
+  {"amount": 70, "category": "Food", "description": "飲料", "type": "expense", "date": "2025-11-30", "currency": "TWD"},
+  {"amount": 150, "category": "Food", "description": "晚餐", "type": "expense", "date": "2025-11-30", "currency": "TWD"},
+  {"amount": 5000, "category": "Allowance", "description": "還給媽媽", "type": "expense", "date": "2025-11-30", "currency": "TWD"}
 ]
 
-== EXAMPLE 2 (單筆範例) ==
-User Input: 昨天買了飲料70
+== EXAMPLE 2 (單筆範例，今日日期) ==
+User Input: 今天買了飲料70
 Output:
 [
-  {"amount": 70, "category": "Food", "description": "飲料", "type": "expense"}
+  {"amount": 70, "category": "Food", "description": "飲料", "type": "expense", "date": "{$today}", "currency": "TWD"}
 ]
 ========================
 
@@ -70,12 +79,13 @@ Output:
 - Bills: 帳單, 房租.
 - Investment: 投資.
 - Medical: 醫療.
-- Education: 書, 課程.
+- Education: 買書, 課程.
 - Miscellaneous: 其他.
 
 規則 3: 請提取具體品項作為 description。
 EOD;
-
+        
+        // 修正：將系統指令與用戶輸入合併，以繞過 API 結構限制
         $mergedText = $systemInstruction . "\n\nUser input: " . $text;
         
         $data = [
@@ -91,6 +101,7 @@ EOD;
             ]
         ];
 
+        // ... (API 呼叫與錯誤處理邏輯不變)
         $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
@@ -121,4 +132,3 @@ EOD;
         return null;
     }
 }
-?>
