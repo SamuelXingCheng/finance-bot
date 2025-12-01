@@ -93,7 +93,7 @@ try {
                         'Food' => '🍱 飲食', 'Transport' => '🚗 交通', 'Entertainment' => '🎮 娛樂',
                         'Shopping' => '🛍️ 購物', 'Bills' => '🧾 帳單', 'Medical' => '💊 醫療',
                         'Education' => '📚 教育', 'Salary' => '💰 薪水', 'Allowance' => '🧧 獎金',
-                        'Investment' => '📈 投資', 'Miscellaneous' => '🔹 雜項','sales' => '💰 賣物',
+                        'Investment' => '📈 投資', 'Miscellaneous' => '🔹 雜項','Sales' => '💰 賣物',
                     ];
 
                     // 3. 建構 Flex Message 的內容區塊 (Body)
