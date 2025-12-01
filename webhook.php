@@ -11,6 +11,7 @@ require_once 'config.php';
 require_once 'src/Database.php';
 require_once 'src/UserService.php';
 require_once 'src/LineService.php';
+require_once 'src/TransactionService.php'; // 【新增】需要載入交易服務來查詢數據
 
 // ----------------------------------------------------
 // 2. 核心邏輯 Try-Catch 保護 (防止 Bot 靜默崩潰)
@@ -27,6 +28,7 @@ try {
     
     $userService = new UserService();
     $lineService = new LineService(); 
+    $transactionService = new TransactionService(); // 【新增】實例化
 
     // ----------------------------------------------------
     // 4. 接收與驗證 LINE 傳送的資料
@@ -71,20 +73,130 @@ try {
                 $replyText = "";
 
                 // ----------------------------------------------------
-                // 【前端過濾器】檢查是否包含數字 (金額)
+                // 【調整：Flex Message 視覺化報表】
                 // ----------------------------------------------------
-                // 【強化過濾器】檢查是否包含阿拉伯數字或常見中文數字
+                if (in_array($text, ['查詢', '本月支出', '報表', '總覽', '支出', '收入'])) {
+                    
+                    // 1. 獲取數據
+                    $incomeData  = $transactionService->getMonthlyBreakdown($dbUserId, 'income');
+                    $expenseData = $transactionService->getMonthlyBreakdown($dbUserId, 'expense');
+                    
+                    $totalIncome  = array_sum($incomeData);
+                    $totalExpense = array_sum($expenseData);
+                    $balance      = $totalIncome - $totalExpense;
+                    
+                    $month = date('n');
+                    $currency = defined('DEFAULT_CURRENCY_SYMBOL') ? DEFAULT_CURRENCY_SYMBOL : '元';
+
+                    // 2. 定義中文對照表
+                    $categoryMap = [
+                        'Food' => '🍱 飲食', 'Transport' => '🚗 交通', 'Entertainment' => '🎮 娛樂',
+                        'Shopping' => '🛍️ 購物', 'Bills' => '🧾 帳單', 'Medical' => '💊 醫療',
+                        'Education' => '📚 教育', 'Salary' => '💰 薪水', 'Allowance' => '🧧 獎金',
+                        'Investment' => '📈 投資', 'Miscellaneous' => '🔹 雜項','sales' => '💰 賣物',
+                    ];
+
+                    // 3. 建構 Flex Message 的內容區塊 (Body)
+                    // 我們需要動態產生「行 (Box)」
+                    $bodyContents = [];
+
+                    // --- A. 收入區塊 ---
+                    if ($totalIncome > 0) {
+                        $bodyContents[] = [
+                            'type' => 'text', 'text' => '📥 本月收入', 'weight' => 'bold', 'color' => '#1DB446', 'size' => 'sm'
+                        ];
+                        foreach ($incomeData as $cat => $amt) {
+                            $name = $categoryMap[$cat] ?? $cat;
+                            $bodyContents[] = [
+                                'type' => 'box', 'layout' => 'baseline', 'margin' => 'md',
+                                'contents' => [
+                                    ['type' => 'text', 'text' => $name, 'size' => 'sm', 'color' => '#555555', 'flex' => 0],
+                                    ['type' => 'text', 'text' => number_format($amt), 'size' => 'sm', 'color' => '#111111', 'align' => 'end']
+                                ]
+                            ];
+                        }
+                        // 加個分隔線
+                        $bodyContents[] = ['type' => 'separator', 'margin' => 'lg'];
+                    }
+
+                    // --- B. 支出區塊 ---
+                    // 加一點間距
+                    $bodyContents[] = ['type' => 'box', 'layout' => 'vertical', 'margin' => 'lg', 'contents' => []]; 
+                    
+                    $bodyContents[] = [
+                        'type' => 'text', 'text' => '💸 本月支出', 'weight' => 'bold', 'color' => '#FF334B', 'size' => 'sm'
+                    ];
+
+                    if ($totalExpense > 0) {
+                        foreach ($expenseData as $cat => $amt) {
+                            $name = $categoryMap[$cat] ?? $cat;
+                            $bodyContents[] = [
+                                'type' => 'box', 'layout' => 'baseline', 'margin' => 'md',
+                                'contents' => [
+                                    ['type' => 'text', 'text' => $name, 'size' => 'sm', 'color' => '#555555', 'flex' => 0],
+                                    ['type' => 'text', 'text' => number_format($amt), 'size' => 'sm', 'color' => '#111111', 'align' => 'end']
+                                ]
+                            ];
+                        }
+                    } else {
+                        $bodyContents[] = ['type' => 'text', 'text' => '無支出記錄', 'size' => 'xs', 'color' => '#aaaaaa', 'margin' => 'md'];
+                    }
+
+                    // 4. 組裝完整的 Flex Bubble 結構
+                    // 根據結餘決定顏色 (正: 藍色, 負: 紅色)
+                    $balanceColor = $balance >= 0 ? '#007AFF' : '#FF334B';
+                    $balanceText  = ($balance >= 0 ? '+' : '') . number_format($balance);
+
+                    $flexPayload = [
+                        'type' => 'bubble',
+                        'size' => 'mega',
+                        // --- 頭部：標題 ---
+                        'header' => [
+                            'type' => 'box', 'layout' => 'vertical', 'backgroundColor' => '#f8f9fa',
+                            'contents' => [
+                                ['type' => 'text', 'text' => "{$month}月財務報表", 'weight' => 'bold', 'size' => 'xl', 'color' => '#333333']
+                            ]
+                        ],
+                        // --- 英雄區：大大的結餘 ---
+                        'hero' => [
+                            'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'xl', 'paddingBottom' => 'none',
+                            'contents' => [
+                                ['type' => 'text', 'text' => '本月結餘', 'color' => '#aaaaaa', 'size' => 'xs', 'align' => 'center'],
+                                ['type' => 'text', 'text' => "$balanceText", 'weight' => 'bold', 'size' => '4xl', 'color' => $balanceColor, 'align' => 'center', 'margin' => 'sm'],
+                                ['type' => 'text', 'text' => $currency, 'size' => 'xs', 'color' => '#aaaaaa', 'align' => 'center']
+                            ]
+                        ],
+                        // --- 內容區：收入與支出列表 ---
+                        'body' => [
+                            'type' => 'box', 'layout' => 'vertical',
+                            'contents' => $bodyContents
+                        ],
+                        // --- 底部：小字 ---
+                        'footer' => [
+                            'type' => 'box', 'layout' => 'vertical',
+                            'contents' => [
+                                ['type' => 'text', 'text' => 'AI 記帳助手', 'color' => '#cccccc', 'align' => 'center', 'size' => 'xxs']
+                            ]
+                        ]
+                    ];
+                    
+                    // 5. 發送 Flex Message
+                    $lineService->replyFlexMessage($replyToken, "{$month}月財務報表", $flexPayload);
+                    break; 
+                }
+
                 // ----------------------------------------------------
-                // 包含：0-9, 零, 一, 二, 三, ... 玖, 壹, 貳, ... 拾, 百, 千, 萬
-                // (i: 不區分大小寫, u: 支援 Unicode/中文)
+                // 【前端過濾器】檢查記帳內容 (數字檢查)
+                // ----------------------------------------------------
+                // 包含：0-9, 零, 一... 萬, 億
                 $chinese_digits = '零一二三四五六七八九壹貳參肆伍陸柒捌玖拾佰仟萬億';
                 $regex = '/[\d' . $chinese_digits . ']/u'; 
 
                 $hasAmount = preg_match($regex, $text);
                 
                 if (!$hasAmount) {
-                    // 偵測不到金額，不推入佇列，直接回覆
-                    $replyText = "⚠️ 偵測不到金額！請輸入包含數字的記帳內容，例如：買咖啡 80 元。";
+                    // 偵測不到金額，也不是查詢指令 -> 回覆提示
+                    $replyText = "❓ 我聽不懂...\n請輸入包含金額的記帳內容 (例如：午餐 120)，或輸入「查詢」查看本月支出。";
                 } else {
                     // --- 異步核心邏輯：將任務快速推入佇列 ---
                     try {
@@ -94,22 +206,21 @@ try {
                         );
                         $stmt->execute([':lineUserId' => $lineUserId, ':text' => $text]);
 
-                        // 設定立即回覆的文本
-                        $replyText = "✅ 訊息已收錄：\"{$text}\"。AI 助手正在後台解析中，完成後將主動通知您！";
+                        // 設定立即回覆的文本 (稍微簡化，減少打擾)
+                        $replyText = "✅ (接收中...)";
 
                     } catch (Throwable $e) {
-                        // 記錄資料庫寫入失敗的錯誤
                         error_log("Failed to insert task for user {$lineUserId}: " . $e->getMessage());
-                        $replyText = "系統忙碌，無法將您的記帳訊息加入處理佇列。請稍後再試。";
+                        $replyText = "系統忙碌，請稍後再試。";
                     }
                 }
                 
-                // 立即回覆 Line，避免 Webhook 超時
+                // 立即回覆 Line
                 $lineService->replyMessage($replyToken, $replyText);
                 
             } elseif ($event['type'] === 'follow' && $replyToken) {
                  // 處理追蹤事件
-                 $welcomeMessage = "歡迎使用！您的內部 ID 是 #{$dbUserId}。\n您可以直接輸入：買咖啡 80元。";
+                 $welcomeMessage = "歡迎使用！\n直接輸入：買咖啡 80元。\n或輸入「查詢」看報表。";
                  $lineService->replyMessage($replyToken, $welcomeMessage);
             }
 
@@ -125,17 +236,13 @@ try {
 
 } catch (Throwable $e) {
     // ----------------------------------------------------
-    // 7. 錯誤處理 (在任何致命錯誤時，確保返回 200)
+    // 7. 錯誤處理
     // ----------------------------------------------------
-    error_log("FATAL APPLICATION ERROR: " . $e->getMessage() . " on line " . $e->getLine() . " in file " . $e->getFile());
-    
-    // 必須返回 200 狀態碼給 LINE 平台
+    error_log("FATAL APPLICATION ERROR: " . $e->getMessage());
     http_response_code(200); 
-    echo "Error processing request. Check server logs.";
+    echo "Error";
 
-    // 嘗試向用戶回覆一個錯誤訊息
     if (isset($lineService) && isset($replyToken)) {
-        // 如果 LINE 服務已初始化，且 replyToken 有效，就回覆錯誤訊息
-        $lineService->replyMessage($replyToken, "系統發生致命錯誤，請稍後再試或聯繫客服。錯誤代碼: #SERVER_E");
+        $lineService->replyMessage($replyToken, "系統發生錯誤，請稍後再試。");
     }
 }

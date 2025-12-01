@@ -87,5 +87,39 @@ class LineService {
         }
         return true;
     }
+
+    /**
+     * 【新增】發送 Flex Message (複雜排版訊息)
+     */
+    public function replyFlexMessage(string $replyToken, string $altText, array $contents): void {
+        $postData = [
+            'replyToken' => $replyToken,
+            'messages' => [
+                [
+                    'type' => 'flex',
+                    'altText' => $altText, // 在聊天列表顯示的簡短文字
+                    'contents' => $contents // Flex JSON 結構
+                ]
+            ],
+        ];
+
+        $ch = curl_init('https://api.line.me/v2/bot/message/reply');
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postData));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $this->channelAccessToken,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            error_log("LINE Flex Reply Error: HTTP $httpCode, Response: $response");
+        }
+    }
 }
 ?>
