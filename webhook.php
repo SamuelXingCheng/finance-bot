@@ -35,9 +35,14 @@ try {
     $rateService = new ExchangeRateService();
 
     // ----------------------------------------------------
-    // 4. 接收與驗證 LINE 傳送的資料 (略)
+    // 4. 接收與驗證 LINE 傳送的資料 
     // ----------------------------------------------------
-    $channelSecret = LINE_CHANNEL_SECRET;
+    // <<< 修正點 1: 使用新的 Bot Channel Secret 進行驗證 >>>
+    if (!defined('LINE_BOT_CHANNEL_SECRET')) {
+        throw new Exception("LINE_BOT_CHANNEL_SECRET is not defined in config.");
+    }
+    $channelSecret = LINE_BOT_CHANNEL_SECRET; 
+    
     $httpRequestBody = file_get_contents('php://input'); 
     
     if (empty($httpRequestBody)) { http_response_code(200); exit("OK"); }
@@ -58,13 +63,48 @@ try {
             // 處理文字訊息
             if ($event['type'] === 'message' && $event['message']['type'] === 'text') {
                 $text = trim($event['message']['text']);
+                $lowerText = strtolower($text); // 轉為小寫以便檢查
                 $replyText = "";
                 $isProcessed = false; 
 
                 // ====================================================
-                // 【資產設定指令 - 最高優先級】
+                // 【LIFF 儀表板指令 - 最高優先級】 (新增的 LIFF 邏輯)
                 // ====================================================
-                if (preg_match('/^設定\s+([^\s]+)\s+([^\s]+)\s+([-\d\.,]+)(.*?)$/u', $text, $matches)) {
+                if (str_contains($lowerText, '儀表板') || str_contains($lowerText, 'dashboard')) {
+                    
+                    if (!defined('LIFF_DASHBOARD_URL')) {
+                         $lineService->replyMessage($replyToken, "❌ 錯誤：LIFF 儀表板 URL 尚未配置。請檢查您的 .env 檔案中的 LIFF_DASHBOARD_URL。");
+                         $isProcessed = true;
+                    } else {
+                        $liffUrl = LIFF_DASHBOARD_URL; 
+
+                        // 構建包含 LIFF 連結的 Flex Message
+                        $flexPayload = [
+                            'type' => 'bubble',
+                            'body' => [
+                                'type' => 'box',
+                                'layout' => 'vertical',
+                                'contents' => [
+                                    ['type' => 'text', 'text' => '📊 財務儀表板', 'weight' => 'bold', 'size' => 'xl', 'color' => '#007AFF'],
+                                    ['type' => 'text', 'text' => '點擊按鈕，即可開啟您的個人淨資產總覽與報表 (將在 LINE App 內開啟並自動登入)。', 'margin' => 'md', 'size' => 'sm', 'wrap' => true],
+                                    ['type' => 'button', 'action' => [
+                                        'type' => 'uri',
+                                        'label' => '開啟儀表板 (LIFF)',
+                                        'uri' => $liffUrl
+                                    ], 'style' => 'primary', 'color' => '#00B900', 'margin' => 'xl']
+                                ]
+                            ]
+                        ];
+
+                        $lineService->replyFlexMessage($replyToken, "開啟財務儀表板", $flexPayload);
+                        $isProcessed = true;
+                    }
+                } 
+                
+                // ====================================================
+                // 【資產設定指令 - 次優先級】 
+                // ====================================================
+                if (!$isProcessed && preg_match('/^設定\s+([^\s]+)\s+([^\s]+)\s+([-\d\.,]+)(.*?)$/u', $text, $matches)) {
                     
                     $name = trim($matches[1]);
                     $typeInput = trim($matches[2]);
@@ -121,7 +161,7 @@ try {
                 // ====================================================
                 // 【資產查詢指令】
                 // ====================================================
-                elseif (in_array($text, ['查詢資產', '資產總覽', '淨值'])) {
+                elseif (!$isProcessed && in_array($text, ['查詢資產', '資產總覽', '淨值'])) {
                     
                     // 1. 獲取數據
                     $result = $assetService->getNetWorthSummary($dbUserId);
@@ -283,7 +323,7 @@ try {
                 // ====================================================
                 // 【記帳查詢 / 報表指令】
                 // ====================================================
-                elseif (in_array($text, ['查詢', '本月支出', '報表', '總覽', '支出', '收入'])) {
+                elseif (!$isProcessed && in_array($text, ['查詢', '本月支出', '報表', '總覽', '支出', '收入'])) {
                     
                     // 假設這裡有完整的 Flex 報表邏輯
                     // $lineService->replyFlexMessage($replyToken, ...);

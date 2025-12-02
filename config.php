@@ -39,7 +39,7 @@ function loadEnv($path = __DIR__ . '/.env') {
             define($name, $value);
         }
         
-        // 【修正點】：同時載入到環境變數中 (供 getenv() 使用)
+        // 同時載入到環境變數中 (供 getenv() 使用)
         putenv("{$name}={$value}"); 
         $_ENV[$name] = $value; // 同步到 $_ENV (可選，但建議保持一致)
     }
@@ -51,18 +51,24 @@ loadEnv();
 // 2. 應用程式常數 (檢查確保)
 // ----------------------------------------------------
 
-// 確保所有必要的常數都已定義 (防呆)
-if (!defined('DB_HOST') || !defined('LINE_CHANNEL_SECRET') || !defined('GEMINI_API_KEY')) {
+// 確保所有**必要**的常數都已定義 (防呆，確保 LIFF 和 Bot 都能運作)
+if (!defined('DB_HOST') || 
+    !defined('LINE_CHANNEL_SECRET') ||       // LINE Login Secret (用於 LIFF Token 驗證)
+    !defined('LINE_BOT_CHANNEL_SECRET') ||   // Messaging API Secret (用於 Webhook Signature)
+    !defined('LINE_BOT_ACCESS_TOKEN') ||     // Messaging API Token (用於 LineService)
+    !defined('LINE_LIFF_ID') ||              // LIFF App ID (用於前端初始化)
+    !defined('LIFF_DASHBOARD_URL') ||        // LIFF URL (用於 Webhook 回覆)
+    !defined('GEMINI_API_KEY')) { 
+
     error_log("FATAL: Required environment variables are missing in .env.");
-    die("Configuration error.");
+    die("Configuration error. Missing one or more critical LINE/DB/GEMINI environment variables.");
 }
 
 // 確保其他常數存在 (檢查 CoinGecko Key 載入成功)
+// 此處保留原有邏輯，如果非必要金鑰遺失，只記錄錯誤但不中止應用程式。
 if (!defined('COINGECKO_API_KEY') && !getenv('COINGECKO_API_KEY')) {
-    error_log("FATAL: COINGECKO_API_KEY is missing.");
-    // 這裡不需要 die，因為如果它在 .env 中，它會被載入。
+    error_log("WARNING: COINGECKO_API_KEY is missing. Currency rates will use static fallback.");
 }
-
 
 if (!defined('GEMINI_MODEL')) define('GEMINI_MODEL', 'gemini-2.5-flash');
 if (!defined('BUDGET_WARNING_RATIO')) define('BUDGET_WARNING_RATIO', 0.9);

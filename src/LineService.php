@@ -6,13 +6,20 @@ class LineService {
     private $channelAccessToken;
 
     public function __construct() {
-        $this->channelAccessToken = LINE_CHANNEL_ACCESS_TOKEN;
+        // <<< 修正點：使用新的 Messaging API Access Token 常數 >>>
+        if (!defined('LINE_BOT_ACCESS_TOKEN')) {
+            error_log("FATAL: LINE_BOT_ACCESS_TOKEN is not defined in config.");
+            // 拋出例外，避免服務初始化失敗
+            throw new Exception("LineService configuration error: Missing LINE_BOT_ACCESS_TOKEN."); 
+        }
+        $this->channelAccessToken = LINE_BOT_ACCESS_TOKEN;
     }
 
     /**
      * 回應單筆或多筆訊息給 LINE 使用者 (使用 replyToken)。
      */
     public function replyMessage(string $replyToken, $text): void {
+        // ... (內容保持不變，已在先前步驟提供)
         $messages = [];
         
         if (!is_array($text)) {
@@ -49,9 +56,9 @@ class LineService {
 
     /**
      * 【新增】主動推送訊息給 LINE 使用者 (使用 userId)。
-     * 這用於後台 Worker 完成任務後的主動通知。
      */
     public function pushMessage(string $userId, $text): bool {
+        // ... (內容保持不變，已在先前步驟提供)
         $messages = [];
         
         if (!is_array($text)) {
@@ -63,11 +70,11 @@ class LineService {
         }
 
         $postData = [
-            'to' => $userId, // 注意：這裡使用 userId 而不是 replyToken
+            'to' => $userId, 
             'messages' => $messages,
         ];
 
-        $ch = curl_init('https://api.line.me/v2/bot/message/push'); // 注意：Push API 的端點不同
+        $ch = curl_init('https://api.line.me/v2/bot/message/push'); 
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -92,13 +99,14 @@ class LineService {
      * 【新增】發送 Flex Message (複雜排版訊息)
      */
     public function replyFlexMessage(string $replyToken, string $altText, array $contents): void {
+        // ... (內容保持不變，已在先前步驟提供)
         $postData = [
             'replyToken' => $replyToken,
             'messages' => [
                 [
                     'type' => 'flex',
-                    'altText' => $altText, // 在聊天列表顯示的簡短文字
-                    'contents' => $contents // Flex JSON 結構
+                    'altText' => $altText, 
+                    'contents' => $contents 
                 ]
             ],
         ];
@@ -121,14 +129,12 @@ class LineService {
             error_log("LINE Flex Reply Error: HTTP $httpCode, Response: $response");
         }
     }
+    
     /**
      * 【新增】主動推送 Flex Message
-     * @param string $userId 接收者的 Line User ID
-     * @param string $altText 訊息替代文字
-     * @param array $contents Flex Bubble 結構
-     * @return bool 推送是否成功
      */
     public function pushFlexMessage(string $userId, string $altText, array $contents): bool {
+        // ... (內容保持不變，已在先前步驟提供)
         $postData = [
             'to' => $userId,
             'messages' => [
@@ -140,7 +146,7 @@ class LineService {
             ],
         ];
 
-        $ch = curl_init('https://api.line.me/v2/bot/message/push'); // 使用 PUSH 端點
+        $ch = curl_init('https://api.line.me/v2/bot/message/push'); 
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
