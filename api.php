@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // 1. 載入服務與環境
 // ----------------------------------------------------
 require_once 'config.php';
-require_once 'src/Database.php'; //
+require_once 'src/Database.php'; 
 require_once 'src/UserService.php'; 
 require_once 'src/AssetService.php'; 
 require_once 'src/TransactionService.php'; 
@@ -45,16 +45,31 @@ function verifyLineIdToken(string $idToken): ?string {
         CURLOPT_POSTFIELDS => $data,
     ]);
     
-    $response = json_decode(curl_exec($ch), true);
+    $rawResponse = curl_exec($ch); // 獲取原始回覆
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    
+    $response = json_decode($rawResponse, true);
 
-    // 檢查驗證結果: 確保有 sub 欄位且 client_id 正確
-    if (isset($response['sub']) && $response['client_id'] === LINE_CHANNEL_ID) {
+    // ------------------------------------------------------------------
+    // 1. 檢查 HTTP 狀態碼和基本欄位
+    // ------------------------------------------------------------------
+    if ($httpCode !== 200 || !isset($response['sub'])) {
+        // 如果 LINE 伺服器回傳非 200 錯誤，記錄詳細訊息
+        error_log("Token Verification Failed. HTTP Code: {$httpCode}. Raw Response: " . $rawResponse);
+        return null;
+    }
+    
+    // ------------------------------------------------------------------
+    // 2. 【關鍵修正】檢查 'aud' (Audience) 是否與我們的 Channel ID 匹配
+    // ------------------------------------------------------------------
+    if (isset($response['sub']) && $response['aud'] === LINE_CHANNEL_ID) {
         // 'sub' 即為 Line User ID
         return $response['sub']; 
     }
     
-    error_log("Token Verification Failed. Response: " . json_encode($response));
+    // 最終檢查失敗，這不應該發生在成功的驗證後，除非 Channel ID 不匹配
+    error_log("Token Verification Failed. Channel ID Mismatch. Aud: {$response['aud']}. Expected: ".LINE_CHANNEL_ID);
     return null;
 }
 
@@ -76,7 +91,7 @@ try {
 
     if (!$lineUserId) {
         http_response_code(401);
-        echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid ID Token.'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid ID Token.'], JSON_UNESCAPED_UNICODE); 
         exit;
     }
 
@@ -101,7 +116,6 @@ try {
 
     switch ($action) {
         
-        // ... (asset_summary 和 monthly_expense_breakdown cases 保持不變，因為它們使用 $dbUserId)
         case 'asset_summary':
             $summary = $assetService->getNetWorthSummary($dbUserId); 
             $response = ['status' => 'success', 'data' => $summary];
@@ -119,8 +133,6 @@ try {
             ];
             break;
             
-
-        // 實作手動新增交易 (POST) - 增加輸入驗證
         case 'add_transaction':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
                 $response = ['status' => 'error', 'message' => 'Method not allowed.'];
