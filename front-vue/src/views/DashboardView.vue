@@ -1,5 +1,6 @@
 <template>
   <div class="dashboard-container">
+    
     <div class="card-section">
       <div class="section-header">
         <h2>✏️ 記一筆</h2>
@@ -56,6 +57,7 @@
                 <option value="Education">📚 教育 (Education)</option>
                 <option value="Salary">💰 薪水 (Salary)</option>
                 <option value="Allowance">🎁 津貼 (Allowance)</option>
+                <option value="Bonus">🧧 獎金 (Bonus)</option>
                 <option value="Miscellaneous">✨ 其他 (Miscellaneous)</option>
               </select>
             </div>
@@ -109,15 +111,33 @@
 
     <div class="card-section">
       <div class="section-header">
-        <h2>📊 本月開銷</h2>
+        <h2>📊 本月收支分佈</h2> 
       </div>
       <div id="expense-breakdown" class="data-box chart-card">
-          <div class="total-expense-display">
-            <span class="label">總支出</span>
-            <span class="value">NT$ {{ numberFormat(totalExpense, 2) }}</span>
+          
+          <div class="stats-row">
+            <div class="stat-item cursor-pointer" 
+                 :class="{ 'active-stat': currentChartType === 'income' }"
+                 @click="toggleChart('income')">
+              <span class="label">總收入 (點擊切換)</span>
+              <span class="value text-income">NT$ {{ numberFormat(totalIncome, 2) }}</span>
+            </div>
+            
+            <div class="vertical-line"></div>
+            
+            <div class="stat-item cursor-pointer" 
+                 :class="{ 'active-stat': currentChartType === 'expense' }"
+                 @click="toggleChart('expense')">
+              <span class="label">總支出 (點擊切換)</span>
+              <span class="value text-expense">NT$ {{ numberFormat(totalExpense, 2) }}</span>
+            </div>
           </div>
+
           <div id="chart-container">
-              <canvas ref="expenseChartCanvas"></canvas>
+              <div v-if="(currentChartType === 'expense' && totalExpense <= 0) || (currentChartType === 'income' && totalIncome <= 0)" class="no-data-msg">
+                📭 本月尚無{{ currentChartType === 'expense' ? '支出' : '收入' }}紀錄
+              </div>
+              <canvas v-else ref="expenseChartCanvas"></canvas>
           </div>
       </div>
     </div>
@@ -133,8 +153,14 @@ import Chart from 'chart.js/auto';
 const assetData = ref({ breakdown: {}, global_twd_net_worth: 0 });
 const assetLoading = ref(true);
 const assetError = ref('');
+
+// 收支數據
 const totalExpense = ref(0);
+const totalIncome = ref(0);
 const expenseBreakdown = ref({});
+const incomeBreakdown = ref({});
+const currentChartType = ref('expense'); // 預設顯示支出
+
 const chartInstance = ref(null);
 const expenseChartCanvas = ref(null);
 const formMessage = ref('');
@@ -152,6 +178,24 @@ const transactionForm = ref({
 
 // 計算屬性
 const globalNetWorth = computed(() => assetData.value.global_twd_net_worth || 0);
+
+// 類別中英對照表
+const categoryMap = {
+  // 支出
+  'Food': '🍱 飲食',
+  'Transport': '🚗 交通',
+  'Entertainment': '🎮 娛樂',
+  'Shopping': '🛍️ 購物',
+  'Bills': '🧾 帳單',
+  'Investment': '📈 投資',
+  'Medical': '💊 醫療',
+  'Education': '📚 教育',
+  'Miscellaneous': '✨ 其他',
+  // 收入
+  'Salary': '💰 薪水',
+  'Allowance': '🎁 津貼',
+  'Bonus': '🧧 獎金',
+};
 
 // --- API 函式 ---
 async function fetchAssetSummary() {
@@ -174,37 +218,56 @@ async function fetchExpenseData() {
         const result = await response.json();
         if (result.status === 'success') {
             totalExpense.value = result.data.total_expense;
-            expenseBreakdown.value = result.data.breakdown;
+            totalIncome.value = result.data.total_income || 0;
+            // 確保 breakdown 存在，避免 null 錯誤
+            expenseBreakdown.value = result.data.breakdown || {};
+            incomeBreakdown.value = result.data.income_breakdown || {};
+            
             renderChart();
         }
     }
 }
 
-// --- 圖表渲染 (使用文青色系) ---
+// 切換圖表類型的函式
+function toggleChart(type) {
+  currentChartType.value = type;
+  renderChart();
+}
+
+// --- 圖表渲染 (支援中文化與切換) ---
 function renderChart() {
   if (chartInstance.value) {
     chartInstance.value.destroy();
   }
 
-  const labels = Object.keys(expenseBreakdown.value);
-  const dataValues = Object.values(expenseBreakdown.value).map(v => parseFloat(v));
+  // 1. 根據目前模式決定使用哪一份數據
+  const sourceData = currentChartType.value === 'expense' ? expenseBreakdown.value : incomeBreakdown.value;
+  const totalValue = currentChartType.value === 'expense' ? totalExpense.value : totalIncome.value;
 
-  if (labels.length === 0 || totalExpense.value <= 0) return;
+  const rawLabels = Object.keys(sourceData);
+  
+  // 2. 如果沒有數據，直接返回 (由 template 的 v-if 處理顯示)
+  if (rawLabels.length === 0 || totalValue <= 0) return;
 
-  // 定義一組莫蘭迪色系/大地色系
+  // 3. 將英文 Label 轉為中文
+  const labels = rawLabels.map(key => categoryMap[key] || key);
+  
+  const dataValues = Object.values(sourceData).map(v => parseFloat(v));
+
+  // 莫蘭迪色系
   const morandiColors = [
     '#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', 
     '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2'
   ];
 
   chartInstance.value = new Chart(expenseChartCanvas.value, {
-    type: 'doughnut', // 改用甜甜圈圖，比較時尚
+    type: 'doughnut',
     data: {
       labels: labels,
       datasets: [{
         data: dataValues,
-        backgroundColor: morandiColors, // 使用自訂色系
-        borderWidth: 0, // 去掉邊框
+        backgroundColor: morandiColors,
+        borderWidth: 0,
         hoverOffset: 6,
       }],
     },
@@ -217,13 +280,24 @@ function renderChart() {
               labels: {
                 usePointStyle: true,
                 padding: 20,
-                font: { family: 'sans-serif', size: 12 },
+                font: { family: '"Helvetica Neue", "Microsoft JhengHei", sans-serif', size: 12 },
                 color: '#666'
               }
             },
-            title: { display: false }
+            title: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  let label = context.label || '';
+                  if (label) label += ': ';
+                  let value = context.raw;
+                  let percentage = Math.round((value / totalValue) * 100) + '%';
+                  return label + 'NT$ ' + numberFormat(value, 0) + ' (' + percentage + ')';
+                }
+              }
+            }
         },
-        cutout: '65%', // 甜甜圈中間留白
+        cutout: '65%',
     },
   });
 }
@@ -247,6 +321,7 @@ async function handleTransactionSubmit() {
       transactionForm.value.description = '';
       transactionForm.value.category = 'Miscellaneous';
       
+      // 重新載入數據以更新圖表
       fetchAssetSummary();
       fetchExpenseData();
       
@@ -259,6 +334,7 @@ async function handleTransactionSubmit() {
   }
 }
 
+// 暴露給父組件調用
 defineExpose({ refreshAllData: () => { fetchAssetSummary(); fetchExpenseData(); } });
 
 onMounted(() => {
@@ -274,7 +350,7 @@ onMounted(() => {
 .dashboard-container {
   max-width: 100%;
   margin: 0 auto;
-  color: #5d5d5d; /* 深灰文字 */
+  color: #5d5d5d;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   letter-spacing: 0.03em;
 }
@@ -287,7 +363,7 @@ onMounted(() => {
 .section-header h2 {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #8c7b75; /* 暖棕色標題 */
+  color: #8c7b75;
   margin-bottom: 12px;
   margin-left: 4px;
   position: relative;
@@ -295,9 +371,9 @@ onMounted(() => {
 
 .data-box {
   background-color: #ffffff;
-  border-radius: 16px; /* 更圓潤 */
+  border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 4px 20px rgba(220, 210, 200, 0.3); /* 暖色系陰影 */
+  box-shadow: 0 4px 20px rgba(220, 210, 200, 0.3);
   border: 1px solid #f0ebe5;
   transition: transform 0.2s ease;
 }
@@ -318,7 +394,7 @@ onMounted(() => {
 
 .input-minimal:focus {
   outline: none;
-  border-bottom: 1px solid #d4a373; /* 聚焦時變大地色 */
+  border-bottom: 1px solid #d4a373;
 }
 
 .form-group {
@@ -389,7 +465,7 @@ onMounted(() => {
 .submit-btn {
   width: 100%;
   padding: 14px;
-  background-color: #d4a373; /* 經典大地色 */
+  background-color: #d4a373;
   color: white;
   border: none;
   border-radius: 12px;
@@ -489,32 +565,82 @@ onMounted(() => {
   align-items: center;
 }
 
-.total-expense-display {
-  text-align: center;
-  margin-bottom: 20px;
+/* 互動式統計列 */
+.stats-row {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed #f0ebe5;
 }
 
-.total-expense-display .label {
+.stat-item {
+  text-align: center;
+  flex: 1;
+  padding: 8px;
+  border-radius: 12px;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+/* 游標樣式 & 點擊效果 */
+.cursor-pointer {
+  cursor: pointer;
+}
+.cursor-pointer:active {
+  transform: scale(0.98);
+}
+
+/* 選中狀態 */
+.active-stat {
+  background-color: #f7f5f0; /* 淺米色背景 */
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.vertical-line {
+  width: 1px;
+  height: 40px;
+  background-color: #f0ebe5;
+}
+
+.stat-item .label {
   display: block;
   font-size: 0.85rem;
   color: #999;
+  margin-bottom: 4px;
 }
 
-.total-expense-display .value {
-  font-size: 1.6rem;
+.stat-item .value {
+  font-size: 1.4rem;
   font-weight: 700;
-  color: #d67a7a; /* 柔和紅 */
+  letter-spacing: 0.5px;
 }
 
+.text-income { color: #8fbc8f; } /* 柔和綠 */
+.text-expense { color: #d67a7a; } /* 柔和紅 */
+
+/* 圖表容器 */
 #chart-container {
   width: 100%;
-  height: 250px; /* 固定高度讓甜甜圈圖好看 */
+  height: 250px;
   position: relative;
 }
 
+.no-data-msg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #aaa;
+  font-size: 0.9rem;
+  width: 100%;
+  text-align: center;
+}
+
 /* 顏色工具類 */
-.text-earth-green { color: #8fbc8f; } /* 鼠尾草綠 */
-.text-earth-red { color: #d67a7a; }   /* 乾燥玫瑰紅 */
+.text-earth-green { color: #8fbc8f; } 
+.text-earth-red { color: #d67a7a; }   
 .text-dark-green { color: #556b2f; }
 .text-dark-red { color: #b22222; }
 
