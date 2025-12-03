@@ -149,6 +149,33 @@ try {
                 $response = ['status' => 'error', 'message' => '刪除失敗'];
             }
             break;
+        
+        // 🌟 新增：儲存帳戶 (新增或更新)
+        case 'save_account':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            $name = trim($input['name'] ?? '');
+            $type = $input['type'] ?? 'Cash';
+            $balance = (float)($input['balance'] ?? 0);
+            $currency = $input['currency'] ?? 'TWD';
+
+            if (empty($name)) {
+                $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
+                break;
+            }
+
+            // 呼叫 Service (邏輯與 webhook 相同：若名稱存在則更新，不存在則新增)
+            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency);
+
+            if ($success) {
+                $response = ['status' => 'success', 'message' => '帳戶儲存成功'];
+            } else {
+                $response = ['status' => 'error', 'message' => '儲存失敗'];
+            }
+            break;
 
         case 'monthly_expense_breakdown':
             // 獲取支出與收入的總額 (這部分您之前改過了)
@@ -228,16 +255,23 @@ try {
             $response = ['status' => 'success', 'data' => $analysisText];
             break;
         
-        // 🌟 新增：動態區間趨勢
+        // 🌟 修改：支援不同模式的趨勢數據
         case 'trend_data':
-            // 預設為過去一年 (若前端沒傳參數)
             $defaultStart = date('Y-m-01', strtotime('-1 year'));
-            $defaultEnd = date('Y-m-t'); // 本月最後一天
+            $defaultEnd = date('Y-m-t');
 
             $start = $_GET['start'] ?? $defaultStart;
             $end = $_GET['end'] ?? $defaultEnd;
+            $mode = $_GET['mode'] ?? 'total'; // 預設為 'total' (收入vs支出)
 
-            $trendData = $transactionService->getTrendData($dbUserId, $start, $end);
+            if ($mode === 'category') {
+                // 模式：分類趨勢 (給 Dashboard 用)
+                $trendData = $transactionService->getCategoryTrendData($dbUserId, $start, $end);
+            } else {
+                // 模式：總量趨勢 (給 Account 用)
+                $trendData = $transactionService->getTrendData($dbUserId, $start, $end);
+            }
+            
             $response = ['status' => 'success', 'data' => $trendData];
             break;
 

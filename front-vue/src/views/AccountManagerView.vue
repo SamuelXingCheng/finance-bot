@@ -2,18 +2,18 @@
   <div class="accounts-container">
     <div class="page-header">
       <div class="title-group">
-        <h2>📂 帳戶管理</h2>
+        <h2>帳戶管理</h2>
         <p class="subtitle">資產配置與詳細列表</p>
       </div>
       <button class="add-btn" @click="showCustomModal('新增帳戶請從 LINE Bot 輸入指令')">
-        <span>+</span> 指令
+        <span>+</span> 新增帳戶
       </button>
     </div>
 
     <div class="ai-section mb-6">
       <div v-if="aiAnalysis" class="ai-box">
         <div class="ai-header">
-          <span class="ai-icon">🤖</span> 財務健檢報告
+          <span class="ai-label">AI</span> 財務健檢報告
         </div>
         <div class="ai-content">{{ aiAnalysis }}</div>
       </div>
@@ -21,14 +21,14 @@
         <span class="loader"></span> 正在分析您的財務結構...
       </div>
       <button v-else @click="fetchAIAnalysis" class="ai-btn">
-        ✨ 點擊生成 AI 資產配置建議
+        生成 AI 資產配置建議
       </button>
     </div>
 
     <div class="charts-wrapper mb-6">
       
       <div class="chart-card">
-        <h3>🍰 配置 (現金 vs 投資)</h3>
+        <h3>配置 (現金 vs 投資)</h3>
         <div class="chart-box">
           <canvas ref="allocationChartCanvas"></canvas>
         </div>
@@ -39,14 +39,14 @@
       </div>
 
       <div class="chart-card">
-        <h3>🌍 幣種分佈</h3>
+        <h3>幣種分佈</h3>
         <div class="chart-box">
           <canvas ref="currencyChartCanvas"></canvas>
         </div>
       </div>
 
       <div class="chart-card">
-        <h3>⚖️ 資產負債表</h3>
+        <h3>資產負債表</h3>
         <div class="chart-box">
           <canvas ref="netWorthChartCanvas"></canvas>
         </div>
@@ -54,8 +54,7 @@
 
       <div class="chart-card wide-card">
         <div class="chart-header-row">
-            <h3>📈 收支趨勢</h3>
-            
+            <h3>收支趨勢</h3>
             <div class="date-controls">
                 <input type="date" v-model="trendFilter.start" class="date-input">
                 <span class="separator">~</span>
@@ -63,7 +62,6 @@
                 <button @click="fetchTrendData" class="filter-btn">查詢</button>
             </div>
         </div>
-
         <div class="chart-box-lg">
           <canvas ref="trendChartCanvas"></canvas>
         </div>
@@ -76,8 +74,8 @@
     </div>
 
     <div v-else-if="accounts.length === 0" class="state-box empty">
-      <p>📭 目前還沒有帳戶記錄</p>
-      <p class="subtitle mt-2">請從 LINE Bot 輸入「設定 帳戶名 類型 金額 幣種」來新增。</p>
+      <p>目前還沒有帳戶記錄</p>
+      <p class="subtitle mt-2">請點擊右上方新增按鈕。</p>
     </div>
 
     <div v-else class="account-list">
@@ -86,7 +84,9 @@
         <div class="card-left">
           <div class="acc-name">{{ account.name }}</div>
           <div class="acc-meta">
-            <span class="badge" :class="getTypeClass(account.type)">{{ account.type }}</span>
+            <span class="badge" :class="getTypeClass(account.type)">
+              {{ typeNameMap[account.type] || account.type }}
+            </span>
             <span class="currency">{{ account.currency_unit }}</span>
           </div>
         </div>
@@ -95,12 +95,65 @@
           <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
             {{ numberFormat(account.balance, 2) }}
           </div>
-          <button class="delete-icon" @click="handleDelete(account.name)" title="刪除">
-            🗑️
-          </button>
+          <div class="action-buttons">
+            <button class="text-btn edit" @click="openModal(account)">編輯</button>
+            <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
+          </div>
         </div>
       </div>
     </div>
+
+    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ isEditMode ? '編輯帳戶' : '新增帳戶' }}</h3>
+          <button class="close-btn" @click="closeModal">×</button>
+        </div>
+        
+        <form @submit.prevent="handleSave">
+          <div class="form-group">
+            <label>帳戶名稱 (唯一識別)</label>
+            <input type="text" v-model="form.name" required class="input-std" :disabled="isEditMode" placeholder="例如：錢包、台新銀行">
+            <p v-if="isEditMode" class="hint">名稱無法修改，如需更名請刪除後重建。</p>
+          </div>
+
+          <div class="form-group">
+            <label>資產類型</label>
+            <select v-model="form.type" class="input-std">
+              <option value="Cash">現金/活存</option>
+              <option value="Investment">投資</option>
+              <option value="Liability">負債</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group half">
+              <label>金額</label>
+              <input type="number" v-model.number="form.balance" step="0.01" required class="input-std">
+            </div>
+            
+            <div class="form-group half">
+              <label>幣種</label>
+              <div v-if="isCustomCurrency" class="custom-currency-wrapper">
+                 <input type="text" v-model="form.currency" class="input-std" placeholder="代碼" required @input="forceUppercase">
+                 <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
+              </div>
+              <select v-else v-model="currencySelectValue" class="input-std" @change="handleCurrencyChange">
+                <option v-for="c in currencyList" :key="c.code" :value="c.code">
+                  {{ c.name }}
+                </option>
+                <option value="CUSTOM">➕ 自行輸入...</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" class="save-btn" :disabled="isSaving">
+            {{ isSaving ? '儲存中...' : '儲存' }}
+          </button>
+        </form>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -109,52 +162,153 @@ import { ref, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api'; 
 import { defineEmits } from 'vue';
 import Chart from 'chart.js/auto';
+// 🌟 1. 引入 DataLabels 外掛
+import ChartDataLabels from 'chartjs-plugin-datalabels';
+Chart.register(ChartDataLabels);
 
+const emit = defineEmits(['refreshDashboard']);
+
+// 資料狀態
 const accounts = ref([]);
 const loading = ref(true);
 const aiLoading = ref(false);
 const aiAnalysis = ref('');
-const emit = defineEmits(['refreshDashboard']);
 
-// 圖表數據與 Canvas Refs
+// 資產類型中文對照
+const typeNameMap = { 'Cash': '現金', 'Investment': '投資', 'Liability': '負債' };
+
+// 🌟 幣種清單
+const currencyList = [
+  { code: 'TWD', name: '新台幣 (TWD)' }, { code: 'USD', name: '美元 (USD)' },
+  { code: 'JPY', name: '日圓 (JPY)' }, { code: 'CNY', name: '人民幣 (CNY)' },
+  { code: 'EUR', name: '歐元 (EUR)' }, { code: 'USDT', name: '泰達幣 (USDT)' },
+  { code: 'BTC', name: '比特幣 (BTC)' }, { code: 'ETH', name: '以太幣 (ETH)' },
+  { code: 'ADA', name: '艾達幣 (ADA)' },
+];
+
+// 圖表狀態
 const chartData = ref({ cash: 0, investment: 0, total_assets: 0, total_liabilities: 0 });
 const assetBreakdown = ref({}); 
-const allocationChartCanvas = ref(null);
-const currencyChartCanvas = ref(null);
-const netWorthChartCanvas = ref(null);
-const trendChartCanvas = ref(null);
-
-let allocChart = null;
-let currChart = null;
-let nwChart = null;
-let trendChart = null;
-
-// 趨勢圖篩選器
 const trendFilter = ref({
-    // 預設過去一年
     start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
     end: new Date().toISOString().substring(0, 10)
 });
 
-function showCustomModal(message) {
-    console.log(`[Modal Placeholder] ${message}`);
-    alert(message); 
+// Canvas Refs
+const allocationChartCanvas = ref(null);
+const currencyChartCanvas = ref(null);
+const netWorthChartCanvas = ref(null);
+const trendChartCanvas = ref(null);
+let allocChart = null; let currChart = null; let nwChart = null; let trendChart = null;
+
+// Modal 與表單狀態
+const isModalOpen = ref(false);
+const isEditMode = ref(false);
+const isSaving = ref(false);
+const form = ref({ name: '', type: 'Cash', balance: 0, currency: 'TWD' });
+
+// 🌟 幣種選擇邏輯 (新增)
+const currencySelectValue = ref('TWD');
+const isCustomCurrency = ref(false);
+
+function handleCurrencyChange() {
+    if (currencySelectValue.value === 'CUSTOM') {
+        isCustomCurrency.value = true;
+        form.value.currency = ''; 
+    } else {
+        isCustomCurrency.value = false;
+        form.value.currency = currencySelectValue.value;
+    }
 }
 
-// 1. 獲取帳戶列表
+function resetCurrency() {
+    isCustomCurrency.value = false;
+    currencySelectValue.value = 'TWD';
+    form.value.currency = 'TWD';
+}
+
+function forceUppercase() {
+    form.value.currency = form.value.currency.toUpperCase();
+}
+
+// --- Modal 操作 ---
+function openModal(account = null) {
+  if (account) {
+    isEditMode.value = true;
+    form.value = { 
+      name: account.name, 
+      type: account.type, 
+      balance: parseFloat(account.balance), 
+      currency: account.currency_unit 
+    };
+    
+    // 🌟 判斷是否為自訂幣種
+    const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
+    if (knownCurrency) {
+        currencySelectValue.value = account.currency_unit;
+        isCustomCurrency.value = false;
+    } else {
+        currencySelectValue.value = 'CUSTOM';
+        isCustomCurrency.value = true;
+    }
+
+  } else {
+    isEditMode.value = false;
+    form.value = { name: '', type: 'Cash', balance: 0, currency: 'TWD' };
+    resetCurrency(); // 重置幣種選單
+  }
+  isModalOpen.value = true;
+}
+
+function closeModal() { isModalOpen.value = false; }
+
+function showCustomModal(message) {
+    console.log(`[Message] ${message}`);
+    openModal();
+}
+
+// 儲存帳戶
+async function handleSave() {
+  isSaving.value = true;
+  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, {
+    method: 'POST', body: JSON.stringify(form.value)
+  });
+
+  if (response && response.ok) {
+    const result = await response.json();
+    if (result.status === 'success') {
+      closeModal();
+      fetchAccounts(); fetchChartData(); emit('refreshDashboard');
+    } else {
+      alert('儲存失敗：' + result.message);
+    }
+  } else {
+    alert('網路錯誤');
+  }
+  isSaving.value = false;
+}
+
+// --- API 函式 (保持不變) ---
 async function fetchAccounts() {
   loading.value = true;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_accounts`);
   if (response && response.ok) {
       const result = await response.json();
-      if (result.status === 'success') {
-        accounts.value = result.data;
-      }
+      if (result.status === 'success') accounts.value = result.data;
   }
   loading.value = false;
 }
 
-// 2. 獲取資產摘要 (用於前三個圖表)
+async function handleDelete(name) {
+  if (!confirm(`確定要刪除 [${name}] 嗎？`)) return;
+  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_account`, {
+    method: 'POST', body: JSON.stringify({ name: name })
+  });
+  if (response && response.ok) {
+      fetchAccounts(); fetchChartData(); emit('refreshDashboard');
+  }
+}
+
 async function fetchChartData() {
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_summary`);
   if (response && response.ok) {
@@ -162,90 +316,105 @@ async function fetchChartData() {
       if (result.status === 'success') {
           chartData.value = result.data.charts || { cash: 0, investment: 0, total_assets: 0, total_liabilities: 0 };
           assetBreakdown.value = result.data.breakdown || {};
-          
-          renderAllocationChart();
-          renderCurrencyChart();
-          renderNetWorthChart();
+          renderAllocationChart(); renderCurrencyChart(); renderNetWorthChart();
       }
   }
 }
 
-// 3. 獲取趨勢數據 (用於折線圖)
 async function fetchTrendData() {
   const { start, end } = trendFilter.value;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}`);
-  
   if (response && response.ok) {
       const result = await response.json();
-      if (result.status === 'success') {
-          renderTrendChart(result.data);
-      }
+      if (result.status === 'success') renderTrendChart(result.data);
   }
 }
 
-// 4. AI 分析
 async function fetchAIAnalysis() {
     aiLoading.value = true;
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_portfolio`);
-    
-    // 🌟 修改這裡：加入 response.ok 的判斷與 else 區塊
     if (response && response.ok) {
         const result = await response.json();
-        if (result.status === 'success') {
-            aiAnalysis.value = result.data;
-        } else {
-            aiAnalysis.value = "AI 分析回傳錯誤: " + result.message;
-        }
+        if (result.status === 'success') aiAnalysis.value = result.data;
+        else aiAnalysis.value = "AI 回傳錯誤: " + result.message;
     } else {
-        // 🌟 新增：如果 API 失敗 (例如 500 錯誤)，跳出提示
-        alert("連線失敗，請檢查後端日誌。"); 
-        aiAnalysis.value = "系統發生錯誤，無法進行分析。";
+        aiAnalysis.value = "連線失敗。";
     }
     aiLoading.value = false;
 }
 
-// --- 圖表繪製函式 ---
+// --- 圖表渲染 ---
 
 function renderAllocationChart() {
     if (allocChart) allocChart.destroy();
+    
+    // 計算總數，用於百分比計算
+    const total = chartData.value.cash + chartData.value.investment;
+
     allocChart = new Chart(allocationChartCanvas.value, {
         type: 'doughnut',
         data: {
             labels: ['現金', '投資'],
-            datasets: [{
-                data: [chartData.value.cash, chartData.value.investment],
+            datasets: [{ 
+                data: [chartData.value.cash, chartData.value.investment], 
                 backgroundColor: ['#A8DADC', '#457B9D'], 
-                borderWidth: 0
+                borderWidth: 0 
             }]
         },
-        options: { cutout: '65%', plugins: { legend: { display: false } } }
+        options: { 
+            cutout: '65%', 
+            plugins: { 
+                legend: { display: false },
+                // 🌟 2. 設定 DataLabels：顯示百分比，過小不顯示
+                datalabels: {
+                    formatter: (value, ctx) => {
+                        if (total === 0) return '';
+                        const percentage = Math.round((value / total) * 100);
+                        // 閾值設定：小於 5% 就不顯示文字，避免塞不下
+                        return percentage >= 5 ? percentage + '%' : '';
+                    },
+                    color: '#fff',
+                    font: { weight: 'bold', size: 12 },
+                    anchor: 'center',
+                    align: 'center'
+                }
+            } 
+        }
     });
 }
 
 function renderCurrencyChart() {
     if (currChart) currChart.destroy();
-    const labels = [];
-    const data = [];
+    const labels = []; const data = [];
     for (const currency in assetBreakdown.value) {
         const item = assetBreakdown.value[currency];
-        if (item.twd_total > 0) {
-            labels.push(currency);
-            data.push(item.twd_total);
-        }
+        if (item.twd_total > 0) { labels.push(currency); data.push(item.twd_total); }
     }
     const colors = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178'];
+    
+    // 計算總數
+    const total = data.reduce((a, b) => a + b, 0);
 
     currChart = new Chart(currencyChartCanvas.value, {
         type: 'pie',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: colors,
-                borderWidth: 0
-            }]
-        },
-        options: { plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
+        data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }] },
+        options: { 
+            plugins: { 
+                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
+                // 🌟 2. 設定 DataLabels：顯示百分比，過小不顯示
+                datalabels: {
+                    formatter: (value, ctx) => {
+                        if (total === 0) return '';
+                        const percentage = Math.round((value / total) * 100);
+                        return percentage >= 5 ? percentage + '%' : '';
+                    },
+                    color: '#fff',
+                    font: { weight: 'bold', size: 11 },
+                    anchor: 'center',
+                    align: 'center'
+                }
+            } 
+        }
     });
 }
 
@@ -255,17 +424,15 @@ function renderNetWorthChart() {
         type: 'bar',
         data: {
             labels: ['資產', '負債'],
-            datasets: [{
-                label: '金額',
-                data: [chartData.value.total_assets, chartData.value.total_liabilities],
-                backgroundColor: ['#8fbc8f', '#d67a7a'],
-                borderRadius: 6
-            }]
+            datasets: [{ label: '金額', data: [chartData.value.total_assets, chartData.value.total_liabilities], backgroundColor: ['#8fbc8f', '#d67a7a'], borderRadius: 6 }]
         },
         options: { 
             indexAxis: 'y', 
-            plugins: { legend: { display: false } },
-            scales: { x: { display: false }, y: { grid: { display: false } } }
+            plugins: { 
+                legend: { display: false },
+                datalabels: { display: false } // 長條圖不顯示百分比
+            }, 
+            scales: { x: { display: false }, y: { grid: { display: false } } } 
         }
     });
 }
@@ -275,57 +442,28 @@ function renderTrendChart(data) {
     const labels = Object.keys(data); 
     const incomes = labels.map(m => data[m].income);
     const expenses = labels.map(m => data[m].expense);
-
     trendChart = new Chart(trendChartCanvas.value, {
         type: 'line',
         data: {
             labels: labels,
             datasets: [
-                {
-                    label: '收入',
-                    data: incomes,
-                    borderColor: '#8fbc8f',
-                    backgroundColor: 'rgba(143, 188, 143, 0.1)',
-                    tension: 0.3, fill: true
-                },
-                {
-                    label: '支出',
-                    data: expenses,
-                    borderColor: '#d67a7a',
-                    backgroundColor: 'rgba(214, 122, 122, 0.1)',
-                    tension: 0.3, fill: true
-                }
+                { label: '收入', data: incomes, borderColor: '#8fbc8f', backgroundColor: 'rgba(143, 188, 143, 0.1)', tension: 0.3, fill: true },
+                { label: '支出', data: expenses, borderColor: '#d67a7a', backgroundColor: 'rgba(214, 122, 122, 0.1)', tension: 0.3, fill: true }
             ]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: NT$ ${numberFormat(ctx.raw, 0)}` } } },
-            scales: {
-                y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } },
-                x: { grid: { display: false } }
-            }
+        options: { 
+            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, 
+            plugins: { 
+                legend: { position: 'top' }, 
+                tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: NT$ ${numberFormat(ctx.raw, 0)}` } },
+                datalabels: { display: false } // 趨勢圖不顯示標籤
+            }, 
+            scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } }, x: { grid: { display: false } } } 
         }
     });
 }
 
-// 列表操作
-async function handleDelete(name) {
-  if (!window.confirm(`確定要刪除 [${name}] 嗎？`)) return;
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_account`, {
-    method: 'POST', body: JSON.stringify({ name: name })
-  });
-  if (response && response.ok) {
-      fetchAccounts(); 
-      fetchChartData(); 
-      emit('refreshDashboard');
-  }
-}
-
-function getTypeClass(type) {
-  return type === 'Liability' ? 'badge-debt' : 'badge-asset';
-}
+function getTypeClass(type) { return type === 'Liability' ? 'badge-debt' : 'badge-asset'; }
 
 onMounted(() => {
     fetchAccounts();
@@ -337,24 +475,23 @@ onMounted(() => {
 <style scoped>
 /* 文青風樣式 */
 .accounts-container { max-width: 100%; padding-bottom: 40px; }
-
-/* 標題區 */
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 .title-group h2 { font-size: 1.2rem; color: var(--text-primary); margin: 0; }
 .subtitle { font-size: 0.85rem; color: var(--text-secondary); margin: 4px 0 0 0; }
-.add-btn { background-color: var(--color-primary); color: white; border: none; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; }
+.add-btn { background-color: var(--color-primary); color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; transition: transform 0.1s; }
+.add-btn:active { transform: scale(0.95); }
 
 /* AI 區塊 */
 .ai-section { background: #fdfcf8; border: 1px dashed #d4a373; border-radius: 12px; padding: 15px; }
-.ai-header { font-weight: bold; color: #8c7b75; margin-bottom: 8px; }
+.ai-header { font-weight: bold; color: #8c7b75; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.ai-label { background: #8c7b75; color: white; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; }
 .ai-content { white-space: pre-wrap; font-size: 0.9rem; color: #555; line-height: 1.5; }
 .ai-btn { width: 100%; padding: 8px; border: 1px solid #d4a373; color: #d4a373; background: white; border-radius: 8px; cursor: pointer; font-weight: bold; }
 .ai-loading { text-align: center; color: #999; font-size: 0.85rem; }
 
-/* 圖表容器 (RWD: 手機單欄，平板雙欄) */
+/* 圖表容器 */
 .charts-wrapper { display: grid; grid-template-columns: 1fr; gap: 16px; }
 @media (min-width: 600px) { .charts-wrapper { grid-template-columns: 1fr 1fr; } }
-
 .chart-card { background: white; padding: 16px; border-radius: 16px; border: 1px solid #f0ebe5; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; align-items: center; }
 .chart-card h3 { font-size: 0.95rem; color: #8c7b75; margin: 0 0 12px 0; align-self: flex-start; }
 .chart-box { width: 100%; height: 160px; position: relative; display: flex; justify-content: center; }
@@ -362,27 +499,14 @@ onMounted(() => {
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .dot.cash { background: #A8DADC; } .dot.invest { background: #457B9D; }
 .ml-2 { margin-left: 8px; }
-
-/* 寬卡片設定 (趨勢圖) */
-.wide-card {
-  grid-column: 1 / -1; 
-  display: block; 
-}
-
-/* 趨勢圖標題與控制器 */
-.chart-header-row {
-    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px;
-}
+.wide-card { grid-column: 1 / -1; display: block; }
+.chart-header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
 .chart-header-row h3 { margin: 0; white-space: nowrap; }
-
-.date-controls {
-    display: flex; align-items: center; gap: 8px; background: #f7f5f0; padding: 6px 12px; border-radius: 20px;
-}
+.date-controls { display: flex; align-items: center; gap: 8px; background: #f7f5f0; padding: 6px 12px; border-radius: 20px; }
 .date-input { border: none; background: transparent; color: #666; font-size: 0.85rem; outline: none; max-width: 110px; }
 .separator { color: #aaa; }
 .filter-btn { background-color: #d4a373; color: white; border: none; padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; transition: background 0.2s; }
 .filter-btn:hover { background-color: #c19263; }
-
 .chart-box-lg { width: 100%; height: 250px; position: relative; }
 
 /* 列表區 */
@@ -398,12 +522,79 @@ onMounted(() => {
 .card-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .acc-balance { font-size: 1rem; font-weight: 700; letter-spacing: 0.5px; }
 .text-asset { color: var(--text-primary); } .text-debt { color: var(--color-danger); }
-.delete-icon { background: transparent; border: none; cursor: pointer; font-size: 0.9rem; opacity: 0.3; padding: 4px; }
-.delete-icon:hover { opacity: 1; }
+.action-buttons { display: flex; gap: 12px; margin-top: 6px; }
+.text-btn { background: transparent; border: none; cursor: pointer; font-size: 0.85rem; padding: 2px 4px; transition: opacity 0.2s; text-decoration: underline; }
+.text-btn:hover { opacity: 0.7; }
+.delete { color: #e5989b; }
+.edit { color: #a98467; }
 .state-box { text-align: center; padding: 30px; color: var(--text-secondary); background: var(--bg-card); border-radius: var(--border-radius); box-shadow: var(--shadow-soft); }
 .mb-6 { margin-bottom: 24px; }
 
-/* RWD 調整 */
+/* Modal 樣式 */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.5); z-index: 1000;
+  display: flex; justify-content: center; align-items: center;
+  padding: 20px;
+}
+.modal-content {
+  background: white; width: 100%; max-width: 400px;
+  border-radius: 16px; padding: 24px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  animation: slideUp 0.3s ease-out;
+}
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header h3 { margin: 0; color: #8c7b75; font-size: 1.1rem; }
+.close-btn { background: transparent; border: none; font-size: 1.5rem; color: #aaa; cursor: pointer; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 0.85rem; color: #666; margin-bottom: 6px; }
+.form-row { display: flex; gap: 12px; }
+.half { flex: 1; }
+
+/* 🌟 3. 修正 Input CSS：確保所有輸入框樣式一致，解決歪掉問題 */
+.input-std {
+  width: 100%; 
+  padding: 10px; 
+  border: 1px solid #ddd;
+  border-radius: 8px; 
+  font-size: 1rem; 
+  color: #333; 
+  outline: none;
+  background: #f9f9f9;
+  box-sizing: border-box; /* 關鍵：確保 padding 不會撐大寬度 */
+  line-height: 1.5;
+  height: 44px; /* 固定高度確保對齊 */
+}
+/* 針對 Select 的特殊修正 */
+select.input-std {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23007CB2%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right .7em top 50%;
+  background-size: .65em auto;
+}
+
+.input-std:focus { border-color: #d4a373; background: white; }
+.input-std:disabled { background: #eee; color: #999; cursor: not-allowed; }
+
+/* 幣種自訂輸入區塊 */
+.custom-currency-wrapper { display: flex; align-items: center; gap: 8px; width: 100%; }
+.back-btn { border: none; background: #eee; border-radius: 8px; width: 44px; height: 44px; cursor: pointer; color: #666; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; }
+
+.save-btn {
+  width: 100%; padding: 12px; background: #d4a373; color: white;
+  border: none; border-radius: 10px; font-size: 1rem; font-weight: bold;
+  cursor: pointer; margin-top: 10px;
+}
+.save-btn:disabled { background: #e0d0c0; cursor: wait; }
+.hint { font-size: 0.75rem; color: #d67a7a; margin-top: 4px; }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (max-width: 480px) {
     .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
     .date-controls { width: 100%; justify-content: space-between; }

@@ -12,14 +12,22 @@ class AssetService {
     }
 
     public function sanitizeAssetType(string $input): string {
-        // ... (保持原樣)
+        $input = trim($input);
+
+        // 🌟 修正點：如果輸入已經是合法的英文類型 (例如從網頁傳來的)，直接回傳
+        if (in_array($input, self::VALID_TYPES)) {
+            return $input;
+        }
+
+        // 原本的中文映射邏輯
         $map = [
             '現金' => 'Cash', '活存' => 'Cash', '銀行' => 'Cash',
             '投資' => 'Investment', '股票' => 'Investment', '基金' => 'Investment',
             '負債' => 'Liability', '房貸' => 'Liability', '車貸' => 'Liability',
             '卡債' => 'Liability', '借款' => 'Liability',
         ];
-        $standardized = $map[trim($input)] ?? 'Cash';
+        
+        $standardized = $map[$input] ?? 'Cash';
         return in_array($standardized, self::VALID_TYPES) ? $standardized : 'Cash';
     }
 

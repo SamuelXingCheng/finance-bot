@@ -26,7 +26,6 @@ class TransactionService {
 
     public function addTransaction(int $userId, array $data): bool {
         if (!isset($data['amount']) || $data['amount'] <= 0 || !in_array($data['type'], ['income', 'expense'])) {
-            error_log("Invalid transaction data for user $userId: " . json_encode($data, JSON_UNESCAPED_UNICODE));
             return false;
         }
 
@@ -35,84 +34,57 @@ class TransactionService {
         $currency = $data['currency'] ?? 'TWD';
         $description = $data['description'] ?? '未分類';
         
-        // 【修正點】：欄位名稱統一為 transaction_date 和 currency
         $sql = "INSERT INTO transactions (user_id, amount, category, description, type, transaction_date, currency, created_at) 
                 VALUES (:userId, :amount, :category, :description, :type, :transDate, :currency, NOW())";
 
         try {
             $stmt = $this->pdo->prepare($sql);
-            $amountValue = (float)($data['amount'] ?? 0); 
-            
             return $stmt->execute([
                 ':userId'      => $userId,
-                ':amount'      => $amountValue,
+                ':amount'      => (float)$data['amount'],
                 ':category'    => $cleanCategory,
                 ':description' => $description,
                 ':type'        => $data['type'],
-                ':transDate'   => $transDate, // 使用 transaction_date
+                ':transDate'   => $transDate, 
                 ':currency'    => $currency
             ]);
         } catch (PDOException $e) {
-            // 由於診斷已完成，這裡可以安全地記錄錯誤並返回 false
-            error_log("Database INSERT failed for user $userId: " . $e->getMessage());
+            error_log("Database INSERT failed: " . $e->getMessage());
             return false;
         }
     }
 
-    /**
-     * 【修正】getTotalExpenseByMonth：使用 transaction_date 欄位
-     */
     public function getTotalExpenseByMonth(int $userId): float {
         $startOfMonth = date('Y-m-01');
-        
-        $sql = "SELECT SUM(amount) FROM transactions 
-                WHERE user_id = :userId 
-                  AND type = 'expense' 
-                  AND transaction_date >= :startOfMonth"; // 【修正點】：使用 transaction_date
-        // ... (以下略) ...
+        $sql = "SELECT SUM(amount) FROM transactions WHERE user_id = :userId AND type = 'expense' AND transaction_date >= :startOfMonth";
         try {
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([':userId' => $userId, ':startOfMonth' => $startOfMonth]);
-            $result = $stmt->fetchColumn();
-            return (float) ($result ?? 0);
+            return (float) ($stmt->fetchColumn() ?? 0);
         } catch (PDOException $e) {
-            error_log("Query Total Expense failed: " . $e->getMessage());
             return 0.0;
         }
     }
 
-    /**
-     * 🌟 新增：取得本月總收入
-     */
     public function getTotalIncomeByMonth(int $userId): float {
         $startOfMonth = date('Y-m-01');
-        
-        $sql = "SELECT SUM(amount) FROM transactions 
-                WHERE user_id = :userId 
-                  AND type = 'income' 
-                  AND transaction_date >= :startOfMonth";
-
+        $sql = "SELECT SUM(amount) FROM transactions WHERE user_id = :userId AND type = 'income' AND transaction_date >= :startOfMonth";
         try {
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([':userId' => $userId, ':startOfMonth' => $startOfMonth]);
-            $result = $stmt->fetchColumn();
-            return (float) ($result ?? 0);
+            return (float) ($stmt->fetchColumn() ?? 0);
         } catch (PDOException $e) {
-            error_log("Query Total Income failed: " . $e->getMessage());
             return 0.0;
         }
     }
 
     /**
-     * 🌟 升級版：獲取指定時間範圍內的收支趨勢
+     * 🟢 既有方法 (給帳戶頁面用)：只分「收入」與「支出」兩條線
      */
     public function getTrendData(int $userId, string $startDate, string $endDate): array {
-        // 1. 產生完整的月份列表 (確保即使該月沒資料，圖表也不會斷掉)
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
-        // 調整結束日期以包含當月
         $end->modify('last day of this month'); 
-        
         $interval = DateInterval::createFromDateString('1 month');
         $period = new DatePeriod($start, $interval, $end);
 
@@ -121,70 +93,76 @@ class TransactionService {
             $data[$dt->format("Y-m")] = ['income' => 0, 'expense' => 0];
         }
 
-        // 2. 資料庫查詢
-        $sql = "SELECT 
-                    DATE_FORMAT(transaction_date, '%Y-%m') as month, 
-                    type, 
-                    SUM(amount) as total 
+        $sql = "SELECT DATE_FORMAT(transaction_date, '%Y-%m') as month, type, SUM(amount) as total 
                 FROM transactions 
-                WHERE user_id = :userId 
-                  AND transaction_date BETWEEN :startDate AND :endDate
-                GROUP BY month, type
-                ORDER BY month ASC";
+                WHERE user_id = :userId AND transaction_date BETWEEN :startDate AND :endDate
+                GROUP BY month, type ORDER BY month ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                ':userId' => $userId, 
-                ':startDate' => $startDate, 
-                ':endDate' => $endDate
-            ]);
+            $stmt->execute([':userId' => $userId, ':startDate' => $startDate, ':endDate' => $endDate]);
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // 3. 填入數據
             foreach ($results as $row) {
-                $m = $row['month'];
-                $type = $row['type'];
-                // 確保月份在我們生成的範圍內才填入
-                if (isset($data[$m])) {
-                    $data[$m][$type] = (float)$row['total'];
+                if (isset($data[$row['month']])) {
+                    $data[$row['month']][$row['type']] = (float)$row['total'];
                 }
             }
-
             return $data; 
         } catch (PDOException $e) {
-            error_log("TransactionService getTrendData failed: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * 🌟 新增方法 (給總覽頁面用)：依據「分類 (Category)」統計多條線
+     */
+    public function getCategoryTrendData(int $userId, string $startDate, string $endDate): array {
+        $start = new DateTime($startDate);
+        $end = new DateTime($endDate);
+        $end->modify('last day of this month'); 
+        $interval = DateInterval::createFromDateString('1 month');
+        $period = new DatePeriod($start, $interval, $end);
+
+        // 初始化結構: ['2023-01' => [], '2023-02' => [] ...]
+        $data = [];
+        foreach ($period as $dt) {
+            $data[$dt->format("Y-m")] = [];
+        }
+
+        // 資料庫查詢：改為依 month 和 category 分組
+        $sql = "SELECT DATE_FORMAT(transaction_date, '%Y-%m') as month, category, SUM(amount) as total 
+                FROM transactions 
+                WHERE user_id = :userId AND transaction_date BETWEEN :startDate AND :endDate
+                GROUP BY month, category ORDER BY month ASC";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([':userId' => $userId, ':startDate' => $startDate, ':endDate' => $endDate]);
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($results as $row) {
+                $m = $row['month'];
+                $cat = $row['category'];
+                if (isset($data[$m])) {
+                    $data[$m][$cat] = (float)$row['total'];
+                }
+            }
+            return $data; 
+        } catch (PDOException $e) {
+            error_log("getCategoryTrendData failed: " . $e->getMessage());
             return [];
         }
     }
     
-    /**
-     * 取得本月指定類型(收入/支出)的分類統計
-     */
     public function getMonthlyBreakdown(int $userId, string $type): array {
+        // ... (保持原樣)
         $startOfMonth = date('Y-m-01');
-        
-        $sql = "SELECT category, SUM(amount) as total 
-                FROM transactions 
-                WHERE user_id = :userId 
-                  AND type = :type 
-                  AND transaction_date >= :startOfMonth
-                GROUP BY category
-                ORDER BY total DESC";
-
+        $sql = "SELECT category, SUM(amount) as total FROM transactions WHERE user_id = :userId AND type = :type AND transaction_date >= :startOfMonth GROUP BY category ORDER BY total DESC";
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                ':userId' => $userId, 
-                ':type' => $type,
-                ':startOfMonth' => $startOfMonth
-            ]);
-            
+            $stmt->execute([':userId' => $userId, ':type' => $type, ':startOfMonth' => $startOfMonth]);
             return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-            
-        } catch (PDOException $e) {
-            error_log("Query Breakdown ({$type}) failed: " . $e->getMessage());
-            return [];
-        }
+        } catch (PDOException $e) { return []; }
     }
 }
