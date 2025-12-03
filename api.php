@@ -21,6 +21,7 @@ require_once 'src/UserService.php';
 require_once 'src/AssetService.php'; 
 require_once 'src/TransactionService.php'; 
 require_once 'src/ExchangeRateService.php'; 
+require_once 'src/GeminiService.php';
 
 /**
  * LIFF 專用驗證函式：使用 ID Token 遠端驗證 Line User ID
@@ -202,11 +203,28 @@ try {
             }
             break;
         
-        // 🌟 新增：AI 資產分析路由
+        // 🌟 修改：AI 資產與收支綜合分析
         case 'analyze_portfolio':
+            // 1. 獲取資產存量 (Stock)
             $assetData = $assetService->getNetWorthSummary($dbUserId);
+            
+            // 2. 獲取本月收支流量 (Flow)
+            $monthlyIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
+            $monthlyExpense = $transactionService->getTotalExpenseByMonth($dbUserId);
+            
+            // 3. 打包數據
+            $analysisData = [
+                'assets' => $assetData,
+                'flow' => [
+                    'income' => $monthlyIncome,
+                    'expense' => $monthlyExpense
+                ]
+            ];
+
+            // 4. 呼叫 AI
             $geminiService = new GeminiService();
-            $analysisText = $geminiService->analyzePortfolio($assetData);
+            $analysisText = $geminiService->analyzePortfolio($analysisData);
+            
             $response = ['status' => 'success', 'data' => $analysisText];
             break;
         
@@ -222,7 +240,7 @@ try {
             $trendData = $transactionService->getTrendData($dbUserId, $start, $end);
             $response = ['status' => 'success', 'data' => $trendData];
             break;
-            
+
         default:
             // 保持預設的錯誤訊息
             break;

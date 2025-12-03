@@ -187,13 +187,19 @@ async function fetchTrendData() {
 async function fetchAIAnalysis() {
     aiLoading.value = true;
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_portfolio`);
+    
+    // 🌟 修改這裡：加入 response.ok 的判斷與 else 區塊
     if (response && response.ok) {
         const result = await response.json();
         if (result.status === 'success') {
             aiAnalysis.value = result.data;
         } else {
-            aiAnalysis.value = "AI 連線失敗。";
+            aiAnalysis.value = "AI 分析回傳錯誤: " + result.message;
         }
+    } else {
+        // 🌟 新增：如果 API 失敗 (例如 500 錯誤)，跳出提示
+        alert("連線失敗，請檢查後端日誌。"); 
+        aiAnalysis.value = "系統發生錯誤，無法進行分析。";
     }
     aiLoading.value = false;
 }
