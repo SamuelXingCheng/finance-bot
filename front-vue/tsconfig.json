@@ -1,0 +1,9 @@
+// tsconfig.json
+{
+  "files": [], // 確保 files 陣列為空
+  "references": [
+    // 解決 TS6306/TS6310 錯誤：確保這些引用的檔案本身是正確配置的
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}

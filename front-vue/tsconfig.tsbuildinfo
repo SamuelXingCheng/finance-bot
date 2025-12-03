@@ -1,0 +1,1 @@
+{"root":["./src/main.ts","./src/vue-shims.d.ts","./src/app.vue","./src/components/helloworld.vue","./src/views/accountmanagerview.vue","./src/views/dashboardview.vue"],"errors":true,"version":"5.9.3"}
