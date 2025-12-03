@@ -323,11 +323,77 @@ try {
                 // ====================================================
                 // 【記帳查詢 / 報表指令】
                 // ====================================================
-                elseif (!$isProcessed && in_array($text, ['查詢', '本月支出', '報表', '總覽', '支出', '收入'])) {
+                elseif (!$isProcessed && in_array($text, ['查詢收支', '收支出', '報表', '總覽', '支出', '收入'])) {
                     
-                    // 假設這裡有完整的 Flex 報表邏輯
-                    // $lineService->replyFlexMessage($replyToken, ...);
+                    // 1. 獲取本月收支數據
+                    $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
+                    $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
+                    $netIncome = $totalIncome - $totalExpense;
+
+                    // 2. 獲取總資產淨值 (作為參考)
+                    $assetResult = $assetService->getNetWorthSummary($dbUserId);
+                    $globalNetWorth = $assetResult['global_twd_net_worth'] ?? 0;
+
+                    // 3. 數字格式化
+                    $fmtExpense = number_format($totalExpense);
+                    $fmtIncome = number_format($totalIncome);
+                    $fmtNet = number_format($netIncome);
+                    $fmtAsset = number_format($globalNetWorth);
                     
+                    // 根據結餘決定顏色 (正數綠色，負數紅色)
+                    $balanceColor = $netIncome >= 0 ? '#1DB446' : '#FF334B';
+
+                    // 4. 組裝 Flex Message
+                    $flexPayload = [
+                        'type' => 'bubble',
+                        'size' => 'kilo',
+                        'header' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'backgroundColor' => '#f7f9fc',
+                            'paddingAll' => 'lg',
+                            'contents' => [
+                                ['type' => 'text', 'text' => '📊 本月財務概況', 'weight' => 'bold', 'size' => 'lg', 'color' => '#555555']
+                            ]
+                        ],
+                        'body' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'spacing' => 'md',
+                            'contents' => [
+                                // 收入列
+                                ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
+                                    ['type' => 'text', 'text' => '總收入', 'size' => 'sm', 'color' => '#555555', 'flex' => 1],
+                                    ['type' => 'text', 'text' => "NT$ {$fmtIncome}", 'size' => 'sm', 'color' => '#1DB446', 'weight' => 'bold', 'align' => 'end', 'flex' => 2]
+                                ]],
+                                // 支出列
+                                ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
+                                    ['type' => 'text', 'text' => '總支出', 'size' => 'sm', 'color' => '#555555', 'flex' => 1],
+                                    ['type' => 'text', 'text' => "NT$ {$fmtExpense}", 'size' => 'sm', 'color' => '#FF334B', 'weight' => 'bold', 'align' => 'end', 'flex' => 2]
+                                ]],
+                                ['type' => 'separator', 'margin' => 'md'],
+                                // 結餘列 (放大顯示)
+                                ['type' => 'box', 'layout' => 'horizontal', 'margin' => 'md', 'contents' => [
+                                    ['type' => 'text', 'text' => '本月結餘', 'size' => 'md', 'weight' => 'bold', 'color' => '#333333', 'flex' => 1, 'gravity' => 'center'],
+                                    ['type' => 'text', 'text' => "NT$ {$fmtNet}", 'size' => 'xl', 'weight' => 'bold', 'color' => $balanceColor, 'align' => 'end', 'flex' => 2]
+                                ]],
+                            ]
+                        ],
+                        'footer' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'contents' => [
+                                ['type' => 'text', 'text' => "💰 目前總資產: NT$ {$fmtAsset}", 'size' => 'xs', 'color' => '#aaaaaa', 'align' => 'center', 'margin' => 'sm'],
+                                ['type' => 'button', 'action' => [
+                                    'type' => 'message', 
+                                    'label' => '查看資產明細', 
+                                    'text' => '查詢資產'
+                                ], 'height' => 'sm', 'style' => 'link', 'margin' => 'sm']
+                            ]
+                        ]
+                    ];
+
+                    $lineService->replyFlexMessage($replyToken, "本月財務報表", $flexPayload);
                     $isProcessed = true;
                 }
                 
