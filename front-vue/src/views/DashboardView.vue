@@ -2,6 +2,61 @@
   <div class="dashboard-container">
     
     <div class="card-section">
+      <div class="data-box premium-box">
+        <div class="premium-content">
+          <div class="premium-header">
+            <h2 class="premium-title">升級 Premium 會員</h2>
+            <span class="premium-badge">PRO</span>
+          </div>
+          
+          <div class="premium-price">
+            每月僅需 <span class="price-tag">$3 USD</span> (約 NT$95)
+          </div>
+
+          <p class="premium-desc">
+            訂閱會員可立即解鎖以下進階功能，**享受無限制的智慧服務**，真正掌握每一分財富：
+        </p>
+        <ul class="feature-list">
+            <li>
+                **無限次 AI 口語記帳：** 只需用日常對話的方式輸入收支，AI 即可精準識別、自動歸類。
+                **【免費版限制：每日僅限使用 3 次口語記帳】**
+            </li>
+            <li>
+                **無限次 AI 財務健檢：** 整合您的記帳、資產配置情況，**即時**獲取個人化的理財建議與知識。
+                **【免費版限制：每年僅能使用 2 次 AI 財務健檢】**
+            </li>
+            <li>
+                **解鎖長期歷史趨勢圖：** 告別短期數據，完整掌握您的收支變化與財富積累的長期趨勢。
+            </li>
+            <li>
+                **資產負債總覽表：** 一目瞭然您的淨值結構、資產與負債的完整配置，做出精準的財務決策。
+            </li>
+            <li>
+                **多幣種整合追蹤：** 專為投資加密貨幣、外幣和海外資產的用戶設計，將所有幣種集中管理，無需手動換算。
+            </li>
+        </ul>
+          
+          <div class="payment-notice">
+            <p>⚠<strong>付款前請注意：</strong></p>
+            <ul>
+              <li>🔹 <strong>BMC 支付：</strong>請務必在付款頁面填寫與下方綁定<strong>相同的 Email</strong>，以便系統自動開通。</li>
+              <li>🔹 <strong>加密貨幣：</strong>請選擇 <strong>USDC (Polygon 鏈)</strong> 進行轉帳，轉錯鏈將無法找回資金。</li>
+            </ul>
+          </div>
+
+          <div class="payment-buttons">
+              <button class="btn-pay btn-bmc" @click="openPaymentModal('bmc')">
+                  Apple Pay / 信用卡 / Buy me a Coffee (BMC)
+              </button>
+              <button class="btn-pay btn-crypto" @click="openPaymentModal('crypto')">
+                  加密貨幣支付
+              </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-section">
       <div class="section-header">
         <h2>快速記帳</h2>
       </div>
@@ -41,7 +96,7 @@
                 <option value="CNY">人民幣 (CNY)</option>
                 <option value="EUR">歐元 (EUR)</option>
                 <option value="USDT">泰達幣 (USDT)</option>
-                <option value="CUSTOM">➕ 自行輸入...</option>
+                <option value="CUSTOM">自行輸入...</option>
               </select>
             </div>
           </div>
@@ -145,7 +200,7 @@
         <h2>近期收支明細</h2>
       </div>
       
-      <div class="data-box"> 
+      <div class="data-box tx-list-wrapper"> 
           <div class="list-controls">
               <h3>明細列表</h3>
               <div class="month-selector">
@@ -219,6 +274,24 @@
       </div>
     </div>
 
+    <div v-if="isPaymentModalOpen" class="modal-overlay" @click.self="isPaymentModalOpen = false">
+      <div class="modal-content payment-modal">
+        <div class="modal-header">
+          <h3>綁定 Email</h3>
+          <button class="close-btn" @click="isPaymentModalOpen = false">×</button>
+        </div>
+        <div class="modal-body">
+            <p class="text-sm text-gray-600 mb-4">
+                請輸入您付款時使用的 <strong>Email</strong>，系統將依此自動開通權限。
+            </p>
+            <input type="email" v-model="paymentEmail" placeholder="name@example.com" class="input-std mb-4">
+            <button class="save-btn" @click="handleLinkAndPay" :disabled="isLinking">
+                {{ isLinking ? '處理中...' : '綁定並前往付款' }}
+            </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -257,10 +330,19 @@ const isCustomCurrency = ref(false);
 
 const transactions = ref([]);
 const txLoading = ref(false);
-const currentListMonth = ref(new Date().toISOString().substring(0, 7)); // YYYY-MM
+const currentListMonth = ref(new Date().toISOString().substring(0, 7)); 
 
 const isEditModalOpen = ref(false);
 const editForm = ref({}); 
+
+// 支付相關狀態
+const isPaymentModalOpen = ref(false);
+const isLinking = ref(false);
+const paymentEmail = ref('');
+const selectedPaymentMethod = ref('bmc'); 
+
+const BMC_URL = 'https://buymeacoffee.com/finbot'; 
+const NOWPAYMENTS_URL = 'https://nowpayments.io'; // 請替換成您的支付連結
 
 const categoryMap = {
   'Food': '飲食', 'Transport': '交通', 'Entertainment': '娛樂', 'Shopping': '購物',
@@ -283,10 +365,41 @@ function resetCurrency() {
 }
 function forceUppercase() { transactionForm.value.currency = transactionForm.value.currency.toUpperCase(); }
 
+// 支付邏輯
+function openPaymentModal(method) {
+    selectedPaymentMethod.value = method;
+    isPaymentModalOpen.value = true;
+}
+
+async function handleLinkAndPay() {
+    if (!paymentEmail.value) { alert('請輸入 Email'); return; }
+    
+    isLinking.value = true;
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=link_bmc`, {
+        method: 'POST',
+        body: JSON.stringify({ email: paymentEmail.value })
+    });
+    
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            isPaymentModalOpen.value = false;
+            const targetUrl = selectedPaymentMethod.value === 'crypto' ? NOWPAYMENTS_URL : BMC_URL;
+            window.open(targetUrl, '_blank');
+            alert('已跳轉至付款頁面，完成付款後系統將自動開通權限！');
+        } else {
+            alert(result.message);
+        }
+    } else {
+        alert('API 連線失敗');
+    }
+    isLinking.value = false;
+}
+
+// API
 async function fetchTransactions() {
     txLoading.value = true;
     const monthToSend = currentListMonth.value.substring(0, 7); 
-    // 確保這裡的 action 是 'get_transactions'
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_transactions&month=${monthToSend}`);
     
     if (response && response.ok) {
@@ -336,13 +449,8 @@ function refreshAllData() {
     fetchTransactions(); 
 }
 
-// 監聽月份選擇器變化
-watch(currentListMonth, (newMonth) => {
-    fetchTransactions();
-});
+watch(currentListMonth, (newMonth) => { fetchTransactions(); });
 
-
-// API: 收支與趨勢 (保持不變)
 async function fetchExpenseData() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=monthly_expense_breakdown`);
     if (response && response.ok) {
@@ -366,7 +474,7 @@ async function fetchTrendData() {
   }
 }
 
-// 圖表渲染 (保持不變)
+// 圖表渲染
 function toggleChart(type) { currentChartType.value = type; nextTick(() => { renderChart(); }); }
 function renderChart() {
   if (chartInstance) chartInstance.destroy();
@@ -404,9 +512,9 @@ function renderTrendChart(data) {
     trendChart = new Chart(trendChartCanvas.value, {
         type: 'line', data: { labels: labels, datasets: datasets },
         options: { 
-            responsive: true, maintainAspectRatio: false, 
+            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, 
             plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, datalabels: { display: false } }, 
-            scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' } }, x: { grid: { display: false } } } 
+            scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } }, x: { grid: { display: false } } } 
         }
     });
 }
@@ -440,6 +548,29 @@ onMounted(() => {
 .card-section { margin-bottom: 24px; }
 .section-header h2 { font-size: 1.1rem; font-weight: 600; color: #8c7b75; margin-bottom: 12px; margin-left: 4px; position: relative; }
 .data-box { background-color: #ffffff; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(220, 210, 200, 0.3); border: 1px solid #f0ebe5; transition: transform 0.2s ease; }
+
+/* 🌟 Premium Box Style */
+.premium-box { background: linear-gradient(135deg, #fff8f0 0%, #fff 100%); border: 1px solid #eeddcc; position: relative; overflow: hidden; }
+.premium-content { position: relative; z-index: 1; }
+.premium-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.premium-icon { font-size: 1.5rem; }
+.premium-title { font-size: 1.1rem; font-weight: bold; color: #b45309; margin: 0; }
+.premium-badge { font-size: 0.7rem; background: #b45309; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+.premium-price { font-size: 1rem; color: #555; margin-bottom: 12px; font-weight: 500; }
+.price-tag { color: #d97706; font-weight: bold; font-size: 1.1rem; }
+.premium-desc { font-size: 0.9rem; color: #666; margin-bottom: 12px; line-height: 1.5; }
+.feature-list { list-style: none; padding: 0; margin: 0 0 16px 0; }
+.feature-list li { font-size: 0.9rem; color: #555; margin-bottom: 6px; }
+.payment-buttons { display: flex; gap: 10px; width: 100%; flex-wrap: wrap; }
+.btn-pay { flex: 1; padding: 10px; border-radius: 12px; font-weight: bold; border: none; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1); transition: transform 0.1s; font-size: 0.9rem; min-width: 120px; }
+.btn-pay:hover { transform: translateY(-1px); }
+.btn-bmc { background-color: #FFDD00; color: #000; }
+.btn-crypto { background-color: #3861FB; color: #fff; }
+
+/* 🌟 Payment Notice */
+.payment-notice { background-color: #fff; border: 1px dashed #d4a373; border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 0.85rem; color: #666; }
+.payment-notice ul { padding-left: 0; list-style: none; margin: 6px 0 0 0; }
+.payment-notice li { margin-bottom: 4px; }
 
 .input-minimal { width: 100%; padding: 10px 0; border: none; border-bottom: 1px solid #e0e0e0; background: transparent; font-size: 16px; color: #333; border-radius: 0; transition: border-color 0.3s; box-sizing: border-box; }
 .input-minimal:focus { outline: none; border-bottom: 1px solid #d4a373; }
@@ -485,46 +616,27 @@ onMounted(() => {
 .filter-btn:hover { background-color: #c19263; }
 .mb-4 { margin-bottom: 16px; }
 
-/* Message */
 .msg-processing { color: #999; margin-top: 15px; font-size: 0.9rem; text-align: center;}
 .msg-success { background-color: #f0f7f0; color: #556b2f; padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; text-align: center; }
 .msg-error { background-color: #fff0f0; color: #d67a7a; padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; text-align: center; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.5s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
-/* 🌟 列表樣式 - Data Box 與內容優化 */
-/* 列表篩選器標頭 */
+/* 列表樣式 */
+.tx-list-wrapper { padding: 24px; }
 .list-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #f0ebe5; padding-bottom: 12px; }
 .list-controls h3 { margin: 0; font-size: 1rem; color: #8c7b75; }
 .month-selector { display: flex; align-items: center; }
-
-/* 🌟 修正月輸入框的樣式，使其看起來像一個選擇器，而不是單純的文字框 */
-.month-input-styled { 
-    border: 1px solid #ddd; 
-    padding: 4px 10px; 
-    border-radius: 20px; 
-    font-size: 0.9rem; 
-    color: #666; 
-    background: #f9f9f9; 
-    outline: none; 
-    box-sizing: border-box;
-    /* 確保其為日期選擇器而非純文字框 */
-    appearance: none;
-    -webkit-appearance: none;
-}
-
+.month-input-styled { border: 1px solid #ddd; padding: 4px 10px; border-radius: 20px; font-size: 0.9rem; color: #666; background: #f9f9f9; outline: none; box-sizing: border-box; }
 .tx-list { display: flex; flex-direction: column; gap: 12px; }
 .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #eee; }
 .tx-item:last-child { border-bottom: none; }
-
 .tx-left { display: flex; flex-direction: column; gap: 4px; min-width: 60px; }
 .tx-date { font-size: 0.8rem; color: #aaa; }
 .tx-cat-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; display: inline-block; width: fit-content; font-weight: bold; }
 .tx-cat-badge.expense { color: #c44536; background: #ffe5d9; }
 .tx-cat-badge.income { color: #556b2f; background: #e9edc9; }
-
 .tx-mid { flex: 1; padding: 0 12px; font-weight: 500; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 .tx-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .tx-amount { font-weight: bold; font-size: 1rem; }
 .tx-actions { display: flex; gap: 10px; }
@@ -532,7 +644,7 @@ onMounted(() => {
 .text-btn:hover { color: #d4a373; }
 .empty-msg { text-align: center; padding: 20px; color: #aaa; }
 
-/* Modal 與 Input */
+/* Modal 樣式 */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px; }
 .modal-content { background: white; width: 100%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s ease-out; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -543,4 +655,8 @@ onMounted(() => {
 .save-btn { width: 100%; padding: 12px; background: #d4a373; color: white; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 10px; }
 .mt-2 { margin-top: 12px; }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 480px) {
+    .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .date-controls { width: 100%; justify-content: space-between; }
+}
 </style>

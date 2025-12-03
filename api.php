@@ -274,6 +274,26 @@ try {
                 $response = ['status' => 'error', 'message' => '更新失敗'];
             }
             break;
+        
+        // 🌟 新增：綁定 BMC Email
+        case 'link_bmc':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $email = trim($input['email'] ?? '');
+            
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $response = ['status' => 'error', 'message' => 'Email 格式不正確'];
+                break;
+            }
+
+            if ($userService->linkBmcEmail($dbUserId, $email)) {
+                $response = ['status' => 'success', 'message' => '綁定成功，請前往付款'];
+            } else {
+                $response = ['status' => 'error', 'message' => '綁定失敗'];
+            }
+            break;
 
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
