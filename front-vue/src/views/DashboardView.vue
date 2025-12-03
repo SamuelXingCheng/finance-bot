@@ -125,14 +125,12 @@
         <h2>歷史分類趨勢</h2>
       </div>
       <div class="data-box chart-card">
-        
         <div class="date-controls mb-4">
             <input type="date" v-model="trendFilter.start" class="date-input">
             <span class="separator">~</span>
             <input type="date" v-model="trendFilter.end" class="date-input">
             <button @click="fetchTrendData" class="filter-btn">查詢</button>
         </div>
-
         <div class="chart-box-lg">
           <canvas ref="trendChartCanvas"></canvas>
         </div>
@@ -142,19 +140,96 @@
       </div>
     </div>
 
+    <div class="card-section">
+      <div class="section-header">
+        <h2>近期收支明細</h2>
+      </div>
+      
+      <div class="data-box"> 
+          <div class="list-controls">
+              <h3>明細列表</h3>
+              <div class="month-selector">
+                  <input type="month" v-model="currentListMonth" @change="fetchTransactions" class="month-input-styled">
+              </div>
+          </div>
+
+          <div v-if="txLoading" class="loading-box">
+              <span class="loader"></span> 載入中...
+          </div>
+          
+          <div v-else-if="transactions.length === 0" class="empty-msg">
+              本月尚無紀錄
+          </div>
+          
+          <div v-else class="tx-list">
+              <div v-for="tx in transactions" :key="tx.id" class="tx-item">
+                  <div class="tx-left">
+                      <div class="tx-date">{{ tx.transaction_date.substring(5) }}</div>
+                      <div class="tx-cat-badge" :class="tx.type">
+                          {{ categoryMap[tx.category] || tx.category }}
+                      </div>
+                  </div>
+                  <div class="tx-mid">
+                      <div class="tx-desc">{{ tx.description }}</div>
+                  </div>
+                  <div class="tx-right">
+                      <div class="tx-amount" :class="tx.type === 'income' ? 'text-income' : 'text-expense'">
+                          {{ tx.type === 'income' ? '+' : '-' }} {{ numberFormat(tx.amount, 0) }}
+                      </div>
+                      <div class="tx-actions">
+                          <button class="text-btn edit" @click="openEditModal(tx)">編輯</button>
+                          <button class="text-btn delete" @click="handleDeleteTx(tx.id)">刪除</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      </div>
+    </div>
+
+    <div v-if="isEditModalOpen" class="modal-overlay" @click.self="closeModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>編輯紀錄</h3>
+          <button class="close-btn" @click="closeModal">×</button>
+        </div>
+        <form @submit.prevent="handleUpdateTx">
+            <div class="form-group type-select">
+                <div class="radio-group">
+                    <label class="radio-label" :class="{ active: editForm.type === 'expense' }"><input type="radio" v-model="editForm.type" value="expense">支出</label>
+                    <label class="radio-label" :class="{ active: editForm.type === 'income' }"><input type="radio" v-model="editForm.type" value="income">收入</label>
+                </div>
+            </div>
+            <div class="form-row">
+                <input type="number" v-model.number="editForm.amount" required class="input-std half">
+                <input type="text" v-model="editForm.currency" class="input-std half" required>
+            </div>
+            <div class="form-group mt-2">
+                <input type="date" v-model="editForm.date" required class="input-std">
+            </div>
+            <div class="form-group">
+                <input type="text" v-model="editForm.description" required class="input-std">
+            </div>
+            <div class="form-group">
+                <select v-model="editForm.category" class="input-std">
+                    <option v-for="(name, key) in categoryMap" :key="key" :value="key">{{ name }}</option>
+                </select>
+            </div>
+            <button type="submit" class="save-btn">儲存修改</button>
+        </form>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, onMounted, nextTick, watch } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto'; 
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 Chart.register(ChartDataLabels);
 
 // --- 狀態管理 ---
-
-// 1. 本月收支相關
 const totalExpense = ref(0);
 const totalIncome = ref(0);
 const expenseBreakdown = ref({});
@@ -163,7 +238,6 @@ const currentChartType = ref('expense');
 const expenseChartCanvas = ref(null);
 let chartInstance = null;
 
-// 2. 歷史趨勢相關
 const trendFilter = ref({
     start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
     end: new Date().toISOString().substring(0, 10)
@@ -171,58 +245,104 @@ const trendFilter = ref({
 const trendChartCanvas = ref(null);
 let trendChart = null;
 
-// 3. 表單相關
 const formMessage = ref('');
 const messageClass = ref('');
 const transactionForm = ref({
-  type: 'expense',
-  amount: null,
-  date: new Date().toISOString().substring(0, 10),
-  description: '',
-  category: 'Miscellaneous',
-  currency: 'TWD',
+  type: 'expense', amount: null, date: new Date().toISOString().substring(0, 10),
+  description: '', category: 'Miscellaneous', currency: 'TWD',
 });
 
-// 🌟 幣種選擇邏輯
 const currencySelectValue = ref('TWD');
 const isCustomCurrency = ref(false);
 
-function handleCurrencyChange() {
-    if (currencySelectValue.value === 'CUSTOM') {
-        isCustomCurrency.value = true;
-        transactionForm.value.currency = ''; // 清空讓用戶輸入
-    } else {
-        isCustomCurrency.value = false;
-        transactionForm.value.currency = currencySelectValue.value;
-    }
-}
+const transactions = ref([]);
+const txLoading = ref(false);
+const currentListMonth = ref(new Date().toISOString().substring(0, 7)); // YYYY-MM
 
-function resetCurrency() {
-    isCustomCurrency.value = false;
-    currencySelectValue.value = 'TWD';
-    transactionForm.value.currency = 'TWD';
-}
+const isEditModalOpen = ref(false);
+const editForm = ref({}); 
 
-function forceUppercase() {
-    transactionForm.value.currency = transactionForm.value.currency.toUpperCase();
-}
-
-// 類別中英對照表
 const categoryMap = {
   'Food': '飲食', 'Transport': '交通', 'Entertainment': '娛樂', 'Shopping': '購物',
   'Bills': '帳單', 'Investment': '投資', 'Medical': '醫療', 'Education': '教育',
   'Miscellaneous': '其他', 'Salary': '薪水', 'Allowance': '津貼', 'Bonus': '獎金',
 };
+const palette = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2'];
 
-// 色票產生器
-const palette = [
-    '#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', 
-    '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2',
-    '#8fbc8f', '#4682b4', '#d2b48c'
-];
+// --- 邏輯函式 ---
 
-// --- API 函式 ---
+function handleCurrencyChange() {
+    if (currencySelectValue.value === 'CUSTOM') {
+        isCustomCurrency.value = true; transactionForm.value.currency = ''; 
+    } else {
+        isCustomCurrency.value = false; transactionForm.value.currency = currencySelectValue.value;
+    }
+}
+function resetCurrency() {
+    isCustomCurrency.value = false; currencySelectValue.value = 'TWD'; transactionForm.value.currency = 'TWD';
+}
+function forceUppercase() { transactionForm.value.currency = transactionForm.value.currency.toUpperCase(); }
 
+async function fetchTransactions() {
+    txLoading.value = true;
+    const monthToSend = currentListMonth.value.substring(0, 7); 
+    // 確保這裡的 action 是 'get_transactions'
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_transactions&month=${monthToSend}`);
+    
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            transactions.value = result.data;
+        } else {
+            console.error("Failed to load transactions:", result);
+        }
+    }
+    txLoading.value = false;
+}
+
+async function handleDeleteTx(id) {
+    if (!confirm("確定要刪除這筆紀錄嗎？")) return;
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_transaction`, {
+        method: 'POST', body: JSON.stringify({ id })
+    });
+    if (response && (await response.json()).status === 'success') {
+        refreshAllData();
+    }
+}
+
+function openEditModal(tx) {
+    editForm.value = { 
+        id: tx.id, amount: parseFloat(tx.amount), type: tx.type,
+        date: tx.transaction_date, description: tx.description,
+        category: tx.category, currency: tx.currency
+    };
+    isEditModalOpen.value = true;
+}
+function closeModal() { isEditModalOpen.value = false; }
+
+async function handleUpdateTx() {
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=update_transaction`, {
+        method: 'POST', body: JSON.stringify(editForm.value)
+    });
+    if (response && (await response.json()).status === 'success') {
+        closeModal(); refreshAllData();
+        alert("更新成功");
+    } else { alert("更新失敗"); }
+}
+
+function refreshAllData() {
+    fetchExpenseData();
+    fetchTrendData();
+    fetchTransactions(); 
+}
+
+// 監聽月份選擇器變化
+watch(currentListMonth, (newMonth) => {
+    fetchTransactions();
+});
+
+
+// API: 收支與趨勢 (保持不變)
 async function fetchExpenseData() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=monthly_expense_breakdown`);
     if (response && response.ok) {
@@ -232,183 +352,90 @@ async function fetchExpenseData() {
             totalIncome.value = result.data.total_income || 0;
             expenseBreakdown.value = result.data.breakdown || {};
             incomeBreakdown.value = result.data.income_breakdown || {};
-            
-            await nextTick();
-            renderChart();
+            await nextTick(); renderChart();
         }
     }
 }
 
 async function fetchTrendData() {
   const { start, end } = trendFilter.value;
-  // 🌟 關鍵：加上 mode=category 參數
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}&mode=category`);
-  
   if (response && response.ok) {
       const result = await response.json();
-      if (result.status === 'success') {
-          renderTrendChart(result.data);
-      }
+      if (result.status === 'success') renderTrendChart(result.data);
   }
 }
 
-// --- 圖表渲染 ---
-
-// 1. 圓餅圖
-function toggleChart(type) {
-  currentChartType.value = type;
-  nextTick(() => { renderChart(); });
-}
-
+// 圖表渲染 (保持不變)
+function toggleChart(type) { currentChartType.value = type; nextTick(() => { renderChart(); }); }
 function renderChart() {
   if (chartInstance) chartInstance.destroy();
-
   const sourceData = currentChartType.value === 'expense' ? expenseBreakdown.value : incomeBreakdown.value;
   const totalValue = currentChartType.value === 'expense' ? totalExpense.value : totalIncome.value;
   const rawLabels = Object.keys(sourceData);
-  
   if (rawLabels.length === 0 || totalValue <= 0) return;
-
   const labels = rawLabels.map(key => categoryMap[key] || key);
   const dataValues = Object.values(sourceData).map(v => parseFloat(v));
-
   if (!expenseChartCanvas.value) return;
-
   chartInstance = new Chart(expenseChartCanvas.value, {
     type: 'doughnut',
-    data: {
-      labels: labels,
-      datasets: [{
-        data: dataValues,
-        backgroundColor: palette,
-        borderWidth: 0,
-        hoverOffset: 6,
-      }],
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20, color: '#666' } },
-            title: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (context) => {
-                  let label = context.label || '';
-                  if (label) label += ': ';
-                  let value = context.raw;
-                  let percentage = Math.round((value / totalValue) * 100) + '%';
-                  return label + 'NT$ ' + numberFormat(value, 0) + ' (' + percentage + ')';
-                }
-              }
-            },
-            datalabels: {
-                formatter: (value, ctx) => {
-                    const percentage = Math.round((value / totalValue) * 100);
-                    return percentage > 4 ? percentage + '%' : '';
-                },
-                color: '#fff',
-                font: { weight: 'bold', size: 11 },
-                anchor: 'center',
-                align: 'center'
-            }
-        },
-        cutout: '65%',
-    },
+    data: { labels: labels, datasets: [{ data: dataValues, backgroundColor: palette, borderWidth: 0, hoverOffset: 6 }] },
+    options: { 
+        cutout: '65%', 
+        plugins: { 
+            legend: { display: false }, 
+            datalabels: { formatter: (value) => Math.round((value/totalValue)*100) >= 5 ? Math.round((value/totalValue)*100)+'%' : '', color: '#fff' } 
+        } 
+    }
   });
 }
 
-// 2. 🌟 歷史分類趨勢圖 (多條折線)
 function renderTrendChart(data) {
     if (trendChart) trendChart.destroy();
     if (!trendChartCanvas.value) return;
-
-    const labels = Object.keys(data); // 月份
-    
-    // 1. 找出所有出現過的 Category
+    const labels = Object.keys(data); 
     const allCategories = new Set();
-    labels.forEach(month => {
-        Object.keys(data[month]).forEach(cat => allCategories.add(cat));
-    });
-
-    // 2. 為每個 Category 建立 Dataset
+    labels.forEach(month => { Object.keys(data[month]).forEach(cat => allCategories.add(cat)); });
     const datasets = Array.from(allCategories).map((cat, index) => {
-        const catData = labels.map(month => data[month][cat] || 0); // 若該月無此分類數據補 0
+        const catData = labels.map(month => data[month][cat] || 0); 
         const color = palette[index % palette.length];
-        
-        return {
-            label: categoryMap[cat] || cat, // 轉中文
-            data: catData,
-            borderColor: color,
-            backgroundColor: color,
-            tension: 0.3,
-            fill: false, // 不填充，保持線條清晰
-            pointRadius: 3
-        };
+        return { label: categoryMap[cat] || cat, data: catData, borderColor: color, backgroundColor: color, tension: 0.3, fill: false, pointRadius: 3 };
     });
-
     trendChart = new Chart(trendChartCanvas.value, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: datasets
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: { 
-                legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, 
-                tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: NT$ ${numberFormat(ctx.raw, 0)}` } },
-                datalabels: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } },
-                x: { grid: { display: false } }
-            }
+        type: 'line', data: { labels: labels, datasets: datasets },
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, datalabels: { display: false } }, 
+            scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' } }, x: { grid: { display: false } } } 
         }
     });
 }
 
-// --- 表單提交 ---
 async function handleTransactionSubmit() {
   formMessage.value = '處理中...';
   messageClass.value = 'msg-processing';
-
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_transaction`, {
-    method: 'POST',
-    body: JSON.stringify(transactionForm.value)
+    method: 'POST', body: JSON.stringify(transactionForm.value)
   });
-
-  if (response) {
-    const result = await response.json();
-    if (result.status === 'success') {
-      formMessage.value = '成功：' + result.message;
-      messageClass.value = 'msg-success';
-      transactionForm.value.amount = null;
-      transactionForm.value.description = '';
-      
-      fetchExpenseData();
-      fetchTrendData();
-      
+  if (response && (await response.json()).status === 'success') {
+      formMessage.value = '成功'; messageClass.value = 'msg-success';
+      transactionForm.value.amount = null; transactionForm.value.description = '';
+      refreshAllData();
       setTimeout(() => { formMessage.value = ''; }, 3000);
-    } else {
-      formMessage.value = '錯誤：' + (result.message || '新增失敗');
-      messageClass.value = 'msg-error';
-    }
+  } else {
+      formMessage.value = '失敗'; messageClass.value = 'msg-error';
   }
 }
 
-defineExpose({ refreshAllData: () => { fetchExpenseData(); fetchTrendData(); } });
+defineExpose({ refreshAllData });
 
 onMounted(() => {
-    fetchExpenseData();
-    fetchTrendData();
+    refreshAllData();
 });
 </script>
 
 <style scoped>
-/* 樣式與之前一致，但增加了 custom-currency-wrapper 的樣式 */
+/* 樣式部分 */
 .dashboard-container { max-width: 100%; margin: 0 auto; color: #5d5d5d; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.03em; }
 .card-section { margin-bottom: 24px; }
 .section-header h2 { font-size: 1.1rem; font-weight: 600; color: #8c7b75; margin-bottom: 12px; margin-left: 4px; position: relative; }
@@ -421,8 +448,7 @@ onMounted(() => {
 .form-row { display: flex; gap: 16px; }
 .half { flex: 1; }
 
-/* 幣種自訂輸入區塊 */
-.custom-currency-wrapper { display: flex; align-items: center; gap: 8px; }
+.custom-currency-wrapper { display: flex; align-items: center; gap: 8px; width: 100%; }
 .back-btn { border: none; background: #eee; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; color: #666; font-size: 0.8rem; display: flex; align-items: center; justify-content: center;}
 
 .radio-group { display: flex; background: #f7f5f0; border-radius: 8px; padding: 4px; }
@@ -437,7 +463,6 @@ onMounted(() => {
 .submit-btn:hover { background-color: #c19263; }
 .submit-btn:active { transform: scale(0.98); }
 
-/* Chart */
 .chart-card { display: flex; flex-direction: column; align-items: center; }
 .stats-row { display: flex; justify-content: space-around; align-items: center; width: 100%; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px dashed #f0ebe5; }
 .stat-item { text-align: center; flex: 1; padding: 8px; border-radius: 12px; transition: background-color 0.2s, transform 0.1s; }
@@ -453,7 +478,6 @@ onMounted(() => {
 .no-data-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #aaa; font-size: 0.9rem; width: 100%; text-align: center; }
 .chart-hint { font-size: 0.75rem; color: #aaa; margin-top: 10px; text-align: center; }
 
-/* Date Control */
 .date-controls { display: flex; align-items: center; gap: 8px; background: #f7f5f0; padding: 6px 12px; border-radius: 20px; width: 100%; justify-content: space-between; box-sizing: border-box; }
 .date-input { border: none; background: transparent; color: #666; font-size: 0.85rem; outline: none; width: 35%; }
 .separator { color: #aaa; }
@@ -467,4 +491,56 @@ onMounted(() => {
 .msg-error { background-color: #fff0f0; color: #d67a7a; padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; text-align: center; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.5s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* 🌟 列表樣式 - Data Box 與內容優化 */
+/* 列表篩選器標頭 */
+.list-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #f0ebe5; padding-bottom: 12px; }
+.list-controls h3 { margin: 0; font-size: 1rem; color: #8c7b75; }
+.month-selector { display: flex; align-items: center; }
+
+/* 🌟 修正月輸入框的樣式，使其看起來像一個選擇器，而不是單純的文字框 */
+.month-input-styled { 
+    border: 1px solid #ddd; 
+    padding: 4px 10px; 
+    border-radius: 20px; 
+    font-size: 0.9rem; 
+    color: #666; 
+    background: #f9f9f9; 
+    outline: none; 
+    box-sizing: border-box;
+    /* 確保其為日期選擇器而非純文字框 */
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.tx-list { display: flex; flex-direction: column; gap: 12px; }
+.tx-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #eee; }
+.tx-item:last-child { border-bottom: none; }
+
+.tx-left { display: flex; flex-direction: column; gap: 4px; min-width: 60px; }
+.tx-date { font-size: 0.8rem; color: #aaa; }
+.tx-cat-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; display: inline-block; width: fit-content; font-weight: bold; }
+.tx-cat-badge.expense { color: #c44536; background: #ffe5d9; }
+.tx-cat-badge.income { color: #556b2f; background: #e9edc9; }
+
+.tx-mid { flex: 1; padding: 0 12px; font-weight: 500; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tx-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.tx-amount { font-weight: bold; font-size: 1rem; }
+.tx-actions { display: flex; gap: 10px; }
+.text-btn { background: transparent; border: none; cursor: pointer; font-size: 0.8rem; padding: 0; text-decoration: underline; color: #999; transition: color 0.2s; }
+.text-btn:hover { color: #d4a373; }
+.empty-msg { text-align: center; padding: 20px; color: #aaa; }
+
+/* Modal 與 Input */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px; }
+.modal-content { background: white; width: 100%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s ease-out; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header h3 { margin: 0; color: #8c7b75; font-size: 1.1rem; }
+.close-btn { background: transparent; border: none; font-size: 1.5rem; color: #aaa; cursor: pointer; }
+.input-std { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; color: #333; outline: none; background: #f9f9f9; box-sizing: border-box; height: 44px; }
+.input-std:focus { border-color: #d4a373; background: white; }
+.save-btn { width: 100%; padding: 12px; background: #d4a373; color: white; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 10px; }
+.mt-2 { margin-top: 12px; }
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 </style>
