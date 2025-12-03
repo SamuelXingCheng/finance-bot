@@ -1,79 +1,64 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  /* --- 文青米色系色票 (Muji / Cafe Style) --- */
+  --bg-body: #f9f7f2;       /* 溫暖的米白色背景 */
+  --bg-card: #ffffff;       /* 純白卡片背景 */
+  --bg-nav: #ffffff;        /* 導航列背景 */
+  
+  --text-primary: #5d5d5d;  /* 柔和的深灰色 (取代純黑) */
+  --text-secondary: #8c8c8c;/* 淺灰色 */
+  --text-accent: #a98467;   /* 暖棕色 (強調色) */
+  
+  --color-primary: #d4a373; /* 經典大地色/奶茶色 (按鈕、重點) */
+  --color-success: #ccd5ae; /* 抹茶綠 (成功/收入) */
+  --color-danger: #e5989b;  /* 乾燥玫瑰粉 (錯誤/支出) */
+  
+  --shadow-soft: 0 4px 20px rgba(212, 163, 115, 0.15); /* 暖色調陰影 */
+  --border-radius: 16px;    /* 圓潤的邊角 */
+  
+  /* 字體優化 */
+  font-family: "Helvetica Neue", Helvetica, "PingFang TC", "Microsoft JhengHei", Arial, sans-serif;
+  line-height: 1.6;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+  color: var(--text-primary);
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  background-color: var(--bg-body);
+  transition: background-color 0.3s;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
+/* 讓連結和按鈕有質感 */
+a {
   font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: opacity 0.2s;
 }
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+a:hover {
+  opacity: 0.8;
 }
 
-.card {
-  padding: 2em;
+/* 滾動條美化 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-body); 
+}
+::-webkit-scrollbar-thumb {
+  background: #e0e0e0; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4a373; 
 }
 
+/* 響應式容器 */
 #app {
-  max-width: 1280px;
+  width: 100%;
   margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
 }
