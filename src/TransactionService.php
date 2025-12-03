@@ -80,6 +80,83 @@ class TransactionService {
             return 0.0;
         }
     }
+
+    /**
+     * 🌟 新增：取得本月總收入
+     */
+    public function getTotalIncomeByMonth(int $userId): float {
+        $startOfMonth = date('Y-m-01');
+        
+        $sql = "SELECT SUM(amount) FROM transactions 
+                WHERE user_id = :userId 
+                  AND type = 'income' 
+                  AND transaction_date >= :startOfMonth";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([':userId' => $userId, ':startOfMonth' => $startOfMonth]);
+            $result = $stmt->fetchColumn();
+            return (float) ($result ?? 0);
+        } catch (PDOException $e) {
+            error_log("Query Total Income failed: " . $e->getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * 🌟 升級版：獲取指定時間範圍內的收支趨勢
+     */
+    public function getTrendData(int $userId, string $startDate, string $endDate): array {
+        // 1. 產生完整的月份列表 (確保即使該月沒資料，圖表也不會斷掉)
+        $start = new DateTime($startDate);
+        $end = new DateTime($endDate);
+        // 調整結束日期以包含當月
+        $end->modify('last day of this month'); 
+        
+        $interval = DateInterval::createFromDateString('1 month');
+        $period = new DatePeriod($start, $interval, $end);
+
+        $data = [];
+        foreach ($period as $dt) {
+            $data[$dt->format("Y-m")] = ['income' => 0, 'expense' => 0];
+        }
+
+        // 2. 資料庫查詢
+        $sql = "SELECT 
+                    DATE_FORMAT(transaction_date, '%Y-%m') as month, 
+                    type, 
+                    SUM(amount) as total 
+                FROM transactions 
+                WHERE user_id = :userId 
+                  AND transaction_date BETWEEN :startDate AND :endDate
+                GROUP BY month, type
+                ORDER BY month ASC";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([
+                ':userId' => $userId, 
+                ':startDate' => $startDate, 
+                ':endDate' => $endDate
+            ]);
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // 3. 填入數據
+            foreach ($results as $row) {
+                $m = $row['month'];
+                $type = $row['type'];
+                // 確保月份在我們生成的範圍內才填入
+                if (isset($data[$m])) {
+                    $data[$m][$type] = (float)$row['total'];
+                }
+            }
+
+            return $data; 
+        } catch (PDOException $e) {
+            error_log("TransactionService getTrendData failed: " . $e->getMessage());
+            return [];
+        }
+    }
     
     /**
      * 取得本月指定類型(收入/支出)的分類統計

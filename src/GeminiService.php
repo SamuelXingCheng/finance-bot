@@ -131,4 +131,49 @@ EOD;
         
         return null;
     }
+
+    /**
+     * 🌟 分析資產配置並提供建議
+     */
+    public function analyzePortfolio(array $data): string {
+        $charts = $data['charts'] ?? [];
+        $netWorth = number_format($data['global_twd_net_worth'] ?? 0);
+        
+        $cash = number_format($charts['cash'] ?? 0);
+        $invest = number_format($charts['investment'] ?? 0);
+        $debt = number_format($charts['total_liabilities'] ?? 0);
+        $asset = number_format($charts['total_assets'] ?? 0);
+        
+        $prompt = <<<EOD
+        你是一位專業的個人財務顧問。請根據以下使用者的資產數據進行簡短分析（250字以內）：
+
+        【財務概況 (TWD)】
+        - 總資產: {$asset}
+        - 總負債: {$debt}
+        - 總淨值: {$netWorth}
+        - 現金部位: {$cash}
+        - 投資部位: {$invest}
+
+        【分析任務】
+        1. **健康度診斷**：評估負債比與緊急預備金（現金）是否健康。
+        2. **配置建議**：針對現金與投資的比例給予建議。
+        3. **語氣**：請用溫暖、鼓勵且專業的口吻，使用繁體中文，並使用條列式重點。
+        EOD;
+
+        $payload = [
+            'contents' => [['role' => 'user', 'parts' => [['text' => $prompt]]]]
+        ];
+
+        $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        $result = json_decode($response, true);
+        return $result['candidates'][0]['content']['parts'][0]['text'] ?? 'AI 目前無法進行分析，請稍後再試。';
+    }
 }

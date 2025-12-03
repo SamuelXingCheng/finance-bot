@@ -121,14 +121,52 @@ try {
             $response = ['status' => 'success', 'data' => $summary];
             break;
 
+        // 🌟【新增】獲取帳戶列表
+        case 'get_accounts':
+            $accounts = $assetService->getAccounts($dbUserId);
+            $response = ['status' => 'success', 'data' => $accounts];
+            break;
+
+        // 🌟【新增】刪除帳戶
+        case 'delete_account':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $name = $input['name'] ?? '';
+            
+            if (empty($name)) {
+                $response = ['status' => 'error', 'message' => '缺少帳戶名稱'];
+                break;
+            }
+
+            if ($assetService->deleteAccount($dbUserId, $name)) {
+                $response = ['status' => 'success', 'message' => "帳戶 [{$name}] 已刪除"];
+            } else {
+                $response = ['status' => 'error', 'message' => '刪除失敗'];
+            }
+            break;
+
         case 'monthly_expense_breakdown':
-            $breakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense'); 
+            // 獲取支出與收入的總額 (這部分您之前改過了)
             $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
+            $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
+
+            // 獲取支出分類細項
+            $expenseBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense'); 
+            
+            // 🌟 新增：獲取收入分類細項
+            $incomeBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'income');
+
             $response = [
                 'status' => 'success', 
                 'data' => [
                     'total_expense' => $totalExpense,
-                    'breakdown' => $breakdown
+                    'total_income' => $totalIncome,
+                    'breakdown' => $expenseBreakdown,       // 支出細項
+                    'income_breakdown' => $incomeBreakdown  // 🌟 新增：收入細項
                 ]
             ];
             break;
@@ -163,7 +201,28 @@ try {
                 $response = ['status' => 'error', 'message' => '交易新增失敗，請檢查類別或資料庫連線。'];
             }
             break;
+        
+        // 🌟 新增：AI 資產分析路由
+        case 'analyze_portfolio':
+            $assetData = $assetService->getNetWorthSummary($dbUserId);
+            $geminiService = new GeminiService();
+            $analysisText = $geminiService->analyzePortfolio($assetData);
+            $response = ['status' => 'success', 'data' => $analysisText];
+            break;
+        
+        // 🌟 新增：動態區間趨勢
+        case 'trend_data':
+            // 預設為過去一年 (若前端沒傳參數)
+            $defaultStart = date('Y-m-01', strtotime('-1 year'));
+            $defaultEnd = date('Y-m-t'); // 本月最後一天
 
+            $start = $_GET['start'] ?? $defaultStart;
+            $end = $_GET['end'] ?? $defaultEnd;
+
+            $trendData = $transactionService->getTrendData($dbUserId, $start, $end);
+            $response = ['status' => 'success', 'data' => $trendData];
+            break;
+            
         default:
             // 保持預設的錯誤訊息
             break;
