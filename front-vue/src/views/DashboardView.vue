@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard-container">
     
-    <div class="card-section">
+    <div class="card-section" v-if="!isPremium">
       <div class="data-box premium-box">
         <div class="premium-content">
           <div class="premium-header">
@@ -26,7 +26,7 @@
                 **【免費版限制：每年僅能使用 2 次 AI 財務健檢】**
             </li>
             <li>
-                **解鎖長期歷史趨勢圖：** 告別短期數據，完整掌握您的收支變化與財富積累的長期趨勢。
+                **解鎖長期歷史趨勢圖** 與 **資產負債總覽表**。
             </li>
             <li>
                 **資產負債總覽表：** 一目瞭然您的淨值結構、資產與負債的完整配置，做出精準的財務決策。
@@ -40,7 +40,9 @@
             <p>⚠<strong>付款前請注意：</strong></p>
             <ul>
               <li>🔹 <strong>BMC 支付：</strong>請務必在付款頁面填寫與下方綁定<strong>相同的 Email</strong>，以便系統自動開通。</li>
-              <li>🔹 <strong>加密貨幣：</strong>請選擇 <strong>USDC (Polygon 鏈)</strong> 進行轉帳，轉錯鏈將無法找回資金。</li>
+              <li>🔹 <strong>加密貨幣：</strong>請選擇 <strong>USDC</strong> 進行轉帳，轉錯鏈將無法找回資金。</li>
+              <li>🔹 <strong>經測試，瀏覽器Safari經常無法成功進入付款網頁，請使用Chrome。</strong></li>
+              <li>🔹 <strong>圖表功能測試階段將免費體驗，AI辨識功能超過額度則不開放，敬請見諒。</strong></li>
             </ul>
           </div>
 
@@ -86,7 +88,7 @@
             <div class="form-group half">
               <label>幣種</label>
               <div v-if="isCustomCurrency" class="custom-currency-wrapper">
-                 <input type="text" v-model="transactionForm.currency" class="input-minimal" placeholder="代碼 (如 HKD)" required @input="forceUppercase">
+                 <input type="text" v-model="transactionForm.currency" class="input-minimal" placeholder="代碼" required @input="forceUppercase">
                  <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
               </div>
               <select v-else v-model="currencySelectValue" class="input-minimal" @change="handleCurrencyChange">
@@ -303,6 +305,7 @@ import ChartDataLabels from 'chartjs-plugin-datalabels';
 Chart.register(ChartDataLabels);
 
 // --- 狀態管理 ---
+const isPremium = ref(false); 
 const totalExpense = ref(0);
 const totalIncome = ref(0);
 const expenseBreakdown = ref({});
@@ -335,14 +338,13 @@ const currentListMonth = ref(new Date().toISOString().substring(0, 7));
 const isEditModalOpen = ref(false);
 const editForm = ref({}); 
 
-// 支付相關狀態
 const isPaymentModalOpen = ref(false);
 const isLinking = ref(false);
 const paymentEmail = ref('');
 const selectedPaymentMethod = ref('bmc'); 
 
 const BMC_URL = 'https://buymeacoffee.com/finbot'; 
-const NOWPAYMENTS_URL = 'https://nowpayments.io'; // 請替換成您的支付連結
+const NOWPAYMENTS_URL = 'https://nowpayments.io/donation/finbot2'; 
 
 const categoryMap = {
   'Food': '飲食', 'Transport': '交通', 'Entertainment': '娛樂', 'Shopping': '購物',
@@ -365,7 +367,6 @@ function resetCurrency() {
 }
 function forceUppercase() { transactionForm.value.currency = transactionForm.value.currency.toUpperCase(); }
 
-// 支付邏輯
 function openPaymentModal(method) {
     selectedPaymentMethod.value = method;
     isPaymentModalOpen.value = true;
@@ -396,7 +397,16 @@ async function handleLinkAndPay() {
     isLinking.value = false;
 }
 
-// API
+async function fetchAssetSummary() {
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_summary`);
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            isPremium.value = result.data.is_premium || false;
+        }
+    }
+}
+
 async function fetchTransactions() {
     txLoading.value = true;
     const monthToSend = currentListMonth.value.substring(0, 7); 
@@ -444,6 +454,7 @@ async function handleUpdateTx() {
 }
 
 function refreshAllData() {
+    fetchAssetSummary(); 
     fetchExpenseData();
     fetchTrendData();
     fetchTransactions(); 
@@ -474,7 +485,6 @@ async function fetchTrendData() {
   }
 }
 
-// 圖表渲染
 function toggleChart(type) { currentChartType.value = type; nextTick(() => { renderChart(); }); }
 function renderChart() {
   if (chartInstance) chartInstance.destroy();
@@ -489,6 +499,8 @@ function renderChart() {
     type: 'doughnut',
     data: { labels: labels, datasets: [{ data: dataValues, backgroundColor: palette, borderWidth: 0, hoverOffset: 6 }] },
     options: { 
+        responsive: true,
+        maintainAspectRatio: false, // 關鍵設定：讓 CSS 控制大小
         cutout: '65%', 
         plugins: { 
             legend: { display: false }, 
@@ -512,7 +524,8 @@ function renderTrendChart(data) {
     trendChart = new Chart(trendChartCanvas.value, {
         type: 'line', data: { labels: labels, datasets: datasets },
         options: { 
-            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, 
+            responsive: true, maintainAspectRatio: false, // 關鍵設定
+            interaction: { mode: 'index', intersect: false }, 
             plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, datalabels: { display: false } }, 
             scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } }, x: { grid: { display: false } } } 
         }
@@ -543,17 +556,33 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 樣式部分 */
-.dashboard-container { max-width: 100%; margin: 0 auto; color: #5d5d5d; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.03em; }
-.card-section { margin-bottom: 24px; }
-.section-header h2 { font-size: 1.1rem; font-weight: 600; color: #8c7b75; margin-bottom: 12px; margin-left: 4px; position: relative; }
-.data-box { background-color: #ffffff; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(220, 210, 200, 0.3); border: 1px solid #f0ebe5; transition: transform 0.2s ease; }
+/* 基本容器設定 */
+.dashboard-container { 
+    width: 100%; 
+    max-width: 100%; /* 防止父層溢出 */
+    margin: 0 auto; 
+    color: #5d5d5d; 
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; 
+    letter-spacing: 0.03em; 
+    overflow-x: hidden; /* 禁止橫向卷軸 */
+    padding-bottom: 30px;
+}
 
-/* 🌟 Premium Box Style */
+/* 區塊卡片設定 - 手機版優化 */
+.card-section { margin-bottom: 20px; }
+.section-header h2 { font-size: 1.1rem; font-weight: 600; color: #8c7b75; margin-bottom: 12px; margin-left: 4px; }
+.data-box { 
+    background-color: #ffffff; 
+    border-radius: 16px; 
+    padding: 16px; /* 手機版減少 padding (原本 24px) */
+    box-shadow: 0 4px 20px rgba(220, 210, 200, 0.3); 
+    border: 1px solid #f0ebe5; 
+}
+
+/* Premium Box Style */
 .premium-box { background: linear-gradient(135deg, #fff8f0 0%, #fff 100%); border: 1px solid #eeddcc; position: relative; overflow: hidden; }
 .premium-content { position: relative; z-index: 1; }
 .premium-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.premium-icon { font-size: 1.5rem; }
 .premium-title { font-size: 1.1rem; font-weight: bold; color: #b45309; margin: 0; }
 .premium-badge { font-size: 0.7rem; background: #b45309; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
 .premium-price { font-size: 1rem; color: #555; margin-bottom: 12px; font-weight: 500; }
@@ -567,17 +596,18 @@ onMounted(() => {
 .btn-bmc { background-color: #FFDD00; color: #000; }
 .btn-crypto { background-color: #3861FB; color: #fff; }
 
-/* 🌟 Payment Notice */
+/* Payment Notice */
 .payment-notice { background-color: #fff; border: 1px dashed #d4a373; border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 0.85rem; color: #666; }
 .payment-notice ul { padding-left: 0; list-style: none; margin: 6px 0 0 0; }
 .payment-notice li { margin-bottom: 4px; }
 
+/* 輸入表單優化 */
 .input-minimal { width: 100%; padding: 10px 0; border: none; border-bottom: 1px solid #e0e0e0; background: transparent; font-size: 16px; color: #333; border-radius: 0; transition: border-color 0.3s; box-sizing: border-box; }
 .input-minimal:focus { outline: none; border-bottom: 1px solid #d4a373; }
-.form-group { margin-bottom: 20px; }
+.form-group { margin-bottom: 16px; } /* 減少間距 */
 .form-group label { display: block; font-size: 0.85rem; color: #999; margin-bottom: 4px; }
-.form-row { display: flex; gap: 16px; }
-.half { flex: 1; }
+.form-row { display: flex; gap: 12px; } /* 減少間距 */
+.half { flex: 1; width: 50%; } /* 確保一半寬度 */
 
 .custom-currency-wrapper { display: flex; align-items: center; gap: 8px; width: 100%; }
 .back-btn { border: none; background: #eee; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; color: #666; font-size: 0.8rem; display: flex; align-items: center; justify-content: center;}
@@ -594,36 +624,80 @@ onMounted(() => {
 .submit-btn:hover { background-color: #c19263; }
 .submit-btn:active { transform: scale(0.98); }
 
-.chart-card { display: flex; flex-direction: column; align-items: center; }
-.stats-row { display: flex; justify-content: space-around; align-items: center; width: 100%; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px dashed #f0ebe5; }
-.stat-item { text-align: center; flex: 1; padding: 8px; border-radius: 12px; transition: background-color 0.2s, transform 0.1s; }
+/* 📊 圖表卡片設定 (修正跑版關鍵) */
+.chart-card { 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    width: 100%; /* 確保滿版 */
+    box-sizing: border-box; /* 包含 padding */
+}
+.stats-row { 
+    display: flex; 
+    justify-content: space-around; 
+    align-items: center; 
+    width: 100%; 
+    margin-bottom: 16px; 
+    padding-bottom: 12px; 
+    border-bottom: 1px dashed #f0ebe5; 
+}
+.stat-item { 
+    text-align: center; 
+    flex: 1; 
+    padding: 6px; 
+    border-radius: 12px; 
+    transition: background-color 0.2s, transform 0.1s; 
+}
 .cursor-pointer { cursor: pointer; }
 .active-stat { background-color: #f7f5f0; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
-.vertical-line { width: 1px; height: 40px; background-color: #f0ebe5; }
-.stat-item .label { display: block; font-size: 0.85rem; color: #999; margin-bottom: 4px; }
-.stat-item .value { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.5px; }
+.vertical-line { width: 1px; height: 30px; background-color: #f0ebe5; }
+.stat-item .label { display: block; font-size: 0.75rem; color: #999; margin-bottom: 2px; }
+.stat-item .value { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px; word-break: break-all; } /* 縮小字體並允許換行 */
 .text-income { color: #8fbc8f; } 
 .text-expense { color: #d67a7a; } 
 
-#chart-container, .chart-box-lg { width: 100%; height: 250px; position: relative; }
+/* 🛠️ 圖表容器修正：使用 Flexbox 強制置中 + 限制寬度 */
+#chart-container { 
+    width: 100%;
+    max-width: 300px; /* 手機版限制最大寬度，避免過大 */
+    height: 250px; 
+    position: relative;
+    display: flex;       
+    justify-content: center; 
+    align-items: center; 
+    margin: 0 auto; /* 水平置中 */
+}
+.chart-box-lg { width: 100%; height: 250px; position: relative; }
 .no-data-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #aaa; font-size: 0.9rem; width: 100%; text-align: center; }
 .chart-hint { font-size: 0.75rem; color: #aaa; margin-top: 10px; text-align: center; }
 
-.date-controls { display: flex; align-items: center; gap: 8px; background: #f7f5f0; padding: 6px 12px; border-radius: 20px; width: 100%; justify-content: space-between; box-sizing: border-box; }
-.date-input { border: none; background: transparent; color: #666; font-size: 0.85rem; outline: none; width: 35%; }
+/* 日期選擇器 RWD */
+.date-controls { 
+    display: flex; 
+    align-items: center; 
+    gap: 8px; 
+    background: #f7f5f0; 
+    padding: 6px 12px; 
+    border-radius: 20px; 
+    width: 100%; 
+    justify-content: space-between; 
+    box-sizing: border-box; 
+    flex-wrap: wrap; /* 允許換行 */
+}
+.date-input { border: none; background: transparent; color: #666; font-size: 0.85rem; outline: none; width: 35%; min-width: 80px; }
 .separator { color: #aaa; }
 .filter-btn { background-color: #d4a373; color: white; border: none; padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; transition: background 0.2s; white-space: nowrap;}
 .filter-btn:hover { background-color: #c19263; }
 .mb-4 { margin-bottom: 16px; }
 
+/* 訊息與列表樣式 */
 .msg-processing { color: #999; margin-top: 15px; font-size: 0.9rem; text-align: center;}
 .msg-success { background-color: #f0f7f0; color: #556b2f; padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; text-align: center; }
 .msg-error { background-color: #fff0f0; color: #d67a7a; padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 0.9rem; text-align: center; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.5s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
-/* 列表樣式 */
-.tx-list-wrapper { padding: 24px; }
+.tx-list-wrapper { padding: 16px; } /* 手機版減少內距 */
 .list-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #f0ebe5; padding-bottom: 12px; }
 .list-controls h3 { margin: 0; font-size: 1rem; color: #8c7b75; }
 .month-selector { display: flex; align-items: center; }
@@ -631,22 +705,22 @@ onMounted(() => {
 .tx-list { display: flex; flex-direction: column; gap: 12px; }
 .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #eee; }
 .tx-item:last-child { border-bottom: none; }
-.tx-left { display: flex; flex-direction: column; gap: 4px; min-width: 60px; }
+.tx-left { display: flex; flex-direction: column; gap: 4px; min-width: 50px; }
 .tx-date { font-size: 0.8rem; color: #aaa; }
 .tx-cat-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; display: inline-block; width: fit-content; font-weight: bold; }
 .tx-cat-badge.expense { color: #c44536; background: #ffe5d9; }
 .tx-cat-badge.income { color: #556b2f; background: #e9edc9; }
-.tx-mid { flex: 1; padding: 0 12px; font-weight: 500; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tx-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.tx-amount { font-weight: bold; font-size: 1rem; }
-.tx-actions { display: flex; gap: 10px; }
+.tx-mid { flex: 1; padding: 0 8px; font-weight: 500; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 70px; }
+.tx-amount { font-weight: bold; font-size: 0.95rem; }
+.tx-actions { display: flex; gap: 8px; }
 .text-btn { background: transparent; border: none; cursor: pointer; font-size: 0.8rem; padding: 0; text-decoration: underline; color: #999; transition: color 0.2s; }
 .text-btn:hover { color: #d4a373; }
 .empty-msg { text-align: center; padding: 20px; color: #aaa; }
 
 /* Modal 樣式 */
-.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px; }
-.modal-content { background: white; width: 100%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s ease-out; }
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box;}
+.modal-content { background: white; width: 100%; max-width: 400px; border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s ease-out; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .modal-header h3 { margin: 0; color: #8c7b75; font-size: 1.1rem; }
 .close-btn { background: transparent; border: none; font-size: 1.5rem; color: #aaa; cursor: pointer; }
@@ -655,8 +729,11 @@ onMounted(() => {
 .save-btn { width: 100%; padding: 12px; background: #d4a373; color: white; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 10px; }
 .mt-2 { margin-top: 12px; }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 手機版微調 */
 @media (max-width: 480px) {
     .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
     .date-controls { width: 100%; justify-content: space-between; }
+    .stat-item .value { font-size: 1rem; } /* 手機版數字變小 */
 }
 </style>

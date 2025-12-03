@@ -1,16 +1,12 @@
 <template>
   <div class="app-layout">
     
-    <!-- 🌟 頂部導航列 -->
     <nav class="navbar">
       <div class="nav-container">
-        <!-- Logo / 品牌 -->
         <div class="nav-brand">
-          <span class="logo-icon">🌿</span>
-          <span class="brand-text">Finance Bot</span>
+          <span class="brand-text">FinBot</span>
         </div>
 
-        <!-- 中間導航選單 (桌面版顯示，手機版可優化) -->
         <div class="nav-links">
           <button 
             @click="currentTab = 'Dashboard'" 
@@ -26,26 +22,22 @@
           </button>
         </div>
 
-        <!-- 右側使用者資訊 -->
         <div class="nav-user">
           <div v-if="liffState.isLoggedIn && liffState.profile" class="user-profile">
-            <span class="user-name">{{ liffState.profile.displayName }}</span>
+            <span class="user-name desktop-only">{{ liffState.profile.displayName }}</span>
             <img :src="liffState.profile.pictureUrl" alt="Avatar" class="user-avatar" />
           </div>
           <div v-else class="user-profile">
-            <span class="user-name">訪客</span>
-            <div class="user-avatar placeholder">Wait</div>
+            <div class="user-avatar placeholder">...</div>
           </div>
         </div>
       </div>
     </nav>
 
-    <!-- ⚠️ 錯誤提示區塊 -->
     <div v-if="liffState.error" class="error-banner">
       <p>❌ {{ liffState.error }}</p>
     </div>
 
-    <!-- 🔄 載入中畫面 -->
     <div v-else-if="!liffState.isLoggedIn" class="loading-screen">
       <div class="loading-content">
         <span class="loader"></span>
@@ -53,7 +45,6 @@
       </div>
     </div>
 
-    <!-- 📱 主要內容區 -->
     <main v-else class="main-content">
       <transition name="fade" mode="out-in">
         <component 
@@ -64,6 +55,11 @@
       </transition>
     </main>
 
+    <a href="https://line.me/R/ti/p/@finbot" target="_blank" class="fab-chat" title="AI 記帳">
+      <span class="fab-icon">💬</span>
+      <span class="fab-text">AI 記帳</span>
+    </a>
+
   </div>
 </template>
 
@@ -71,15 +67,10 @@
 import { ref, computed, onMounted } from 'vue';
 import liff from '@line/liff';
 import { liffState } from './liffState';
-
-// 引入 Views
 import DashboardView from './views/DashboardView.vue';
 import AccountManagerView from './views/AccountManagerView.vue';
 
-// 環境變數
 const LIFF_ID = import.meta.env.VITE_LIFF_ID;
-
-// 頁面狀態
 const currentTab = ref('Dashboard');
 const currentViewRef = ref(null);
 
@@ -89,14 +80,12 @@ const currentView = computed(() => {
   return null;
 });
 
-// 刷新邏輯
 const handleRefreshDashboard = () => {
     if (currentView.value === DashboardView && currentViewRef.value?.refreshAllData) {
        currentViewRef.value.refreshAllData();
     }
 };
 
-// LIFF 初始化
 onMounted(async () => {
     if (!liff) {
         liffState.error = 'LIFF SDK 未載入';
@@ -117,149 +106,122 @@ onMounted(async () => {
 });
 </script>
 
+<style>
+/* 🟢 全域設定：防止 padding 撐開寬度導致左右滑動 */
+* {
+  box-sizing: border-box;
+}
+body {
+  overflow-x: hidden; /* 強制隱藏水平卷軸 */
+}
+</style>
+
 <style scoped>
-/* 佈局容器 */
 .app-layout {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
-/* --- 導航列設計 --- */
+/* --- 導航列 --- */
 .navbar {
   background-color: var(--bg-nav);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.03); /* 極淡的陰影 */
+  box-shadow: 0 2px 10px rgba(0,0,0,0.03); 
   position: sticky;
   top: 0;
   z-index: 100;
-  height: 64px;
+  height: 60px;
   display: flex;
   align-items: center;
+  width: 100%;
 }
 
 .nav-container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 800px; /* 限制最大寬度，與內容一致 */
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-/* Brand */
 .nav-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--text-accent); /* 暖棕色 */
+  display: flex; align-items: center; gap: 6px;
+  font-size: 1.2rem; font-weight: 700; color: var(--text-accent); 
 }
 
-/* Links */
 .nav-links {
-  display: flex;
-  gap: 8px;
-  background: #f7f5f0; /* 淺米色背景條 */
-  padding: 4px;
-  border-radius: 30px;
+  display: flex; gap: 8px;
+  background: #f7f5f0; padding: 4px; border-radius: 30px;
 }
 
 .nav-item {
-  background: transparent;
-  border: none;
-  padding: 8px 20px;
-  border-radius: 20px;
-  color: var(--text-secondary);
-  font-size: 0.95rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.nav-item:hover {
-  color: var(--text-primary);
+  background: transparent; border: none;
+  padding: 6px 16px; border-radius: 20px;
+  color: var(--text-secondary); font-size: 0.9rem; font-weight: 500;
+  cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
 }
 
 .nav-item.active {
-  background-color: #ffffff;
-  color: var(--text-accent);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-  font-weight: 600;
+  background-color: #ffffff; color: var(--text-accent);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05); font-weight: 600;
 }
 
-/* User Profile */
-.nav-user {
-  display: flex;
-  align-items: center;
-}
-
-.user-profile {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.user-name {
-  font-size: 0.9rem;
-  color: var(--text-primary);
-  display: none; /* 手機版隱藏名字 */
-}
-
-@media (min-width: 640px) {
-  .user-name { display: block; }
-}
-
+.nav-user { display: flex; align-items: center; }
+.user-profile { display: flex; align-items: center; gap: 8px; }
+.user-name { font-size: 0.9rem; color: var(--text-primary); }
 .user-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
+  border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+.user-avatar.placeholder {
+  background-color: #eee; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: #999;
 }
 
-.user-avatar.placeholder {
-  background-color: #eee;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  color: #999;
+/* 手機版隱藏文字，只留圖示 */
+.desktop-only { display: none; }
+@media (min-width: 640px) {
+  .desktop-only { display: block; }
+  .nav-container { padding: 0 24px; }
 }
 
 /* --- 內容區 --- */
 .main-content {
   flex: 1;
   width: 100%;
-  max-width: 800px; /* 限制內容寬度，讓閱讀更舒適 */
+  max-width: 800px;
   margin: 0 auto;
-  padding: 24px 16px;
+  padding: 20px 16px; /* 左右留邊距 */
 }
+
+/* 🟢 懸浮按鈕 (FAB) */
+.fab-chat {
+  position: fixed;
+  bottom: 24px;
+  right: 20px;
+  background-color: #1DB446; /* LINE Green */
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 20px;
+  border-radius: 50px;
+  box-shadow: 0 4px 12px rgba(29, 180, 70, 0.4);
+  text-decoration: none;
+  z-index: 999;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.fab-chat:active { transform: scale(0.95); }
+.fab-icon { font-size: 1.4rem; }
+.fab-text { font-weight: bold; font-size: 0.95rem; }
 
 /* 狀態提示 */
-.loading-screen {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  color: var(--text-secondary);
-}
-
-.error-banner {
-  background-color: #ffeaea;
-  color: #d67a7a;
-  padding: 12px;
-  text-align: center;
-  font-size: 0.9rem;
-}
-
-/* 頁面切換動畫 */
-.fade-enter-active, .fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
-}
+.loading-screen { flex: 1; display: flex; justify-content: center; align-items: center; color: var(--text-secondary); }
+.error-banner { background-color: #ffeaea; color: #d67a7a; padding: 12px; text-align: center; font-size: 0.9rem; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

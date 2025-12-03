@@ -5,7 +5,7 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 // ----------------------------------------------------
-// 1. 載入服務與環境 (確保路徑正確)
+// 1. 載入服務與環境
 // ----------------------------------------------------
 require_once 'config.php';
 require_once 'src/Database.php';
@@ -37,7 +37,6 @@ try {
     // ----------------------------------------------------
     // 4. 接收與驗證 LINE 傳送的資料 
     // ----------------------------------------------------
-    // <<< 修正點 1: 使用新的 Bot Channel Secret 進行驗證 >>>
     if (!defined('LINE_BOT_CHANNEL_SECRET')) {
         throw new Exception("LINE_BOT_CHANNEL_SECRET is not defined in config.");
     }
@@ -63,49 +62,39 @@ try {
             // 處理文字訊息
             if ($event['type'] === 'message' && $event['message']['type'] === 'text') {
                 $text = trim($event['message']['text']);
-                $lowerText = strtolower($text); // 轉為小寫以便檢查
+                $lowerText = strtolower($text); 
                 $replyText = "";
                 $isProcessed = false; 
 
                 // ====================================================
-                // 【LIFF 儀表板指令 - 最高優先級】 (新增的 LIFF 邏輯)
+                // 【LIFF 儀表板指令 - 最高優先級】
                 // ====================================================
                 if (str_contains($lowerText, '儀表板') || str_contains($lowerText, 'dashboard')) {
-                    
                     if (!defined('LIFF_DASHBOARD_URL')) {
-                         $lineService->replyMessage($replyToken, "❌ 錯誤：LIFF 儀表板 URL 尚未配置。請檢查您的 .env 檔案中的 LIFF_DASHBOARD_URL。");
+                         $lineService->replyMessage($replyToken, "❌ 錯誤：LIFF 儀表板 URL 尚未配置。");
                          $isProcessed = true;
                     } else {
                         $liffUrl = LIFF_DASHBOARD_URL; 
-
-                        // 構建包含 LIFF 連結的 Flex Message
                         $flexPayload = [
                             'type' => 'bubble',
                             'body' => [
-                                'type' => 'box',
-                                'layout' => 'vertical',
+                                'type' => 'box', 'layout' => 'vertical',
                                 'contents' => [
                                     ['type' => 'text', 'text' => '📊 財務儀表板', 'weight' => 'bold', 'size' => 'xl', 'color' => '#007AFF'],
-                                    ['type' => 'text', 'text' => '點擊按鈕，即可開啟您的個人淨資產總覽與報表 (將在 LINE App 內開啟並自動登入)。', 'margin' => 'md', 'size' => 'sm', 'wrap' => true],
-                                    ['type' => 'button', 'action' => [
-                                        'type' => 'uri',
-                                        'label' => '開啟儀表板 (LIFF)',
-                                        'uri' => $liffUrl
-                                    ], 'style' => 'primary', 'color' => '#00B900', 'margin' => 'xl']
+                                    ['type' => 'text', 'text' => '點擊按鈕，即可開啟您的個人淨資產總覽與報表。', 'margin' => 'md', 'size' => 'sm', 'wrap' => true],
+                                    ['type' => 'button', 'action' => ['type' => 'uri', 'label' => '開啟儀表板 (LIFF)', 'uri' => $liffUrl], 'style' => 'primary', 'color' => '#00B900', 'margin' => 'xl']
                                 ]
                             ]
                         ];
-
                         $lineService->replyFlexMessage($replyToken, "開啟財務儀表板", $flexPayload);
                         $isProcessed = true;
                     }
                 } 
                 
                 // ====================================================
-                // 【資產設定指令 - 次優先級】 
+                // 【資產設定指令】 
                 // ====================================================
                 if (!$isProcessed && preg_match('/^設定\s+([^\s]+)\s+([^\s]+)\s+([-\d\.,]+)(.*?)$/u', $text, $matches)) {
-                    
                     $name = trim($matches[1]);
                     $typeInput = trim($matches[2]);
                     $balanceInputRaw = trim($matches[3]);
@@ -117,19 +106,16 @@ try {
                         $currencyUnit = 'TWD';
                         $balanceInput = str_replace(['元', '塊', 'NT', 'NTD'], '', $balanceInput); 
                     }
-
                     $balance = (float)$balanceInput;
 
                     $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $typeInput, $currencyUnit);
                     $type = $assetService->sanitizeAssetType($typeInput);
 
                     if ($success) {
-                        // 1. 格式化並移除尾隨零 (Flex 顯示優化)
                         $formattedBalance = number_format($balance, 8, '.', ''); 
                         $trimmedZeros = rtrim($formattedBalance, '0');
                         $displayBalance = rtrim($trimmedZeros, '.');
 
-                        // 2. 建構 Flex 成功回覆
                         $flexPayload = [
                             'type' => 'bubble', 'size' => 'kilo',
                             'header' => ['type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'backgroundColor' => '#1DB446',
@@ -146,15 +132,10 @@ try {
                                 ]
                             ]
                         ];
-
                         $lineService->replyFlexMessage($replyToken, "資產更新成功", $flexPayload);
-
                     } else {
-                        // 失敗時，使用純文字回覆
-                        $replyText = "❌ 資產更新失敗，請檢查格式或聯繫客服。";
-                        $lineService->replyMessage($replyToken, $replyText);
+                        $lineService->replyMessage($replyToken, "❌ 資產更新失敗，請檢查格式或聯繫客服。");
                     }
-                    
                     $isProcessed = true;
                 } 
                 
@@ -162,46 +143,33 @@ try {
                 // 【資產查詢指令】
                 // ====================================================
                 elseif (!$isProcessed && in_array($text, ['查詢資產', '資產總覽', '淨值'])) {
-                    
-                    // 1. 獲取數據
                     $result = $assetService->getNetWorthSummary($dbUserId);
                     $summary = $result['breakdown'];
                     $globalNetWorthTWD = $result['global_twd_net_worth'];
                     $usdTwdRate = $result['usdTwdRate'];
                     
-                    // 2. 建構 Flex Message 的 Body 內容 (分幣種)
                     $assetBodyContents = [];
                     $rateContents = [];
                     
-                    // --- Hero Size Logic ---
                     $globalNetWorthText = number_format($globalNetWorthTWD, 2);
                     $textLength = strlen($globalNetWorthText);
-                    $heroSize = '3xl';
-                    if ($textLength > 16) { $heroSize = 'xl'; } elseif ($textLength > 12) { $heroSize = 'xxl'; }
+                    $heroSize = ($textLength > 16) ? 'xl' : (($textLength > 12) ? 'xxl' : '3xl');
                     $globalNetWorthColor = $globalNetWorthTWD >= 0 ? '#007AFF' : '#FF334B';
-                    
                     
                     if (!empty($summary)) {
                         foreach ($summary as $currency => $data) {
-                            $assets = number_format($data['assets'], 8);
-                            $liabilities = number_format($data['liabilities'], 8);
-                            $netWorth = number_format($data['net_worth'], 8);
+                            $assetsDisplay = rtrim(rtrim(number_format($data['assets'], 8), '0'), '.');
+                            $liabilitiesDisplay = rtrim(rtrim(number_format($data['liabilities'], 8), '0'), '.');
+                            $netWorthDisplay = rtrim(rtrim(number_format($data['net_worth'], 8), '0'), '.');
                             $twdTotal = number_format($data['twd_total'], 2);
-
-                            // 移除資產明細中的尾隨零 (顯示優化)
-                            $assetsDisplay = rtrim(rtrim($assets, '0'), '.');
-                            $liabilitiesDisplay = rtrim(rtrim($liabilities, '0'), '.');
-                            $netWorthDisplay = rtrim(rtrim($netWorth, '0'), '.');
 
                             $netWorthColor = $data['net_worth'] >= 0 ? '#1DB446' : '#FF334B';
                             $netWorthEmoji = $data['net_worth'] >= 0 ? '🟢' : '🔴';
 
-                            // 幣種標題
                             $assetBodyContents[] = [
                                 'type' => 'text', 'text' => "🏦 {$currency} 資產總覽", 'weight' => 'bold', 'color' => '#333333', 'size' => 'md', 'margin' => 'xl'
                             ];
                             
-                            // 詳情列表
                             $assetBodyContents[] = [
                                 'type' => 'box', 'layout' => 'vertical', 'spacing' => 'sm', 'margin' => 'md',
                                 'contents' => [
@@ -225,76 +193,51 @@ try {
                                 ]
                             ];
                             
-                            // ----------------------------------------------------
-                            // 3. 【修正】建構匯率清單：根據幣種類型顯示 TWD 或 USD 匯率
-                            // ----------------------------------------------------
                             if ($currency !== 'TWD') {
-                                // 獲取 X 兌 USD 的匯率 (USD 是中繼基準)
                                 $rateToUSD = $rateService->getRateToUSD($currency); 
-                                
-                                // 檢查是否為加密貨幣 (透過 ExchangeRateService 提供的公開常數檢查)
                                 $isCrypto = isset(ExchangeRateService::COIN_ID_MAP[$currency]);
                                 
                                 if ($isCrypto) {
-                                    // 加密貨幣：顯示 X 兌 USD
                                     $rateDisplayCurrency = 'USD';
                                     $rateToDisplay = $rateToUSD;
-                                    $ratePrecision = 2; // BTC, ETH 等顯示 2 位小數
+                                    $ratePrecision = 2; 
                                 } else {
-                                    // 法幣 (Fiat)：顯示 X 兌 TWD
                                     $rateDisplayCurrency = 'NT$';
-                                    // 計算 X/TWD = (X/USD) * (USD/TWD)
                                     $rateToDisplay = $rateToUSD * $usdTwdRate; 
-                                    $ratePrecision = 4; // 法幣顯示 4 位小數
+                                    $ratePrecision = 4; 
                                 }
-                                
                                 $rateDisplay = number_format($rateToDisplay, $ratePrecision);
 
                                 $rateContents[] = [
                                     'type' => 'box', 'layout' => 'horizontal', 'margin' => 'sm',
                                     'contents' => [
                                         ['type' => 'text', 'text' => "1 {$currency} =", 'size' => 'xs', 'color' => '#555555', 'flex' => 0],
-                                        // 顯示修正後的幣種和匯率
                                         ['type' => 'text', 'text' => "{$rateDisplayCurrency} {$rateDisplay}", 'size' => 'xs', 'color' => '#111111', 'align' => 'end', 'flex' => 1]
                                     ]
                                 ];
                             }
-                        } // 關閉 foreach ($summary as $currency => $data)
+                        }
 
-                        // 將匯率清單 Box 加入到 Body 的最下方
                         if (!empty($rateContents)) {
                             $assetBodyContents[] = ['type' => 'separator', 'margin' => 'xl'];
-                            // 更新標題：說明幣種計價的差異
-                            $assetBodyContents[] = ['type' => 'text', 'text' => '實時匯率參考 (法幣兌 TWD / 加密貨幣兌 USD)', 'weight' => 'bold', 'size' => 'sm', 'margin' => 'lg'];
+                            $assetBodyContents[] = ['type' => 'text', 'text' => '實時匯率參考', 'weight' => 'bold', 'size' => 'sm', 'margin' => 'lg'];
                             $assetBodyContents = array_merge($assetBodyContents, $rateContents);
-                            
-                            // ----------------------------------------------------
-                            // 【關鍵新增】：USD/TWD 最終匯率
-                            // ----------------------------------------------------
                             $assetBodyContents[] = ['type' => 'separator', 'margin' => 'md'];
                             $assetBodyContents[] = [
                                 'type' => 'box', 'layout' => 'horizontal', 'margin' => 'sm',
                                 'contents' => [
                                     ['type' => 'text', 'text' => "1 USD =", 'size' => 'sm', 'color' => '#333333', 'weight' => 'bold', 'flex' => 0],
-                                    // 顯示 USD/TWD 匯率 (使用 AssetService 獲取的 $usdTwdRate)
                                     ['type' => 'text', 'text' => "NT$ " . number_format($usdTwdRate, 4), 'size' => 'sm', 'color' => '#111111', 'align' => 'end', 'flex' => 1]
                                 ]
                             ];
                         }
-
                     } else {
                         $assetBodyContents[] = ['type' => 'text', 'text' => '目前沒有任何資產記錄。請輸入「設定...」新增。', 'size' => 'sm', 'color' => '#AAAAAA', 'margin' => 'xl'];
                     }
 
-                    // 4. 組裝 Flex Bubble (Hero 區塊新增全球淨值)
-                    $globalNetWorthText = number_format($globalNetWorthTWD, 2);
-                    $globalNetWorthColor = $globalNetWorthTWD >= 0 ? '#007AFF' : '#FF334B';
-                    
                     $flexPayload = [
                         'type' => 'bubble', 'size' => 'mega',
-                        'header' => ['type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'contents' => [
-                            ['type' => 'text', 'text' => '淨資產總覽', 'weight' => 'bold', 'size' => 'xl']
-                        ]],
+                        'header' => ['type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'contents' => [['type' => 'text', 'text' => '淨資產總覽', 'weight' => 'bold', 'size' => 'xl']]],
                         'hero' => [
                             'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'xl', 'paddingBottom' => 'none',
                             'contents' => [
@@ -307,11 +250,7 @@ try {
                         'footer' => ['type' => 'box', 'layout' => 'vertical', 'contents' => [
                             ['type' => 'text', 'text' => '輸入「設定 帳戶名 類型 金額 幣種」更新。', 'color' => '#BBBBBB', 'size' => 'xxs', 'align' => 'center'],
                             ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
-                                ['type' => 'text', 'text' => 'Powered by CoinGecko', 'color' => '#AAAAAA', 'size' => 'xxs', 'align' => 'center', 'action' => [
-                                    'type' => 'uri',
-                                    'label' => 'CoinGecko',
-                                    'uri' => 'https://www.coingecko.com'
-                                ], 'flex' => 1] // 讓它居中
+                                ['type' => 'text', 'text' => 'Powered by CoinGecko', 'color' => '#AAAAAA', 'size' => 'xxs', 'align' => 'center', 'action' => ['type' => 'uri', 'label' => 'CoinGecko', 'uri' => 'https://www.coingecko.com'], 'flex' => 1]
                             ]]
                         ]]
                     ];
@@ -324,55 +263,36 @@ try {
                 // 【記帳查詢 / 報表指令】
                 // ====================================================
                 elseif (!$isProcessed && in_array($text, ['查詢收支', '收支出', '報表', '總覽', '支出', '收入'])) {
-                    
-                    // 1. 獲取本月收支數據
                     $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
                     $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
                     $netIncome = $totalIncome - $totalExpense;
-
-                    // 2. 獲取總資產淨值 (作為參考)
                     $assetResult = $assetService->getNetWorthSummary($dbUserId);
                     $globalNetWorth = $assetResult['global_twd_net_worth'] ?? 0;
 
-                    // 3. 數字格式化
                     $fmtExpense = number_format($totalExpense);
                     $fmtIncome = number_format($totalIncome);
                     $fmtNet = number_format($netIncome);
                     $fmtAsset = number_format($globalNetWorth);
-                    
-                    // 根據結餘決定顏色 (正數綠色，負數紅色)
                     $balanceColor = $netIncome >= 0 ? '#1DB446' : '#FF334B';
 
-                    // 4. 組裝 Flex Message
                     $flexPayload = [
-                        'type' => 'bubble',
-                        'size' => 'kilo',
+                        'type' => 'bubble', 'size' => 'kilo',
                         'header' => [
-                            'type' => 'box',
-                            'layout' => 'vertical',
-                            'backgroundColor' => '#f7f9fc',
-                            'paddingAll' => 'lg',
-                            'contents' => [
-                                ['type' => 'text', 'text' => '📊 本月財務概況', 'weight' => 'bold', 'size' => 'lg', 'color' => '#555555']
-                            ]
+                            'type' => 'box', 'layout' => 'vertical', 'backgroundColor' => '#f7f9fc', 'paddingAll' => 'lg',
+                            'contents' => [['type' => 'text', 'text' => '📊 本月財務概況', 'weight' => 'bold', 'size' => 'lg', 'color' => '#555555']]
                         ],
                         'body' => [
-                            'type' => 'box',
-                            'layout' => 'vertical',
-                            'spacing' => 'md',
+                            'type' => 'box', 'layout' => 'vertical', 'spacing' => 'md',
                             'contents' => [
-                                // 收入列
                                 ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
                                     ['type' => 'text', 'text' => '總收入', 'size' => 'sm', 'color' => '#555555', 'flex' => 1],
                                     ['type' => 'text', 'text' => "NT$ {$fmtIncome}", 'size' => 'sm', 'color' => '#1DB446', 'weight' => 'bold', 'align' => 'end', 'flex' => 2]
                                 ]],
-                                // 支出列
                                 ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
                                     ['type' => 'text', 'text' => '總支出', 'size' => 'sm', 'color' => '#555555', 'flex' => 1],
                                     ['type' => 'text', 'text' => "NT$ {$fmtExpense}", 'size' => 'sm', 'color' => '#FF334B', 'weight' => 'bold', 'align' => 'end', 'flex' => 2]
                                 ]],
                                 ['type' => 'separator', 'margin' => 'md'],
-                                // 結餘列 (放大顯示)
                                 ['type' => 'box', 'layout' => 'horizontal', 'margin' => 'md', 'contents' => [
                                     ['type' => 'text', 'text' => '本月結餘', 'size' => 'md', 'weight' => 'bold', 'color' => '#333333', 'flex' => 1, 'gravity' => 'center'],
                                     ['type' => 'text', 'text' => "NT$ {$fmtNet}", 'size' => 'xl', 'weight' => 'bold', 'color' => $balanceColor, 'align' => 'end', 'flex' => 2]
@@ -380,19 +300,13 @@ try {
                             ]
                         ],
                         'footer' => [
-                            'type' => 'box',
-                            'layout' => 'vertical',
+                            'type' => 'box', 'layout' => 'vertical',
                             'contents' => [
                                 ['type' => 'text', 'text' => "💰 目前總資產: NT$ {$fmtAsset}", 'size' => 'xs', 'color' => '#aaaaaa', 'align' => 'center', 'margin' => 'sm'],
-                                ['type' => 'button', 'action' => [
-                                    'type' => 'message', 
-                                    'label' => '查看資產明細', 
-                                    'text' => '查詢資產'
-                                ], 'height' => 'sm', 'style' => 'link', 'margin' => 'sm']
+                                ['type' => 'button', 'action' => ['type' => 'message', 'label' => '查看資產明細', 'text' => '查詢資產'], 'height' => 'sm', 'style' => 'link', 'margin' => 'sm']
                             ]
                         ]
                     ];
-
                     $lineService->replyFlexMessage($replyToken, "本月財務報表", $flexPayload);
                     $isProcessed = true;
                 }
@@ -401,15 +315,46 @@ try {
                 // 【記帳與過濾器邏輯】(非指令時執行)
                 // =====================================================
                 if (!$isProcessed) {
-                    
                     $chinese_digits = '零一二三四五六七八九壹貳參肆伍陸柒捌玖拾佰仟萬億';
                     $regex = '/[\d' . $chinese_digits . ']/u'; 
                     $hasAmount = preg_match($regex, $text);
                     
                     if (!$hasAmount) {
                         $replyText = "❓ 我聽不懂...\n請輸入包含金額的記帳內容 (例如：午餐 120)，或輸入「查詢資產」查看淨值。";
-                        $lineService->replyMessage($replyToken, $replyText); // 純文字回覆
+                        $lineService->replyMessage($replyToken, $replyText); 
                     } else {
+                        // =========== 🔴 新增限制檢查邏輯 START ===========
+                        $isPremium = $userService->isPremium($dbUserId);
+                        
+                        if (!$isPremium) {
+                            // 如果是免費會員，檢查今日用量
+                            $dailyUsage = $userService->getDailyVoiceUsage($dbUserId);
+                            
+                            // 讀取 Config 常數，若未定義則給預設值 3
+                            $limit = defined('LIMIT_VOICE_TX_DAILY') ? LIMIT_VOICE_TX_DAILY : 3;
+                            
+                            if ($dailyUsage >= $limit) {
+                                // 超過限制，發送升級引導 Flex Message
+                                $limitMsg = [
+                                    'type' => 'bubble',
+                                    'body' => [
+                                        'type' => 'box', 'layout' => 'vertical', 'spacing' => 'md',
+                                        'contents' => [
+                                            ['type' => 'text', 'text' => '🔒 達到每日免費上限', 'weight' => 'bold', 'color' => '#FF334B', 'size' => 'md'],
+                                            ['type' => 'text', 'text' => "您今日的 {$limit} 次免費 AI 記帳額度已用完。", 'size' => 'sm', 'color' => '#555555', 'wrap' => true],
+                                            ['type' => 'text', 'text' => '升級 Premium 解鎖無限次使用，並獲得完整財務報表功能！', 'size' => 'sm', 'color' => '#555555', 'wrap' => true],
+                                            ['type' => 'button', 'style' => 'primary', 'color' => '#D4A373', 'action' => ['type' => 'uri', 'label' => '了解 Premium 方案', 'uri' => defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : '#']]
+                                        ]
+                                    ]
+                                ];
+                                $lineService->replyFlexMessage($replyToken, "達到免費上限", $limitMsg);
+                                $isProcessed = true; 
+                                // 略過後續處理
+                                goto end_of_loop; 
+                            }
+                        }
+                        // =========== 🔴 新增限制檢查邏輯 END ===========
+
                         // --- 異步核心邏輯：將任務快速推入佇列 ---
                         try {
                             $stmt = $dbConn->prepare(
@@ -418,12 +363,10 @@ try {
                             );
                             $stmt->execute([':lineUserId' => $lineUserId, ':text' => $text]);
 
-                            // 成功推入並回覆 Flex Message
                             $flexPayload = [
                                 'type' => 'bubble',
                                 'body' => [
-                                    'type' => 'box',
-                                    'layout' => 'vertical',
+                                    'type' => 'box', 'layout' => 'vertical',
                                     'contents' => [
                                         ['type' => 'text', 'text' => '✅ 記帳已送出', 'weight' => 'bold', 'color' => '#1DB446', 'size' => 'md'],
                                         ['type' => 'text', 'text' => "內容： {$text}", 'margin' => 'sm', 'size' => 'xs', 'color' => '#555555'],
@@ -431,42 +374,26 @@ try {
                                     ]
                                 ]
                             ];
-                            
                             $lineService->replyFlexMessage($replyToken, "記帳已送出", $flexPayload);
-
-                            break; // 成功推入並回覆後，跳出迴圈
 
                         } catch (Throwable $e) {
                             error_log("Failed to insert task for user {$lineUserId}: " . $e->getMessage());
                             $replyText = "系統忙碌，無法將您的記帳訊息加入處理佇列。請稍後再試。";
-                            // 失敗時，會執行後續的純文字回覆
                             $lineService->replyMessage($replyToken, $replyText);
                         }
                     }
-                    
                 }
-                
-            } elseif ($event['type'] === 'follow' && $replyToken) {
-                 // 處理追蹤事件 (略)
-            }
-
-            // 確保每次只處理一個事件
-            if ($isProcessed) break; 
+            } 
+            
+            // 跳轉標籤
+            end_of_loop:
+            if ($isProcessed) continue; 
         }
     }
-
-    // ----------------------------------------------------
-    // 6. 成功結束 (略)
-    // ----------------------------------------------------
-
 } catch (Throwable $e) {
-    // ----------------------------------------------------
-    // 7. 錯誤處理 (略)
-    // ----------------------------------------------------
     error_log("FATAL APPLICATION ERROR: " . $e->getMessage());
     http_response_code(200); 
     echo "Error";
-
     if (isset($lineService) && isset($replyToken)) {
         $lineService->replyMessage($replyToken, "系統發生錯誤，請稍後再試。");
     }

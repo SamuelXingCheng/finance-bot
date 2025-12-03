@@ -162,7 +162,6 @@ import { ref, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api'; 
 import { defineEmits } from 'vue';
 import Chart from 'chart.js/auto';
-// 🌟 1. 引入 DataLabels 外掛
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 Chart.register(ChartDataLabels);
 
@@ -173,11 +172,12 @@ const accounts = ref([]);
 const loading = ref(true);
 const aiLoading = ref(false);
 const aiAnalysis = ref('');
+// const isPremium = ref(false); // 🟢 移除會員狀態變數 (不需要鎖定)
 
 // 資產類型中文對照
 const typeNameMap = { 'Cash': '現金', 'Investment': '投資', 'Liability': '負債' };
 
-// 🌟 幣種清單
+// 幣種清單
 const currencyList = [
   { code: 'TWD', name: '新台幣 (TWD)' }, { code: 'USD', name: '美元 (USD)' },
   { code: 'JPY', name: '日圓 (JPY)' }, { code: 'CNY', name: '人民幣 (CNY)' },
@@ -207,7 +207,7 @@ const isEditMode = ref(false);
 const isSaving = ref(false);
 const form = ref({ name: '', type: 'Cash', balance: 0, currency: 'TWD' });
 
-// 🌟 幣種選擇邏輯 (新增)
+// 幣種選擇邏輯
 const currencySelectValue = ref('TWD');
 const isCustomCurrency = ref(false);
 
@@ -242,7 +242,6 @@ function openModal(account = null) {
       currency: account.currency_unit 
     };
     
-    // 🌟 判斷是否為自訂幣種
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
     if (knownCurrency) {
         currencySelectValue.value = account.currency_unit;
@@ -288,7 +287,7 @@ async function handleSave() {
   isSaving.value = false;
 }
 
-// --- API 函式 (保持不變) ---
+// --- API 函式 ---
 async function fetchAccounts() {
   loading.value = true;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_accounts`);
@@ -316,6 +315,7 @@ async function fetchChartData() {
       if (result.status === 'success') {
           chartData.value = result.data.charts || { cash: 0, investment: 0, total_assets: 0, total_liabilities: 0 };
           assetBreakdown.value = result.data.breakdown || {};
+          // 🟢 移除 isPremium 賦值
           renderAllocationChart(); renderCurrencyChart(); renderNetWorthChart();
       }
   }
@@ -336,7 +336,14 @@ async function fetchAIAnalysis() {
     if (response && response.ok) {
         const result = await response.json();
         if (result.status === 'success') aiAnalysis.value = result.data;
-        else aiAnalysis.value = "AI 回傳錯誤: " + result.message;
+        else {
+            // 友善顯示後端傳來的限制訊息
+            if (result.message && result.message.includes('免費版')) {
+                 aiAnalysis.value = result.message; 
+            } else {
+                 aiAnalysis.value = "AI 回傳錯誤: " + result.message;
+            }
+        }
     } else {
         aiAnalysis.value = "連線失敗。";
     }
@@ -348,7 +355,6 @@ async function fetchAIAnalysis() {
 function renderAllocationChart() {
     if (allocChart) allocChart.destroy();
     
-    // 計算總數，用於百分比計算
     const total = chartData.value.cash + chartData.value.investment;
 
     allocChart = new Chart(allocationChartCanvas.value, {
@@ -365,12 +371,10 @@ function renderAllocationChart() {
             cutout: '65%', 
             plugins: { 
                 legend: { display: false },
-                // 🌟 2. 設定 DataLabels：顯示百分比，過小不顯示
                 datalabels: {
                     formatter: (value, ctx) => {
                         if (total === 0) return '';
                         const percentage = Math.round((value / total) * 100);
-                        // 閾值設定：小於 5% 就不顯示文字，避免塞不下
                         return percentage >= 5 ? percentage + '%' : '';
                     },
                     color: '#fff',
@@ -392,7 +396,6 @@ function renderCurrencyChart() {
     }
     const colors = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178'];
     
-    // 計算總數
     const total = data.reduce((a, b) => a + b, 0);
 
     currChart = new Chart(currencyChartCanvas.value, {
@@ -401,7 +404,6 @@ function renderCurrencyChart() {
         options: { 
             plugins: { 
                 legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
-                // 🌟 2. 設定 DataLabels：顯示百分比，過小不顯示
                 datalabels: {
                     formatter: (value, ctx) => {
                         if (total === 0) return '';
@@ -430,7 +432,7 @@ function renderNetWorthChart() {
             indexAxis: 'y', 
             plugins: { 
                 legend: { display: false },
-                datalabels: { display: false } // 長條圖不顯示百分比
+                datalabels: { display: false } 
             }, 
             scales: { x: { display: false }, y: { grid: { display: false } } } 
         }
@@ -456,7 +458,7 @@ function renderTrendChart(data) {
             plugins: { 
                 legend: { position: 'top' }, 
                 tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: NT$ ${numberFormat(ctx.raw, 0)}` } },
-                datalabels: { display: false } // 趨勢圖不顯示標籤
+                datalabels: { display: false } 
             }, 
             scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } }, x: { grid: { display: false } } } 
         }
@@ -551,7 +553,6 @@ onMounted(() => {
 .form-row { display: flex; gap: 12px; }
 .half { flex: 1; }
 
-/* 🌟 3. 修正 Input CSS：確保所有輸入框樣式一致，解決歪掉問題 */
 .input-std {
   width: 100%; 
   padding: 10px; 
@@ -561,11 +562,10 @@ onMounted(() => {
   color: #333; 
   outline: none;
   background: #f9f9f9;
-  box-sizing: border-box; /* 關鍵：確保 padding 不會撐大寬度 */
+  box-sizing: border-box; 
   line-height: 1.5;
-  height: 44px; /* 固定高度確保對齊 */
+  height: 44px; 
 }
-/* 針對 Select 的特殊修正 */
 select.input-std {
   appearance: none;
   -webkit-appearance: none;
@@ -578,7 +578,6 @@ select.input-std {
 .input-std:focus { border-color: #d4a373; background: white; }
 .input-std:disabled { background: #eee; color: #999; cursor: not-allowed; }
 
-/* 幣種自訂輸入區塊 */
 .custom-currency-wrapper { display: flex; align-items: center; gap: 8px; width: 100%; }
 .back-btn { border: none; background: #eee; border-radius: 8px; width: 44px; height: 44px; cursor: pointer; color: #666; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; }
 

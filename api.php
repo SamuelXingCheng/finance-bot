@@ -1,13 +1,12 @@
 <?php
 // api.php
-// 設置回應標頭為 JSON 格式
 header('Content-Type: application/json; charset=utf-8');
-// 根據您的 LIFF 配置，您可能需要新增您的自訂域名
-header('Access-Control-Allow-Origin: https://liff.line.me'); 
+// 根據您的 LIFF 配置，可能需要修改允許的 Origin
+header('Access-Control-Allow-Origin: *'); 
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-// 處理 OPTIONS 請求 (CORS preflight)
+// 處理 OPTIONS 請求
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
@@ -103,6 +102,8 @@ try {
         
         case 'asset_summary':
             $summary = $assetService->getNetWorthSummary($dbUserId); 
+            // 🟢 必備：告訴前端這個人是不是會員
+            $summary['is_premium'] = $userService->isPremium($dbUserId);
             $response = ['status' => 'success', 'data' => $summary];
             break;
 
@@ -203,6 +204,24 @@ try {
             break;
         
         case 'analyze_portfolio':
+            // 🔴 1. 權限檢查
+            $isPremium = $userService->isPremium($dbUserId);
+            
+            if (!$isPremium) {
+                // 免費會員檢查用量
+                $limit = defined('LIMIT_HEALTH_CHECK_MONTHLY') ? LIMIT_HEALTH_CHECK_MONTHLY : 2;
+                $monthlyUsage = $userService->getMonthlyHealthCheckUsage($dbUserId);
+                
+                if ($monthlyUsage >= $limit) {
+                    $response = [
+                        'status' => 'error', 
+                        'message' => "🔒 免費版每月僅限 {$limit} 次 AI 健檢。\n請升級會員以解鎖無限次數。"
+                    ];
+                    break; // 中斷執行
+                }
+            }
+
+            // 2. 執行分析
             $assetData = $assetService->getNetWorthSummary($dbUserId);
             $monthlyIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
             $monthlyExpense = $transactionService->getTotalExpenseByMonth($dbUserId);
@@ -218,6 +237,9 @@ try {
             $geminiService = new GeminiService();
             $analysisText = $geminiService->analyzePortfolio($analysisData);
             
+            // 🔴 3. 成功後記錄使用量
+            $userService->logApiUsage($dbUserId, 'health_check');
+
             $response = ['status' => 'success', 'data' => $analysisText];
             break;
         
@@ -229,6 +251,19 @@ try {
             $end = $_GET['end'] ?? $defaultEnd;
             $mode = $_GET['mode'] ?? 'total';
 
+            // 🟢 限制邏輯：免費版強制鎖定日期範圍
+            $isPremium = $userService->isPremium($dbUserId);
+            
+            if (!$isPremium) {
+                // 免費版：最早只能查到 "3個月前" 的 1 號
+                $freeLimitDate = date('Y-m-01', strtotime('-3 months'));
+                
+                // 如果用戶請求的開始時間 "早於" 限制時間，強制覆寫
+                if ($start < $freeLimitDate) {
+                    $start = $freeLimitDate;
+                }
+            }
+
             if ($mode === 'category') {
                 $trendData = $transactionService->getCategoryTrendData($dbUserId, $start, $end);
             } else {
@@ -238,9 +273,6 @@ try {
             $response = ['status' => 'success', 'data' => $trendData];
             break;
 
-        // ==========================================
-        // 🌟 新增：交易列表 CRUD 路由
-        // ==========================================
         case 'get_transactions':
             $month = $_GET['month'] ?? date('Y-m'); 
             $list = $transactionService->getTransactions($dbUserId, $month);
@@ -275,7 +307,6 @@ try {
             }
             break;
         
-        // 🌟 新增：綁定 BMC Email
         case 'link_bmc':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
                 http_response_code(405); break;

@@ -73,4 +73,11 @@ if (!defined('COINGECKO_API_KEY') && !getenv('COINGECKO_API_KEY')) {
 if (!defined('GEMINI_MODEL')) define('GEMINI_MODEL', 'gemini-2.5-flash');
 if (!defined('BUDGET_WARNING_RATIO')) define('BUDGET_WARNING_RATIO', 0.9);
 
+// --- 會員限制設定 ---
+// 免費版：每日口語記帳次數限制
+if (!defined('LIMIT_VOICE_tx_ZOOM_DAILY')) define('LIMIT_VOICE_TX_DAILY', 3);
+
+// 免費版：每月/每年 AI 財務健檢次數限制 (這裡設為每月 2 次為例)
+if (!defined('LIMIT_HEALTH_CHECK_MONTHLY')) define('LIMIT_HEALTH_CHECK_MONTHLY', 2);
+
 ?>
