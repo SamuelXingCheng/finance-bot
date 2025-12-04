@@ -40,9 +40,9 @@
             <p>⚠<strong>付款前請注意：</strong></p>
             <ul>
               <li>🔹 <strong>BMC 支付：</strong>請務必在付款頁面填寫與下方綁定<strong>相同的 Email</strong>，以便系統自動開通。</li>
-              <li>🔹 <strong>加密貨幣：</strong>請選擇 <strong>USDC</strong> 進行轉帳，轉錯鏈將無法找回資金。</li>
+              <li>🔹 <strong>加密貨幣：</strong>請選擇 <strong>USDC/USDT</strong> 進行轉帳，推薦使用Polygon或是BSC鏈，手續費較低。</li>
               <li>🔹 <strong>經測試，瀏覽器Safari經常無法成功進入付款網頁，請使用Chrome。</strong></li>
-              <li>🔹 <strong>圖表功能測試階段將免費體驗，AI辨識功能超過額度則不開放，敬請見諒。</strong></li>
+              <li>🔹 <strong>測試階段，圖表功能將免費體驗，AI功能超過額度則不開放，敬請見諒。</strong></li>
             </ul>
           </div>
 
@@ -51,7 +51,7 @@
                   Apple Pay / 信用卡 / Buy me a Coffee (BMC)
               </button>
               <button class="btn-pay btn-crypto" @click="openPaymentModal('crypto')">
-                  加密貨幣支付
+                  加密貨幣支付（NOWPayments）
               </button>
           </div>
         </div>

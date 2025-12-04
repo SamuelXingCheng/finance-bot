@@ -200,7 +200,7 @@ if ($isSuccess && $activatedEmail) {
                     'backgroundColor' => '#D4A373',
                     'paddingAll' => 'lg',
                     'contents' => [
-                        ['type' => 'text', 'text' => '🎉 會員開通成功', 'weight' => 'bold', 'color' => '#FFFFFF', 'size' => 'lg']
+                        ['type' => 'text', 'text' => '會員開通成功', 'weight' => 'bold', 'color' => '#FFFFFF', 'size' => 'lg']
                     ]
                 ],
                 'body' => [
