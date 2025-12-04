@@ -130,21 +130,78 @@ if ($isSuccess && $activatedEmail) {
                 'type' => 'bubble',
                 'size' => 'kilo',
                 'header' => [
-                    'type' => 'box', 'layout' => 'vertical', 'backgroundColor' => '#272727',
+                    'type' => 'box',
+                    'layout' => 'vertical',
+                    'backgroundColor' => '#D4A373', // 🟤 統一使用 BMC 風格的暖棕色
                     'paddingAll' => 'lg',
-                    'contents' => [['type' => 'text', 'text' => '💎 加密貨幣支付成功', 'weight' => 'bold', 'color' => '#00D1FF', 'size' => 'lg']]
+                    'contents' => [
+                        [
+                            'type' => 'text',
+                            'text' => '加密貨幣支付成功', // 🚫 已移除表情符號
+                            'weight' => 'bold',
+                            'color' => '#FFFFFF',
+                            'size' => 'lg'
+                        ]
+                    ]
                 ],
                 'body' => [
-                    'type' => 'box', 'layout' => 'vertical', 'backgroundColor' => '#333333',
+                    'type' => 'box',
+                    'layout' => 'vertical',
                     'contents' => [
-                        ['type' => 'text', 'text' => '區塊鏈交易已確認', 'weight' => 'bold', 'size' => 'md', 'color' => '#FFFFFF'],
-                        ['type' => 'separator', 'margin' => 'lg', 'color' => '#555555'],
+                        ['type' => 'text', 'text' => '加密貨幣交易已確認', 'weight' => 'bold', 'size' => 'md', 'color' => '#333333'],
+                        ['type' => 'text', 'text' => '您的 Premium 權益已即時生效。', 'size' => 'xs', 'color' => '#aaaaaa', 'margin' => 'sm'],
+                        ['type' => 'separator', 'margin' => 'lg'],
                         [
                             'type' => 'box', 'layout' => 'vertical', 'margin' => 'lg', 'spacing' => 'sm', 
                             'contents' => [
-                                ['type' => 'box', 'layout' => 'baseline', 'contents' => [['type' => 'text', 'text' => '金額', 'color' => '#aaaaaa', 'flex' => 2], ['type' => 'text', 'text' => "{$priceCurrency} \${$safeAmount}", 'color' => '#FFFFFF', 'flex' => 4]]],
-                                ['type' => 'box', 'layout' => 'baseline', 'contents' => [['type' => 'text', 'text' => '效期', 'color' => '#aaaaaa', 'flex' => 2], ['type' => 'text', 'text' => "至 {$displayDate}", 'color' => '#FFD700', 'weight' => 'bold', 'flex' => 4]]]
+                                // 第一行：金額
+                                [
+                                    'type' => 'box', 'layout' => 'baseline', 
+                                    'contents' => [
+                                        ['type' => 'text', 'text' => '支付金額', 'color' => '#888888', 'size' => 'sm', 'flex' => 2],
+                                        ['type' => 'text', 'text' => "{$priceCurrency} \${$safeAmount}", 'color' => '#333333', 'size' => 'sm', 'flex' => 4]
+                                    ]
+                                ],
+                                // 第二行：增加天數
+                                [
+                                    'type' => 'box', 'layout' => 'baseline', 
+                                    'contents' => [
+                                        ['type' => 'text', 'text' => '增加天數', 'color' => '#888888', 'size' => 'sm', 'flex' => 2],
+                                        ['type' => 'text', 'text' => "+ {$days} 天", 'color' => '#333333', 'size' => 'sm', 'flex' => 4]
+                                    ]
+                                ],
+                                // 第三行：效期 (強調色)
+                                [
+                                    'type' => 'box', 'layout' => 'baseline', 
+                                    'contents' => [
+                                        ['type' => 'text', 'text' => '會員效期', 'color' => '#888888', 'size' => 'sm', 'flex' => 2],
+                                        ['type' => 'text', 'text' => "至 {$displayDate}", 'color' => '#D4A373', 'weight' => 'bold', 'size' => 'md', 'flex' => 4]
+                                    ]
+                                ],
+                                // 第四行：Email
+                                [
+                                    'type' => 'box', 'layout' => 'baseline', 
+                                    'contents' => [
+                                        ['type' => 'text', 'text' => '綁定帳號', 'color' => '#888888', 'size' => 'sm', 'flex' => 2],
+                                        ['type' => 'text', 'text' => $activatedEmail, 'color' => '#cccccc', 'size' => 'xxs', 'flex' => 4, 'wrap' => true]
+                                    ]
+                                ]
                             ]
+                        ]
+                    ]
+                ],
+                'footer' => [
+                    'type' => 'box', 'layout' => 'vertical', 
+                    'contents' => [
+                        [
+                            'type' => 'button',
+                            'action' => [
+                                'type' => 'uri',
+                                'label' => '開啟儀表板查看',
+                                'uri' => defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me/'
+                            ],
+                            'style' => 'primary',
+                            'color' => '#D4A373' // 按鈕顏色也統一
                         ]
                     ]
                 ]

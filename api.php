@@ -307,6 +307,78 @@ try {
             }
             break;
         
+        case 'create_crypto_order':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $email = trim($input['email'] ?? '');
+            
+            // 1. 基本驗證
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $response = ['status' => 'error', 'message' => 'Email 格式不正確'];
+                break;
+            }
+
+            // 2. 檢查 API Key (從 config.php / .env 載入)
+            $apiKey = defined('NOWPAYMENTS_API_KEY') ? NOWPAYMENTS_API_KEY : getenv('NOWPAYMENTS_API_KEY');
+            if (!$apiKey) {
+                error_log("❌ Error: NOWPAYMENTS_API_KEY not defined.");
+                $response = ['status' => 'error', 'message' => '系統配置錯誤 (Missing API Key)'];
+                break;
+            }
+
+            // 3. 準備訂單參數
+            // 產生唯一訂單編號，避免重複
+            $orderId = 'PREMIUM_' . $dbUserId . '_' . time();
+            
+            // 設定 Webhook 回調網址 (請確認此網域是否正確指向您的伺服器)
+            // 這裡假設您的網域與 LIFF_DASHBOARD_URL 相同網域，或您可以直接寫死 'https://finbot.tw/crypto_webhook.php'
+            $domain = 'https://finbot.tw'; // 🔴 請確認此網域
+            $webhookUrl = $domain . '/crypto_webhook.php';
+            $returnUrl = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me/';
+
+            $payload = [
+                'price_amount' => 3,        // 固定價格 3 USD
+                'price_currency' => 'usd',  // 計價單位
+                // 'pay_currency' => 'usdttrc20', // 可選：若不指定，使用者可在頁面上自選幣種 (推薦不指定)
+                'order_id' => $orderId,
+                'order_description' => $email, // 🔥 關鍵：將 Email 塞入訂單描述，Webhook 會回傳此欄位
+                'ipn_callback_url' => $webhookUrl,
+                'success_url' => $returnUrl,
+                'cancel_url' => $returnUrl
+            ];
+
+            // 4. 呼叫 NOWPayments Create Invoice API
+            $ch = curl_init('https://api.nowpayments.io/v1/invoice');
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'x-api-key: ' . $apiKey,
+                'Content-Type: application/json'
+            ]);
+            curl_setopt($ch, CURLOPT_POST, 1);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+            $apiResponse = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $result = json_decode($apiResponse, true);
+
+            // 5. 處理回應
+            if ($httpCode === 200 && isset($result['invoice_url'])) {
+                $response = [
+                    'status' => 'success', 
+                    'data' => [
+                        'invoice_url' => $result['invoice_url'],
+                        'id' => $result['id']
+                    ]
+                ];
+            } else {
+                error_log("❌ NOWPayments API Error: " . $apiResponse);
+                $response = ['status' => 'error', 'message' => '建立加密貨幣訂單失敗，請稍後再試'];
+            }
+            break;
         case 'link_bmc':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
                 http_response_code(405); break;

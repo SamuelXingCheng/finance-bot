@@ -372,31 +372,6 @@ function openPaymentModal(method) {
     isPaymentModalOpen.value = true;
 }
 
-async function handleLinkAndPay() {
-    if (!paymentEmail.value) { alert('請輸入 Email'); return; }
-    
-    isLinking.value = true;
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=link_bmc`, {
-        method: 'POST',
-        body: JSON.stringify({ email: paymentEmail.value })
-    });
-    
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') {
-            isPaymentModalOpen.value = false;
-            const targetUrl = selectedPaymentMethod.value === 'crypto' ? NOWPAYMENTS_URL : BMC_URL;
-            window.open(targetUrl, '_blank');
-            alert('已跳轉至付款頁面，完成付款後系統將自動開通權限！');
-        } else {
-            alert(result.message);
-        }
-    } else {
-        alert('API 連線失敗');
-    }
-    isLinking.value = false;
-}
-
 async function fetchAssetSummary() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_summary`);
     if (response && response.ok) {
@@ -546,6 +521,62 @@ async function handleTransactionSubmit() {
   } else {
       formMessage.value = '失敗'; messageClass.value = 'msg-error';
   }
+}
+
+async function handleLinkAndPay() {
+    if (!paymentEmail.value) { alert('請輸入 Email'); return; }
+    
+    isLinking.value = true;
+
+    // 1. 先執行資料庫綁定 (這步不變，確保 DB 有紀錄)
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=link_bmc`, {
+        method: 'POST',
+        body: JSON.stringify({ email: paymentEmail.value })
+    });
+    
+    if (response && response.ok) {
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            
+            // 2. 判斷付款方式
+            if (selectedPaymentMethod.value === 'crypto') {
+                // 💎 加密貨幣：呼叫後端建立訂單
+                try {
+                    const orderResponse = await fetchWithLiffToken(`${window.API_BASE_URL}?action=create_crypto_order`, {
+                        method: 'POST',
+                        body: JSON.stringify({ email: paymentEmail.value }) // 傳送 Email 給後端
+                    });
+                    
+                    const orderResult = await orderResponse.json();
+                    
+                    if (orderResult.status === 'success') {
+                        isPaymentModalOpen.value = false;
+                        // 開啟後端回傳的專屬付款連結
+                        window.open(orderResult.data.invoice_url, '_blank');
+                        alert('已為您建立專屬訂單！\n請在跳出的頁面完成支付，系統確認後將自動開通權限。');
+                    } else {
+                        alert('建立訂單失敗：' + (orderResult.message || '未知錯誤'));
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert('建立訂單時發生網路錯誤，請稍後再試。');
+                }
+
+            } else {
+                // ☕ BMC / 信用卡：維持原樣，開啟靜態連結
+                isPaymentModalOpen.value = false;
+                window.open(BMC_URL, '_blank');
+                alert('已跳轉至付款頁面，請務必填寫相同的 Email 以便系統自動開通！');
+            }
+
+        } else {
+            alert(result.message); // 綁定失敗的錯誤訊息
+        }
+    } else {
+        alert('API 連線失敗');
+    }
+    isLinking.value = false;
 }
 
 defineExpose({ refreshAllData });
