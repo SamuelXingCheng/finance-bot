@@ -58,10 +58,12 @@ if (!defined('DB_HOST') ||
     !defined('LINE_BOT_ACCESS_TOKEN') ||     // Messaging API Token (用於 LineService)
     !defined('LINE_LIFF_ID') ||              // LIFF App ID (用於前端初始化)
     !defined('LIFF_DASHBOARD_URL') ||        // LIFF URL (用於 Webhook 回覆)
-    !defined('GEMINI_API_KEY')) { 
+    !defined('GEMINI_API_KEY') ||
+    !defined('BMC_WEBHOOK_SECRET')           // ✅ 修正：移除右括號，加入 || 
+) {                                          // ✅ 修正：將最終括號放回此處
 
     error_log("FATAL: Required environment variables are missing in .env.");
-    die("Configuration error. Missing one or more critical LINE/DB/GEMINI environment variables.");
+    die("Configuration error. Missing one or more critical LINE/DB/GEMINI/BMC environment variables.");
 }
 
 // 確保其他常數存在 (檢查 CoinGecko Key 載入成功)

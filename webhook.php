@@ -55,6 +55,9 @@ try {
             $replyToken = $event['replyToken'] ?? null;
             $lineUserId = $event['source']['userId'] ?? null;
             
+            // 【修復】在所有事件開始前，初始化 $isProcessed
+            $isProcessed = false; 
+
             if (!$lineUserId || !$replyToken) continue;
 
             $dbUserId = $userService->findOrCreateUser($lineUserId);
@@ -64,7 +67,7 @@ try {
                 $text = trim($event['message']['text']);
                 $lowerText = strtolower($text); 
                 $replyText = "";
-                $isProcessed = false; 
+                // $isProcessed = false; // 這裡可以移除，因為已經在迴圈開頭定義了
 
                 // ====================================================
                 // 【LIFF 儀表板指令 - 最高優先級】
@@ -387,6 +390,7 @@ try {
             
             // 跳轉標籤
             end_of_loop:
+            // 由於 $isProcessed 已經在迴圈開始時初始化為 false，這裡不會再報錯
             if ($isProcessed) continue; 
         }
     }
