@@ -2,29 +2,25 @@
   <div class="crypto-container">
     
     <div class="dashboard-header">
-      <div class="header-top">
-        <h2>加密資產看板</h2>
-        <div class="currency-toggle" @click="toggleCurrency">
-          <span :class="{ active: displayCurrency === 'TWD' }">TWD</span>
-          <span :class="{ active: displayCurrency === 'USD' }">USD</span>
+      <div class="header-content">
+        <div class="subtitle">Total Balance (Est.)</div>
+        <div class="main-balance">
+          <span class="currency-symbol">$</span>
+          {{ numberFormat(dashboard.totalUsd, 2) }}
+          <span class="currency-code">USD</span>
         </div>
-      </div>
-      
-      <div class="summary-card" :class="totalPnL >= 0 ? 'bg-profit' : 'bg-loss'">
-        <div class="label">總估值 ({{ displayCurrency }})</div>
-        <div class="main-val">{{ currencySign }} {{ numberFormat(currentTotalVal, 0) }}</div>
         
-        <div class="pnl-row">
-          <div class="pnl-item">
-            <span class="sub-label">總成本</span>
-            <span class="sub-val">{{ currencySign }} {{ numberFormat(currentTotalCost, 0) }}</span>
+        <div class="stats-row">
+          <div class="stat-item">
+            <span class="label">總投入本金 (TWD)</span>
+            <span class="value">NT$ {{ numberFormat(dashboard.totalInvestedTwd, 0) }}</span>
           </div>
-          <div class="vertical-divider"></div>
-          <div class="pnl-item">
-            <span class="sub-label">未實現損益</span>
-            <span class="sub-val" :class="totalPnL >= 0 ? 'text-up' : 'text-down'">
-              {{ totalPnL >= 0 ? '+' : '' }}{{ numberFormat(totalPnL, 0) }} 
-              <small>({{ numberFormat(totalRoi, 2) }}%)</small>
+          <div class="vertical-line"></div>
+          <div class="stat-item">
+            <span class="label">未實現損益</span>
+            <span class="value" :class="dashboard.pnl >= 0 ? 'text-profit' : 'text-loss'">
+              {{ dashboard.pnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.pnl, 2) }} 
+              <small>({{ numberFormat(dashboard.pnlPercent, 2) }}%)</small>
             </span>
           </div>
         </div>
@@ -32,24 +28,44 @@
     </div>
 
     <div class="list-section">
-      <div class="section-title">
-        <h3>持倉績效</h3>
-        <button class="add-btn" @click="openModal()">+ 記帳</button>
+      <div class="section-header">
+        <h3>持倉資產</h3>
+        <button class="add-btn" @click="openTransactionModal()">
+          <span>+</span> 記一筆
+        </button>
       </div>
 
-      <div v-for="coin in cryptoList" :key="coin.currency" class="coin-card" @click="openModal(coin)">
-        <div class="card-left">
-          <div class="coin-name">
-            <span class="coin-icon" :class="coin.currency.toLowerCase()">{{ coin.currency.substring(0,1) }}</span>
-            {{ coin.currency }}
+      <div v-if="holdings.length === 0" class="empty-state">
+        <p>尚未有交易紀錄</p>
+        <p class="sub-text">點擊右上方按鈕開始記錄您的第一筆入金或交易。</p>
+      </div>
+
+      <div v-else class="coin-list">
+        <div v-for="coin in holdings" :key="coin.symbol" class="coin-card">
+          <div class="card-top">
+            <div class="coin-left">
+              <div class="coin-icon">{{ coin.symbol.substring(0,1) }}</div>
+              <div class="coin-name">
+                <span class="symbol">{{ coin.symbol }}</span>
+                <span class="amount">{{ numberFormat(coin.balance, 4) }}</span>
+              </div>
+            </div>
+            <div class="coin-right">
+              <div class="coin-value">$ {{ numberFormat(coin.valueUsd, 2) }}</div>
+              <div class="coin-pnl" :class="coin.pnl >= 0 ? 'text-profit' : 'text-loss'">
+                {{ coin.pnl >= 0 ? '+' : '' }}{{ numberFormat(coin.pnlPercent, 2) }}%
+              </div>
+            </div>
           </div>
-          <div class="coin-balance">持有: {{ numberFormat(coin.balance, 4) }}</div>
-        </div>
-        
-        <div class="card-right">
-          <div class="curr-val">{{ currencySign }} {{ numberFormat(getDisplayValue(coin), 0) }}</div>
-          <div class="pnl-tag" :class="coin.roi >= 0 ? 'tag-up' : 'tag-down'">
-            {{ coin.roi >= 0 ? '▲' : '▼' }} {{ numberFormat(Math.abs(coin.roi), 2) }}%
+          <div class="card-bottom">
+            <div class="detail-item">
+              <span class="label">均價</span>
+              <span class="val">$ {{ numberFormat(coin.avgPrice, 2) }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">現價</span>
+              <span class="val">$ {{ numberFormat(coin.currentPrice, 2) }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -57,22 +73,126 @@
 
     <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
-        <h3>{{ isEdit ? '更新持倉' : '新增資產' }}</h3>
-        <form @submit.prevent="saveAsset">
-          <div class="form-group">
-            <label>幣種 (例如 BTC)</label>
-            <input v-model="form.currency" class="input-std" :disabled="isEdit" @input="form.currency = form.currency.toUpperCase()">
+        <div class="modal-header">
+          <h3>新增紀錄</h3>
+          <button class="close-btn" @click="closeModal">×</button>
+        </div>
+
+        <div class="tabs">
+          <button 
+            v-for="tab in tabs" 
+            :key="tab.id" 
+            class="tab-btn" 
+            :class="{ active: currentTab === tab.id }"
+            @click="switchTab(tab.id)"
+          >
+            {{ tab.name }}
+          </button>
+        </div>
+
+        <form @submit.prevent="submitTransaction" class="tx-form">
+          
+          <div v-if="currentTab === 'fiat'">
+            <div class="form-group">
+              <label>動作方向</label>
+              <div class="radio-group">
+                <label class="radio-label" :class="{ active: form.type === 'deposit' }">
+                  <input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)
+                </label>
+                <label class="radio-label" :class="{ active: form.type === 'withdraw' }">
+                  <input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)
+                </label>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group half">
+                <label>台幣金額 (TWD)</label>
+                <input type="number" v-model.number="form.total" class="input-std" placeholder="例如 100000" @input="calcFiatRate">
+              </div>
+              <div class="form-group half">
+                <label>收到/轉出 (USDT)</label>
+                <input type="number" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" @input="calcFiatRate">
+              </div>
+            </div>
+            
+            <div class="info-box" v-if="form.total && form.quantity">
+              <span class="label">換算匯率:</span>
+              <span class="value">1 USDT ≈ <strong>{{ fiatRateDisplay }}</strong> TWD</span>
+            </div>
           </div>
-          <div class="form-group">
-            <label>持有數量 (Balance)</label>
-            <input type="number" v-model="form.balance" step="any" class="input-std" required>
+
+          <div v-if="currentTab === 'trade'">
+            <div class="form-group">
+              <label>交易對 (Pair)</label>
+              <div class="input-group">
+                <input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2">
+                <span class="separator">/</span>
+                <input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>動作</label>
+              <div class="radio-group">
+                <label class="radio-label buy" :class="{ active: form.type === 'buy' }">
+                  <input type="radio" v-model="form.type" value="buy"> 買入 (Buy)
+                </label>
+                <label class="radio-label sell" :class="{ active: form.type === 'sell' }">
+                  <input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)
+                </label>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group half">
+                <label>成交價格 (Price)</label>
+                <input type="number" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal">
+              </div>
+              <div class="form-group half">
+                <label>數量 (Amount)</label>
+                <input type="number" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>總金額 (Total USDT)</label>
+              <input type="number" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity">
+            </div>
           </div>
-          <div class="form-group">
-            <label>總投入成本 (TWD)</label>
-            <input type="number" v-model="form.cost" step="0.01" class="input-std" placeholder="你總共花了多少台幣買這些幣？">
-            <p class="hint">輸入 0 代表不計算成本 (例如空投)</p>
+
+          <div v-if="currentTab === 'earn'">
+            <div class="form-group">
+              <label>幣種</label>
+              <input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH (Staking)">
+            </div>
+            <div class="form-group">
+              <label>獲得數量</label>
+              <input type="number" v-model.number="form.quantity" class="input-std" placeholder="0.00">
+            </div>
+            <p class="hint">理財收益或空投的成本將視為 0，這會降低您的持倉均價。</p>
           </div>
-          <button type="submit" class="save-btn">儲存</button>
+
+          <div class="form-row mt-4">
+            <div class="form-group half">
+              <label>手續費 (Fee)</label>
+              <input type="number" v-model.number="form.fee" class="input-std" placeholder="0">
+            </div>
+            <div class="form-group half">
+              <label>日期</label>
+              <input type="date" v-model="form.date" class="input-std">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>備註</label>
+            <input type="text" v-model="form.note" class="input-std" placeholder="例如: 幣安 DCA, Max 入金">
+          </div>
+
+          <button type="submit" class="save-btn" :class="currentTab">
+            {{ submitButtonText }}
+          </button>
+
         </form>
       </div>
     </div>
@@ -81,72 +201,249 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, reactive, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 
-const displayCurrency = ref('TWD'); // 'TWD' or 'USD'
+// --- 資料狀態 (預設為 0/空，等待 API 載入) ---
+const dashboard = ref({
+  totalUsd: 0,
+  totalInvestedTwd: 0,
+  pnl: 0,
+  pnlPercent: 0
+});
+
+const holdings = ref([]); // 空陣列
+const usdTwdRate = ref(32); // 預設匯率，API 會更新
 const loading = ref(false);
-const accounts = ref([]); // 原始帳戶資料
-const usdTwdRate = ref(32); // 匯率
 
-// 狀態與 Modal
+// --- UI 狀態 ---
 const isModalOpen = ref(false);
-const isEdit = ref(false);
-const form = ref({ currency: '', balance: 0, cost: 0, name: 'CryptoWallet' });
+const currentTab = ref('trade'); // trade, fiat, earn
+const tabs = [
+  { id: 'fiat', name: '出入金 (TWD)' },
+  { id: 'trade', name: '交易 (Trade)' },
+  { id: 'earn', name: '理財 (Earn)' }
+];
 
-// 1. 計算屬性：轉換原始資料為績效列表
-const cryptoList = computed(() => {
-  // 過濾出 Crypto (這裡假設非 TWD/USD 等法幣即為 Crypto，或根據 API 回傳的類型)
-  const fiats = ['TWD', 'USD', 'JPY', 'EUR'];
+// --- 表單資料 ---
+const form = reactive({
+  type: 'buy', 
+  baseCurrency: '',
+  quoteCurrency: 'USDT',
+  price: null,
+  quantity: null,
+  total: null,
+  fee: null,
+  date: new Date().toISOString().substring(0, 10),
+  note: ''
+});
+
+// --- 計算屬性 ---
+const fiatRateDisplay = computed(() => {
+  if (form.total && form.quantity && form.quantity > 0) {
+    return (form.total / form.quantity).toFixed(2);
+  }
+  return '0.00';
+});
+
+const submitButtonText = computed(() => {
+  if (currentTab.value === 'fiat') return form.type === 'deposit' ? '確認入金' : '確認出金';
+  if (currentTab.value === 'trade') return form.type === 'buy' ? '確認買入' : '確認賣出';
+  return '新增紀錄';
+});
+
+// --- API 串接 ---
+
+// 1. 讀取數據
+async function fetchCryptoData() {
+  loading.value = true;
+  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_summary`);
   
-  return accounts.value.filter(acc => !fiats.includes(acc.currency_unit)).map(acc => {
-    // 這裡需要後端 API 支援回傳 cost_basis，若無則預設 0
-    const cost = parseFloat(acc.cost_basis || 0); 
-    const balance = parseFloat(acc.balance);
-    
-    // 假設我們有從 asset_summary 拿到現價 (此處簡化，實際建議由後端算好單價傳過來)
-    // 這裡先模擬： Value (TWD) / Balance = 單價
-    // 實際上您應該修改 getAccounts API 回傳 TWD 估值，或者在前端呼叫 CoinGecko
-    const currentValTwd = acc.estimated_twd_value || (balance * 0); // 需後端配合
-    
-    const pnl = currentValTwd - cost;
-    const roi = cost > 0 ? (pnl / cost) * 100 : 0;
+  if (response && response.ok) {
+    const result = await response.json();
+    if (result.status === 'success') {
+      dashboard.value = result.data.dashboard;
+      holdings.value = result.data.holdings;
+      if (result.data.usdTwdRate) {
+        usdTwdRate.value = result.data.usdTwdRate;
+      }
+    }
+  }
+  loading.value = false;
+}
 
-    return {
-        ...acc,
-        currency: acc.currency_unit,
-        balance: balance,
-        costTwd: cost,
-        valTwd: currentValTwd,
-        pnlTwd: pnl,
-        roi: roi
-    };
+// 2. 送出交易
+async function submitTransaction() {
+  // 準備資料
+  const payload = { ...form };
+  
+  if (currentTab.value === 'fiat') {
+    // 出入金: 價格 = 匯率
+    payload.price = form.quantity > 0 ? (form.total / form.quantity) : 0;
+    payload.baseCurrency = 'USDT';
+    payload.quoteCurrency = 'TWD';
+  } else if (currentTab.value === 'trade') {
+    // 交易: 確保幣種大寫
+    payload.baseCurrency = form.baseCurrency.toUpperCase();
+    payload.quoteCurrency = form.quoteCurrency.toUpperCase();
+  } else {
+    payload.baseCurrency = form.baseCurrency.toUpperCase();
+  }
+
+  // 呼叫 API
+  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_crypto_transaction`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
+
+  if (response && response.ok) {
+    const result = await response.json();
+    if (result.status === 'success') {
+      closeModal();
+      fetchCryptoData(); // 成功後刷新列表
+      alert('✅ 紀錄成功！');
+    } else {
+      alert('❌ 失敗：' + result.message);
+    }
+  } else {
+    alert('網路錯誤，請稍後再試');
+  }
+}
+
+// --- 輔助邏輯 ---
+function openTransactionModal() { resetForm(); isModalOpen.value = true; }
+function closeModal() { isModalOpen.value = false; }
+
+function switchTab(tabId) {
+  currentTab.value = tabId;
+  resetForm();
+  if (tabId === 'fiat') {
+    form.type = 'deposit';
+    form.baseCurrency = 'USDT';
+    form.quoteCurrency = 'TWD';
+  } else if (tabId === 'trade') {
+    form.type = 'buy';
+    form.baseCurrency = '';
+    form.quoteCurrency = 'USDT';
+  } else if (tabId === 'earn') {
+    form.type = 'earn';
+  }
+}
+
+function resetForm() {
+  form.price = null; form.quantity = null; form.total = null; form.fee = null; form.note = '';
+  form.date = new Date().toISOString().substring(0, 10);
+}
+
+// 自動計算 (Excel 體驗)
+function calcTotal() {
+  if (form.price && form.quantity) {
+    form.total = parseFloat((form.price * form.quantity).toFixed(4));
+  }
+}
+function calcQuantity() {
+  if (form.total && form.price && form.price > 0) {
+    form.quantity = parseFloat((form.total / form.price).toFixed(6));
+  }
+}
+function calcFiatRate() {} // 純顯示用
+
+onMounted(() => {
+  fetchCryptoData();
 });
-
-// 2. 切換匯率顯示邏輯
-const currencySign = computed(() => displayCurrency.value === 'TWD' ? 'NT$' : '$');
-const toggleCurrency = () => { displayCurrency.value = displayCurrency.value === 'TWD' ? 'USD' : 'TWD'; }
-
-// 3. 計算總值
-const currentTotalVal = computed(() => {
-    // 實作加總邏輯，並根據匯率轉換
-    return 0; // 範例
-});
-// ... 類似邏輯計算 cost, pnl ...
-
-// ... API 呼叫 (saveAsset, fetchAccounts) ...
 </script>
 
 <style scoped>
-/* 樣式重點：
-   1. 雙本位切換按鈕要顯眼
-   2. 盈虧顏色要直觀 (綠漲紅跌)
-   3. 成本輸入框要有提示
-*/
-.bg-profit { background: linear-gradient(135deg, #134e5e 0%, #71b280 100%); color: white; }
-.bg-loss { background: linear-gradient(135deg, #4b1212 0%, #9e2a2a 100%); color: white; }
-.text-up { color: #76ff03; }
-.text-down { color: #ff8a80; }
-/* ... 其他 CSS 沿用您現有的文青風 ... */
+/* 基本樣式 (與 AccountManager 一致) */
+.crypto-container { padding-bottom: 40px; color: #5d5d5d; }
+
+/* 1. Dashboard Header (USD 本位，強調大數字) */
+.dashboard-header {
+  background: white;
+  margin: 0 0 20px 0;
+  padding: 24px 20px;
+  border-bottom: 1px solid #f0ebe5;
+}
+.subtitle { font-size: 0.85rem; color: #8c7b75; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+.main-balance { font-size: 2.2rem; font-weight: 700; color: #333; margin-bottom: 20px; }
+.currency-symbol { font-size: 1.2rem; vertical-align: top; color: #888; margin-right: 2px; }
+.currency-code { font-size: 0.9rem; color: #aaa; font-weight: 400; margin-left: 4px; }
+
+.stats-row { display: flex; justify-content: space-between; background: #fdfcfb; padding: 12px; border-radius: 12px; border: 1px solid #f0f0f0; }
+.stat-item { flex: 1; display: flex; flex-direction: column; align-items: center; }
+.vertical-line { width: 1px; background: #eee; margin: 0 10px; }
+.stat-item .label { font-size: 0.75rem; color: #999; margin-bottom: 4px; }
+.stat-item .value { font-size: 0.95rem; font-weight: 600; color: #555; }
+
+/* 2. Holdings List */
+.list-section { padding: 0 16px; }
+.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.section-header h3 { margin: 0; color: #8c7b75; font-size: 1.1rem; }
+.add-btn { background-color: #d4a373; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 5px rgba(212, 163, 115, 0.3); }
+
+.empty-state { text-align: center; padding: 40px 20px; background: white; border-radius: 16px; border: 1px dashed #ddd; color: #aaa; }
+.sub-text { font-size: 0.8rem; margin-top: 8px; }
+
+.coin-list { display: flex; flex-direction: column; gap: 12px; }
+.coin-card { background: white; border-radius: 16px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border: 1px solid #f0ebe5; }
+.card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.coin-left { display: flex; align-items: center; gap: 10px; }
+.coin-icon { width: 36px; height: 36px; background: #f5f5f5; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #555; }
+.coin-name { display: flex; flex-direction: column; }
+.coin-name .symbol { font-weight: 700; font-size: 1rem; color: #333; }
+.coin-name .amount { font-size: 0.8rem; color: #999; }
+.coin-right { text-align: right; }
+.coin-value { font-weight: 600; font-size: 1rem; }
+.coin-pnl { font-size: 0.8rem; font-weight: 500; margin-top: 2px; }
+
+.card-bottom { display: flex; justify-content: space-between; border-top: 1px dashed #eee; padding-top: 10px; }
+.detail-item { font-size: 0.8rem; color: #888; }
+.detail-item .val { color: #555; margin-left: 4px; font-weight: 500; }
+
+/* 3. Modal & Tabs */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; justify-content: center; align-items: flex-end; }
+.modal-content { background: white; width: 100%; max-width: 500px; border-radius: 20px 20px 0 0; padding: 24px; animation: slideUp 0.3s ease-out; max-height: 90vh; overflow-y: auto; }
+@media (min-width: 600px) { .modal-overlay { align-items: center; } .modal-content { border-radius: 16px; width: 420px; } }
+
+.modal-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+.modal-header h3 { margin: 0; color: #333; }
+.close-btn { background: none; border: none; font-size: 1.5rem; color: #999; cursor: pointer; }
+
+/* Tabs */
+.tabs { display: flex; background: #f2f2f2; padding: 4px; border-radius: 12px; margin-bottom: 20px; }
+.tab-btn { flex: 1; border: none; background: transparent; padding: 8px; font-size: 0.9rem; color: #777; cursor: pointer; border-radius: 10px; transition: all 0.2s; }
+.tab-btn.active { background: white; color: #333; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+/* Form Elements */
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 0.85rem; color: #888; margin-bottom: 6px; }
+.form-row { display: flex; gap: 12px; }
+.half { flex: 1; width: 50%; }
+.input-std { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 1rem; box-sizing: border-box; background: #f9f9f9; transition: all 0.2s; }
+.input-std:focus { border-color: #d4a373; background: white; outline: none; }
+.uppercase { text-transform: uppercase; }
+
+.input-group { display: flex; align-items: center; gap: 8px; }
+.separator { color: #aaa; font-weight: bold; }
+
+.radio-group { display: flex; gap: 10px; }
+.radio-label { flex: 1; text-align: center; padding: 10px; border: 1px solid #eee; border-radius: 10px; cursor: pointer; font-size: 0.9rem; color: #666; transition: all 0.2s; background: #fafafa; }
+.radio-label input { display: none; }
+.radio-label.active { border-color: #d4a373; color: #d4a373; background: #fff8f0; font-weight: 600; }
+.radio-label.buy.active { border-color: #2A9D8F; color: #2A9D8F; background: #e6fcf5; }
+.radio-label.sell.active { border-color: #e5989b; color: #c44536; background: #fff5f5; }
+
+.info-box { background: #f0f7ff; padding: 10px; border-radius: 8px; font-size: 0.85rem; color: #336699; display: flex; justify-content: space-between; margin-top: -8px; margin-bottom: 16px; }
+.hint { font-size: 0.8rem; color: #999; margin-top: -10px; margin-bottom: 16px; }
+.mt-4 { margin-top: 16px; }
+
+.save-btn { width: 100%; padding: 14px; background: #d4a373; color: white; border: none; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px; }
+.save-btn.fiat { background: #333; } /* 出入金用深色 */
+.save-btn.trade { background: #2A9D8F; } /* 交易用綠色(默認買) - 可配合邏輯變色 */
+
+/* Colors */
+.text-profit { color: #2A9D8F; }
+.text-loss { color: #e5989b; }
+
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 </style>

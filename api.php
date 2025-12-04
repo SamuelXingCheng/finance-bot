@@ -397,6 +397,30 @@ try {
                 $response = ['status' => 'error', 'message' => '綁定失敗'];
             }
             break;
+        // 🟢 1. 獲取加密貨幣儀表板數據
+        case 'get_crypto_summary':
+            $cryptoService = new CryptoService();
+            $data = $cryptoService->getDashboardData($dbUserId);
+            $response = ['status' => 'success', 'data' => $data];
+            break;
+
+        // 🟢 2. 新增加密貨幣交易流水
+        case 'add_crypto_transaction':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                break;
+            }
+            
+            $input = json_decode(file_get_contents('php://input'), true);
+            $cryptoService = new CryptoService();
+            
+            if ($cryptoService->addTransaction($dbUserId, $input)) {
+                $response = ['status' => 'success', 'message' => '交易紀錄已新增'];
+            } else {
+                $response = ['status' => 'error', 'message' => '新增失敗，請檢查欄位'];
+            }
+            break;
 
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];

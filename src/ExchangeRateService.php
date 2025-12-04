@@ -13,7 +13,7 @@ class ExchangeRateService {
     private const RATES_TO_USD = [
         'EUR' => 1.08, 'GBP' => 1.25, 'CAD' => 0.74, 'AUD' => 0.65, 
         'CNY' => 0.14, 'HKD' => 0.128, 'SGD' => 0.74,
-        'BTC' => 40000.0, 'ETH' => 2000.0, 'ADA' => 0.5, 'USDT' => 1.0, 
+        'BTC' => 100000.0, 'ETH' => 3000.0, 'ADA' => 0.5, 'USDT' => 1.0, 
     ];
     
     // USD 兌換 TWD 的最終匯率
