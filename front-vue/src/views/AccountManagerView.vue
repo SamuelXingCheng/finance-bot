@@ -39,13 +39,13 @@
       </div>
 
       <div class="chart-card">
-        <h3>地區配置 (台灣 vs 美國)</h3>
+        <h3>地區配置 (台灣 vs 海外)</h3>
         <div class="chart-box">
           <canvas ref="twUsChartCanvas"></canvas>
         </div>
         <div class="chart-meta">
           <span class="dot tw-stock"></span> 台: {{ numberFormat(chartData.tw_invest, 0) }}
-          <span class="dot us-stock ml-2"></span> 美: {{ numberFormat(chartData.us_invest, 0) }}
+          <span class="dot us-stock ml-2"></span> 外: {{ numberFormat(chartData.overseas_invest, 0) }}
         </div>
       </div>
 
@@ -61,7 +61,7 @@
       </div>
 
       <div class="chart-card">
-        <h3>法幣分佈</h3>
+        <h3>法幣 vs 加密貨幣配置</h3>
         <div class="chart-box">
           <canvas ref="currencyChartCanvas"></canvas>
         </div>
@@ -225,7 +225,7 @@ const currencyList = [
 // 圖表狀態
 const chartData = ref({ 
     cash: 0, investment: 0, total_assets: 0, total_liabilities: 0,
-    stock: 0, bond: 0, tw_invest: 0, us_invest: 0 
+    stock: 0, bond: 0, tw_invest: 0, overseas_invest: 0 
 });
 const assetBreakdown = ref({}); 
 const trendFilter = ref({
@@ -235,8 +235,8 @@ const trendFilter = ref({
 
 // Canvas Refs
 const allocationChartCanvas = ref(null);
-const twUsChartCanvas = ref(null);      // 新增
-const stockBondChartCanvas = ref(null); // 新增
+const twUsChartCanvas = ref(null);
+const stockBondChartCanvas = ref(null);
 const currencyChartCanvas = ref(null);
 const holdingValueChartCanvas = ref(null);
 const netWorthChartCanvas = ref(null);
@@ -244,8 +244,8 @@ const trendChartCanvas = ref(null);
 
 // Chart Instances
 let allocChart = null; 
-let twUsChart = null;      // 新增
-let stockBondChart = null; // 新增
+let twUsChart = null;
+let stockBondChart = null;
 let currChart = null; 
 let holdingValueChart = null;
 let nwChart = null; 
@@ -372,14 +372,14 @@ async function fetchChartData() {
               stock: result.data.charts.stock || 0,
               bond: result.data.charts.bond || 0,
               tw_invest: result.data.charts.tw_invest || 0,
-              us_invest: result.data.charts.us_invest || 0
+              overseas_invest: result.data.charts.overseas_invest || 0 // 🟢
           };
           assetBreakdown.value = result.data.breakdown || {};
           
           renderAllocationChart();
-          renderTwUsChart();      // 新增
-          renderStockBondChart(); // 新增
-          renderCurrencyChart();
+          renderRegionChart();      // 🟢 改名並更新邏輯
+          renderStockBondChart(); 
+          renderFiatCryptoChart();  // 🟢 改名並更新邏輯
           renderHoldingValueChart();
           renderNetWorthChart();
       }
@@ -451,19 +451,17 @@ function renderAllocationChart() {
     });
 }
 
-// [新增] 渲染 台股 vs 美股 圖表
-function renderTwUsChart() {
+// 🟢 [修改] 渲染 台灣 vs 海外 圖表
+function renderRegionChart() {
     if (twUsChart) twUsChart.destroy();
-    
-    // 以 台股 + 美股 總和為分母
-    const total = chartData.value.tw_invest + chartData.value.us_invest;
+    const total = chartData.value.tw_invest + chartData.value.overseas_invest;
 
     twUsChart = new Chart(twUsChartCanvas.value, {
         type: 'doughnut',
         data: {
-            labels: ['台股 (TWD)', '美股 (USD)'],
+            labels: ['台灣', '海外'],
             datasets: [{ 
-                data: [chartData.value.tw_invest, chartData.value.us_invest], 
+                data: [chartData.value.tw_invest, chartData.value.overseas_invest], 
                 backgroundColor: ['#E9C46A', '#264653'], // 黃色 vs 深藍
                 borderWidth: 0 
             }]
@@ -488,70 +486,51 @@ function renderTwUsChart() {
     });
 }
 
-// [新增] 渲染 股票 vs 債券 圖表
 function renderStockBondChart() {
     if (stockBondChart) stockBondChart.destroy();
-    
     const total = chartData.value.stock + chartData.value.bond;
-
     stockBondChart = new Chart(stockBondChartCanvas.value, {
         type: 'doughnut',
-        data: {
-            labels: ['股票', '債券'],
-            datasets: [{ 
-                data: [chartData.value.stock, chartData.value.bond], 
-                backgroundColor: ['#F4A261', '#2A9D8F'], // 橘色 vs 綠色
-                borderWidth: 0 
-            }]
-        },
-        options: { 
-            cutout: '65%', 
-            plugins: { 
-                legend: { display: false },
-                datalabels: {
-                    formatter: (value, ctx) => {
-                        if (total === 0) return '';
-                        const percentage = Math.round((value / total) * 100);
-                        return percentage >= 5 ? percentage + '%' : '';
-                    },
-                    color: '#fff',
-                    font: { weight: 'bold', size: 12 },
-                    anchor: 'center',
-                    align: 'center'
-                }
-            } 
-        }
+        data: { labels: ['股票', '債券'], datasets: [{ data: [chartData.value.stock, chartData.value.bond], backgroundColor: ['#F4A261', '#2A9D8F'], borderWidth: 0 }] },
+        options: { cutout: '65%', plugins: { legend: { display: false }, datalabels: { formatter: (val) => total===0?'':Math.round((val/total)*100)>5?Math.round((val/total)*100)+'%':'', color:'#fff', font:{weight:'bold'} } } }
     });
 }
 
-function renderCurrencyChart() {
+// 🟢 [修改] 法幣 vs 加密貨幣 配置圖 (甜甜圈圖)
+function renderFiatCryptoChart() {
     if (currChart) currChart.destroy();
     
-    // 篩選邏輯：只包含在 fiatCurrencies 列表中的幣種
-    const sortedData = Object.entries(assetBreakdown.value)
-        .filter(([key, val]) => fiatCurrencies.includes(key) && val.twd_total > 0)
-        .map(([key, val]) => ({ key, val: val.twd_total }))
-        .sort((a, b) => b.val - a.val);
+    // 計算總法幣資產 vs 總加密貨幣資產
+    let totalFiat = 0;
+    let totalCrypto = 0;
 
-    const labels = []; 
-    const data = [];
-    sortedData.forEach(item => { labels.push(item.key); data.push(item.val); });
+    Object.entries(assetBreakdown.value).forEach(([currency, data]) => {
+        if (data.twd_total <= 0) return;
+        if (fiatCurrencies.includes(currency)) {
+            totalFiat += data.twd_total;
+        } else {
+            totalCrypto += data.twd_total;
+        }
+    });
 
-    const colors = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D'];
-    const total = data.reduce((a, b) => a + b, 0);
+    const total = totalFiat + totalCrypto;
 
     currChart = new Chart(currencyChartCanvas.value, {
-        type: 'pie',
-        data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 1, borderColor: '#fff' }] },
+        type: 'doughnut',
+        data: { 
+            labels: ['法幣', '加密貨幣'], 
+            datasets: [{ 
+                data: [totalFiat, totalCrypto], 
+                backgroundColor: ['#A5A58D', '#6B705C'], // 灰色系/軍綠
+                borderWidth: 0
+            }] 
+        },
         options: { 
+            cutout: '65%',
             responsive: true,
             maintainAspectRatio: false, 
-            layout: { padding: 10 },
             plugins: { 
-                legend: { 
-                    position: 'bottom', 
-                    labels: { boxWidth: 12, font: { size: 11 }, padding: 15 } 
-                },
+                legend: { display: false },
                 datalabels: {
                     formatter: (value, ctx) => {
                         if (total === 0) return '';
@@ -568,47 +547,49 @@ function renderCurrencyChart() {
     });
 }
 
+// 🟢 [修改] 加密貨幣分佈 (改為 Doughnut 並顯示百分比)
 function renderHoldingValueChart() {
     if (holdingValueChart) holdingValueChart.destroy();
     
-    // 篩選邏輯：排除法幣列表，即視為加密貨幣
+    // 篩選邏輯：排除法幣列表
     const sortedItems = Object.entries(assetBreakdown.value)
         .filter(([key, val]) => !fiatCurrencies.includes(key) && val.twd_total > 0)
         .map(([currency, data]) => ({ currency, value: data.twd_total }))
         .sort((a, b) => b.value - a.value);
 
     const labels = sortedItems.map(i => i.currency);
-    const data = sortedItems.map(i => i.value);
+    const dataValues = sortedItems.map(i => i.value);
+    const total = dataValues.reduce((a,b) => a+b, 0);
+
+    // 產生漸層色系 (科技藍)
+    const cryptoColors = ['#0077B6', '#0096C7', '#00B4D8', '#48CAE4', '#90E0EF', '#ADE8F4', '#CAF0F8'];
 
     holdingValueChart = new Chart(holdingValueChartCanvas.value, {
-        type: 'bar',
+        type: 'doughnut',
         data: {
             labels: labels,
             datasets: [{
-                label: 'TWD 價值',
-                data: data,
-                backgroundColor: '#88b0b3', // 加密貨幣使用科技感藍綠色
-                borderRadius: 4,
-                barThickness: 15 
+                data: dataValues,
+                backgroundColor: cryptoColors, 
+                borderWidth: 0
             }]
         },
         options: {
-            indexAxis: 'y', 
+            cutout: '65%',
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
                 legend: { display: false }, 
                 datalabels: {
-                    anchor: 'end',
-                    align: 'end',
-                    formatter: (val) => numberFormat(val, 0), 
-                    color: '#666',
-                    font: { size: 10 }
+                    formatter: (value, ctx) => {
+                        if (total === 0) return '';
+                        const percentage = Math.round((value / total) * 100);
+                        // 只顯示佔比大於 5% 的標籤
+                        return percentage >= 5 ? ctx.chart.data.labels[ctx.dataIndex] + ' ' + percentage + '%' : '';
+                    },
+                    color: '#fff',
+                    font: { size: 11, weight: 'bold' }
                 }
-            },
-            scales: {
-                x: { display: false, grid: { display: false } },
-                y: { grid: { display: false }, ticks: { font: { weight: 'bold' } } }
             }
         }
     });

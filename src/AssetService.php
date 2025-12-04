@@ -5,7 +5,7 @@ require_once __DIR__ . '/ExchangeRateService.php';
 
 class AssetService {
     private $pdo;
-    // 1. 🟢 修改：擴充允許的類型，加入 Stock 和 Bond
+    // 擴充允許的類型
     private const VALID_TYPES = ['Cash', 'Investment', 'Liability', 'Stock', 'Bond'];
 
     public function __construct() {
@@ -19,10 +19,10 @@ class AssetService {
             return $input;
         }
 
-        // 2. 🟢 修改：更新中文映射，讓「股票」與「債券」能正確歸類
+        // 更新中文映射
         $map = [
             '現金' => 'Cash', '活存' => 'Cash', '銀行' => 'Cash',
-            '投資' => 'Investment', // 舊有資料保留為 Investment
+            '投資' => 'Investment',
             '股票' => 'Stock', '證券' => 'Stock', '美股' => 'Stock', '台股' => 'Stock',
             '債券' => 'Bond', '債' => 'Bond',
             '負債' => 'Liability', '房貸' => 'Liability', '車貸' => 'Liability',
@@ -34,7 +34,6 @@ class AssetService {
     }
 
     public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit): bool {
-        // ... (保持原樣)
         $assetType = $this->sanitizeAssetType($type); 
         $sql = "INSERT INTO accounts (user_id, name, type, balance, currency_unit)
                 VALUES (:userId, :name, :type, :balance, :unit)
@@ -70,15 +69,15 @@ class AssetService {
             
             // 統計變數
             $totalCash = 0.0;
-            $totalInvest = 0.0; // 廣義投資 (含 Stock, Bond, Investment)
+            $totalInvest = 0.0; 
             $totalAssets = 0.0;
             $totalLiabilities = 0.0;
 
-            // 3. 🟢 新增：新圖表需要的統計變數
+            // 新圖表需要的統計變數
             $totalStock = 0.0;
             $totalBond = 0.0;
             $totalTwInvest = 0.0; // 台股 (TWD 計價的投資)
-            $totalUsInvest = 0.0; // 美股 (USD 計價的投資)
+            $totalOverseasInvest = 0.0; // 海外 (非 TWD 計價的投資)
     
             foreach ($results as $row) {
                 $currency = $row['currency_unit'];
@@ -111,21 +110,20 @@ class AssetService {
                     if ($type === 'Cash') {
                         $totalCash += $twdValue;
                     } else {
-                        // 廣義投資 (Investment, Stock, Bond)
+                        // 廣義投資
                         $totalInvest += $twdValue;
 
-                        // 統計股債 (將舊的 Investment 暫時歸類為 Stock，或根據需求調整)
                         if ($type === 'Stock' || $type === 'Investment') {
                             $totalStock += $twdValue;
                         } elseif ($type === 'Bond') {
                             $totalBond += $twdValue;
                         }
 
-                        // 統計地區 (僅計算投資類資產)
+                        // 🟢 統計地區：非 TWD 皆視為海外投資
                         if ($currency === 'TWD') {
                             $totalTwInvest += $twdValue;
-                        } elseif ($currency === 'USD') {
-                            $totalUsInvest += $twdValue;
+                        } else {
+                            $totalOverseasInvest += $twdValue;
                         }
                     }
                 }
@@ -145,11 +143,10 @@ class AssetService {
                     'investment' => $totalInvest,
                     'total_assets' => $totalAssets,
                     'total_liabilities' => $totalLiabilities,
-                    // 4. 🟢 新增回傳欄位
                     'stock' => $totalStock,
                     'bond' => $totalBond,
                     'tw_invest' => $totalTwInvest,
-                    'us_invest' => $totalUsInvest
+                    'overseas_invest' => $totalOverseasInvest // 🟢 新增回傳欄位
                 ]
             ];
         } catch (PDOException $e) {
@@ -158,7 +155,6 @@ class AssetService {
         }
     }
 
-    // 🌟 新增方法 1：獲取單一用戶的所有帳戶列表
     public function getAccounts(int $userId): array {
         $sql = "SELECT name, type, balance, currency_unit, last_updated_at 
                 FROM accounts 
@@ -169,19 +165,16 @@ class AssetService {
             $stmt->execute([':userId' => $userId]);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
-            error_log("AssetService getAccounts failed: " . $e->getMessage());
             return [];
         }
     }
 
-    // 🌟 新增方法 2：刪除帳戶
     public function deleteAccount(int $userId, string $name): bool {
         $sql = "DELETE FROM accounts WHERE user_id = :userId AND name = :name";
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([':userId' => $userId, ':name' => $name]);
         } catch (PDOException $e) {
-            error_log("AssetService deleteAccount failed: " . $e->getMessage());
             return false;
         }
     }
