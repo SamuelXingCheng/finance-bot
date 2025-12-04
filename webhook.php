@@ -145,7 +145,7 @@ try {
                 // --- 3. 資產查詢指令 (恢復原版 Flex) ---
                 elseif (in_array($text, ['查詢資產', '資產總覽', '淨值'])) {
                     $result = $assetService->getNetWorthSummary($dbUserId);
-                    $summary = $result['breakdown'];
+                    $summary = $result['breakdown']; 
                     $globalNetWorthTWD = $result['global_twd_net_worth'];
                     $usdTwdRate = $result['usdTwdRate'];
                     
@@ -157,6 +157,52 @@ try {
                     $heroSize = ($textLength > 16) ? 'xl' : (($textLength > 12) ? 'xl' : 'xxl');
                     $globalNetWorthColor = $globalNetWorthTWD >= 0 ? '#007AFF' : '#FF334B';
                     
+                    // ====================================================
+                    // 🌟 淨值資產排序優化邏輯 (法幣在前，加密貨幣在後)
+                    // ====================================================
+                    $fiatSummary = [];
+                    $cryptoSummary = [];
+
+                    // 1. 定義法幣與加密貨幣的優先順序
+                    $fiatOrder = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'CAD', 'AUD', 'HKD', 'SGD'];
+                    $cryptoOrder = ['BTC', 'ETH', 'USDT', 'ADA', 'XMR']; // 從 ExchangeRateService::COIN_ID_MAP 擷取
+
+                    // 2. 分離幣種
+                    foreach ($summary as $currency => $data) {
+                        // 使用 ExchangeRateService 中的常量判斷是否為已知加密貨幣
+                        if (isset(ExchangeRateService::COIN_ID_MAP[$currency])) {
+                            $cryptoSummary[$currency] = $data;
+                        } else {
+                            $fiatSummary[$currency] = $data;
+                        }
+                    }
+
+                    // 3. 排序法幣：優先順序在前，其餘字母排序
+                    $sortedFiat = [];
+                    foreach ($fiatOrder as $key) {
+                        if (isset($fiatSummary[$key])) {
+                            $sortedFiat[$key] = $fiatSummary[$key];
+                            unset($fiatSummary[$key]);
+                        }
+                    }
+                    ksort($fiatSummary); // 剩餘的法幣按字母排序
+                    $sortedFiat = array_merge($sortedFiat, $fiatSummary);
+
+                    // 4. 排序加密貨幣：優先順序在前，其餘字母排序
+                    $sortedCrypto = [];
+                    foreach ($cryptoOrder as $key) {
+                        if (isset($cryptoSummary[$key])) {
+                            $sortedCrypto[$key] = $cryptoSummary[$key];
+                            unset($cryptoSummary[$key]);
+                        }
+                    }
+                    ksort($cryptoSummary); // 剩餘的加密貨幣按字母排序
+                    $sortedCrypto = array_merge($sortedCrypto, $cryptoSummary);
+
+                    // 5. 合併：法幣在前 + 加密貨幣在後
+                    $summary = array_merge($sortedFiat, $sortedCrypto);
+                    // ====================================================
+
                     if (!empty($summary)) {
                         foreach ($summary as $currency => $data) {
                             $assetsDisplay = rtrim(rtrim(number_format($data['assets'], 8), '0'), '.');
@@ -165,7 +211,7 @@ try {
                             $twdTotal = number_format($data['twd_total'], 2);
 
                             $netWorthColor = $data['net_worth'] >= 0 ? '#1DB446' : '#FF334B';
-                            $netWorthEmoji = $data['net_worth'] >= 0 ? '🟢' : '🔴';
+                            $netWorthEmoji = ''; // 🌟 已移除表情符號 (原為 '🟢' 或 '🔴')
 
                             $assetBodyContents[] = [
                                 'type' => 'text', 'text' => "{$currency} 資產總覽", 'weight' => 'bold', 'color' => '#333333', 'size' => 'md', 'margin' => 'xl'
@@ -449,3 +495,4 @@ try {
         $lineService->replyMessage($replyToken, "系統發生錯誤，請稍後再試。");
     }
 }
+?>
