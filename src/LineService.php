@@ -166,6 +166,33 @@ class LineService {
         }
         return true;
     }
+
+    /**
+     * 【新增】取得訊息內容 (圖片、影片、音訊)
+     * @param string $messageId
+     * @return string|false 二進位檔案內容
+     */
+    public function getMessageContent(string $messageId) {
+        // LINE 取得內容的 API 端點
+        $url = "https://api-data.line.me/v2/bot/message/{$messageId}/content";
+        
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $this->channelAccessToken,
+        ]);
+        
+        $result = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 200) {
+            return $result;
+        }
+        
+        error_log("LINE Get Content Error: HTTP $httpCode");
+        return false;
+    }
     
 }
 ?>

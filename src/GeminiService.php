@@ -35,7 +35,7 @@ class GeminiService {
         // 取得當前日期，用於 AI 推斷日期的預設值
         $today = date('Y-m-d');
         
-        // 強化版 System Instruction (日期推斷以當前日期為準)
+        // 🟢 保持您原本的 System Instruction 完全不動
         $systemInstruction = <<<EOD
 --- 核心指令：專業結構化數據轉換引擎 ---
 
@@ -85,14 +85,49 @@ Output:
 規則 3: 請提取具體品項作為 description。
 EOD;
         
-        // 修正：將系統指令與用戶輸入合併，以繞過 API 結構限制
-        $mergedText = $systemInstruction . "\n\nUser input: " . $text;
-        
+        // 🟢 修改點開始：判斷輸入是「純文字」還是「檔案路徑」
+        $parts = [];
+
+        // 檢查字串是否以 'FILE:' 開頭
+        if (strncmp($text, 'FILE:', 5) === 0) {
+            // === 處理音訊 ===
+            $filePath = trim(substr($text, 5)); // 去掉前綴取得路徑
+            
+            if (file_exists($filePath)) {
+                // 讀取檔案並轉為 Base64
+                $fileData = file_get_contents($filePath);
+                $base64Data = base64_encode($fileData);
+
+                // 建構多模態請求 (Prompt + Audio)
+                // 我們將 System Instruction 放在 text part，並附加上一段語音提示
+                $parts = [
+                    ['text' => $systemInstruction . "\n\n[系統提示] 這是一段用戶的語音記帳，請仔細聆聽並提取所有消費金額與項目。"],
+                    [
+                        'inline_data' => [
+                            'mime_type' => 'audio/mp4', // LINE 的 m4a 屬於 MPEG-4 容器，Gemini 支援 audio/mp4
+                            'data' => $base64Data
+                        ]
+                    ]
+                ];
+                
+                // (可選) 處理完後刪除暫存檔以節省空間
+                // unlink($filePath); 
+            } else {
+                error_log("GeminiService Error: Audio file not found at {$filePath}");
+                return null;
+            }
+        } else {
+            // === 處理純文字 (原本的邏輯) ===
+            $mergedText = $systemInstruction . "\n\nUser input: " . $text;
+            $parts = [['text' => $mergedText]];
+        }
+
+        // 組裝最終 API 請求資料
         $data = [
             'contents' => [
                 [
                     'role' => 'user',
-                    'parts' => [['text' => $mergedText]]
+                    'parts' => $parts // 這裡傳入動態生成的 parts
                 ]
             ],
             'generationConfig' => [ 
@@ -100,8 +135,9 @@ EOD;
                 'responseSchema' => $this->transactionSchema
             ]
         ];
+        // 🟢 修改點結束
 
-        // ... (API 呼叫與錯誤處理邏輯不變)
+        // ... (以下 API 呼叫與錯誤處理邏輯保持不變)
         $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
@@ -133,10 +169,7 @@ EOD;
     }
 
     /**
-     * 🌟 分析資產配置並提供建議
-     */
-    /**
-     * 🌟 綜合分析：資產配置 + 收支狀況
+     * 🌟 分析資產配置並提供建議 (保持不變)
      */
     public function analyzePortfolio(array $data): string {
         // 1. 解構資產數據
@@ -202,3 +235,4 @@ EOD;
         return $result['candidates'][0]['content']['parts'][0]['text'] ?? 'AI 目前無法進行分析，請稍後再試。';
     }
 }
+?>
