@@ -5,7 +5,8 @@ require_once __DIR__ . '/ExchangeRateService.php';
 
 class AssetService {
     private $pdo;
-    private const VALID_TYPES = ['Cash', 'Investment', 'Liability'];
+    // 1. 🟢 修改：擴充允許的類型，加入 Stock 和 Bond
+    private const VALID_TYPES = ['Cash', 'Investment', 'Liability', 'Stock', 'Bond'];
 
     public function __construct() {
         $this->pdo = Database::getInstance()->getConnection();
@@ -14,15 +15,16 @@ class AssetService {
     public function sanitizeAssetType(string $input): string {
         $input = trim($input);
 
-        // 🌟 修正點：如果輸入已經是合法的英文類型 (例如從網頁傳來的)，直接回傳
         if (in_array($input, self::VALID_TYPES)) {
             return $input;
         }
 
-        // 原本的中文映射邏輯
+        // 2. 🟢 修改：更新中文映射，讓「股票」與「債券」能正確歸類
         $map = [
             '現金' => 'Cash', '活存' => 'Cash', '銀行' => 'Cash',
-            '投資' => 'Investment', '股票' => 'Investment', '基金' => 'Investment',
+            '投資' => 'Investment', // 舊有資料保留為 Investment
+            '股票' => 'Stock', '證券' => 'Stock', '美股' => 'Stock', '台股' => 'Stock',
+            '債券' => 'Bond', '債' => 'Bond',
             '負債' => 'Liability', '房貸' => 'Liability', '車貸' => 'Liability',
             '卡債' => 'Liability', '借款' => 'Liability',
         ];
@@ -66,11 +68,17 @@ class AssetService {
             $globalNetWorthUSD = 0.0;
             $usdTwdRate = $rateService->getUsdTwdRate();
             
-            // 🌟 新增：分類統計變數
+            // 統計變數
             $totalCash = 0.0;
-            $totalInvest = 0.0;
+            $totalInvest = 0.0; // 廣義投資 (含 Stock, Bond, Investment)
             $totalAssets = 0.0;
             $totalLiabilities = 0.0;
+
+            // 3. 🟢 新增：新圖表需要的統計變數
+            $totalStock = 0.0;
+            $totalBond = 0.0;
+            $totalTwInvest = 0.0; // 台股 (TWD 計價的投資)
+            $totalUsInvest = 0.0; // 美股 (USD 計價的投資)
     
             foreach ($results as $row) {
                 $currency = $row['currency_unit'];
@@ -92,20 +100,33 @@ class AssetService {
                     $summary[$currency]['liabilities'] += $total;
                     $summary[$currency]['net_worth'] -= $total;
                     $globalNetWorthUSD -= $usdValue;
-                    
-                    // 🌟 累加總負債
                     $totalLiabilities += $twdValue;
                 } else {
                     $summary[$currency]['assets'] += $total;
                     $summary[$currency]['net_worth'] += $total;
                     $globalNetWorthUSD += $usdValue;
-                    
-                    // 🌟 累加總資產與類別
                     $totalAssets += $twdValue;
+
+                    // 分類統計
                     if ($type === 'Cash') {
                         $totalCash += $twdValue;
-                    } elseif ($type === 'Investment') {
+                    } else {
+                        // 廣義投資 (Investment, Stock, Bond)
                         $totalInvest += $twdValue;
+
+                        // 統計股債 (將舊的 Investment 暫時歸類為 Stock，或根據需求調整)
+                        if ($type === 'Stock' || $type === 'Investment') {
+                            $totalStock += $twdValue;
+                        } elseif ($type === 'Bond') {
+                            $totalBond += $twdValue;
+                        }
+
+                        // 統計地區 (僅計算投資類資產)
+                        if ($currency === 'TWD') {
+                            $totalTwInvest += $twdValue;
+                        } elseif ($currency === 'USD') {
+                            $totalUsInvest += $twdValue;
+                        }
                     }
                 }
                 
@@ -119,12 +140,16 @@ class AssetService {
                 'breakdown' => $summary, 
                 'global_twd_net_worth' => $globalNetWorthTWD,
                 'usdTwdRate' => $usdTwdRate,
-                // 🌟 新增：前端繪圖需要的統計數據
                 'charts' => [
                     'cash' => $totalCash,
                     'investment' => $totalInvest,
                     'total_assets' => $totalAssets,
-                    'total_liabilities' => $totalLiabilities
+                    'total_liabilities' => $totalLiabilities,
+                    // 4. 🟢 新增回傳欄位
+                    'stock' => $totalStock,
+                    'bond' => $totalBond,
+                    'tw_invest' => $totalTwInvest,
+                    'us_invest' => $totalUsInvest
                 ]
             ];
         } catch (PDOException $e) {

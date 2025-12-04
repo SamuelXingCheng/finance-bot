@@ -28,7 +28,7 @@
     <div class="charts-wrapper mb-6">
       
       <div class="chart-card">
-        <h3>配置 (現金 vs 投資)</h3>
+        <h3>現金流配置 (現金 vs 投資)</h3>
         <div class="chart-box">
           <canvas ref="allocationChartCanvas"></canvas>
         </div>
@@ -39,14 +39,43 @@
       </div>
 
       <div class="chart-card">
-        <h3>幣種分佈</h3>
+        <h3>地區配置 (台灣 vs 美國)</h3>
+        <div class="chart-box">
+          <canvas ref="twUsChartCanvas"></canvas>
+        </div>
+        <div class="chart-meta">
+          <span class="dot tw-stock"></span> 台: {{ numberFormat(chartData.tw_invest, 0) }}
+          <span class="dot us-stock ml-2"></span> 美: {{ numberFormat(chartData.us_invest, 0) }}
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h3>股債配置</h3>
+        <div class="chart-box">
+          <canvas ref="stockBondChartCanvas"></canvas>
+        </div>
+        <div class="chart-meta">
+          <span class="dot stock"></span> 股: {{ numberFormat(chartData.stock, 0) }}
+          <span class="dot bond ml-2"></span> 債: {{ numberFormat(chartData.bond, 0) }}
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h3>法幣分佈</h3>
         <div class="chart-box">
           <canvas ref="currencyChartCanvas"></canvas>
         </div>
       </div>
 
       <div class="chart-card">
-        <h3>資產負債表</h3>
+        <h3>加密貨幣分佈</h3>
+        <div class="chart-box">
+          <canvas ref="holdingValueChartCanvas"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h3>資產負債總覽</h3>
         <div class="chart-box">
           <canvas ref="netWorthChartCanvas"></canvas>
         </div>
@@ -121,7 +150,9 @@
             <label>資產類型</label>
             <select v-model="form.type" class="input-std">
               <option value="Cash">現金/活存</option>
-              <option value="Investment">投資</option>
+              <option value="Stock">股票 (台灣/海外)</option>
+              <option value="Bond">債券</option>
+              <option value="Investment">其他投資</option>
               <option value="Liability">負債</option>
             </select>
           </div>
@@ -172,10 +203,15 @@ const accounts = ref([]);
 const loading = ref(true);
 const aiLoading = ref(false);
 const aiAnalysis = ref('');
-// const isPremium = ref(false); // 🟢 移除會員狀態變數 (不需要鎖定)
 
 // 資產類型中文對照
-const typeNameMap = { 'Cash': '現金', 'Investment': '投資', 'Liability': '負債' };
+const typeNameMap = { 
+    'Cash': '現金', 
+    'Investment': '投資', 
+    'Stock': '股票', 
+    'Bond': '債券', 
+    'Liability': '負債' 
+};
 
 // 幣種清單
 const currencyList = [
@@ -187,7 +223,10 @@ const currencyList = [
 ];
 
 // 圖表狀態
-const chartData = ref({ cash: 0, investment: 0, total_assets: 0, total_liabilities: 0 });
+const chartData = ref({ 
+    cash: 0, investment: 0, total_assets: 0, total_liabilities: 0,
+    stock: 0, bond: 0, tw_invest: 0, us_invest: 0 
+});
 const assetBreakdown = ref({}); 
 const trendFilter = ref({
     start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
@@ -196,10 +235,21 @@ const trendFilter = ref({
 
 // Canvas Refs
 const allocationChartCanvas = ref(null);
+const twUsChartCanvas = ref(null);      // 新增
+const stockBondChartCanvas = ref(null); // 新增
 const currencyChartCanvas = ref(null);
+const holdingValueChartCanvas = ref(null);
 const netWorthChartCanvas = ref(null);
 const trendChartCanvas = ref(null);
-let allocChart = null; let currChart = null; let nwChart = null; let trendChart = null;
+
+// Chart Instances
+let allocChart = null; 
+let twUsChart = null;      // 新增
+let stockBondChart = null; // 新增
+let currChart = null; 
+let holdingValueChart = null;
+let nwChart = null; 
+let trendChart = null;
 
 // Modal 與表單狀態
 const isModalOpen = ref(false);
@@ -210,6 +260,9 @@ const form = ref({ name: '', type: 'Cash', balance: 0, currency: 'TWD' });
 // 幣種選擇邏輯
 const currencySelectValue = ref('TWD');
 const isCustomCurrency = ref(false);
+
+// 定義法幣列表 (用來過濾)
+const fiatCurrencies = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'HKD', 'AUD', 'CAD', 'SGD', 'KRW'];
 
 function handleCurrencyChange() {
     if (currencySelectValue.value === 'CUSTOM') {
@@ -313,10 +366,22 @@ async function fetchChartData() {
   if (response && response.ok) {
       const result = await response.json();
       if (result.status === 'success') {
-          chartData.value = result.data.charts || { cash: 0, investment: 0, total_assets: 0, total_liabilities: 0 };
+          // 確保接收後端的新欄位
+          chartData.value = {
+              ...result.data.charts,
+              stock: result.data.charts.stock || 0,
+              bond: result.data.charts.bond || 0,
+              tw_invest: result.data.charts.tw_invest || 0,
+              us_invest: result.data.charts.us_invest || 0
+          };
           assetBreakdown.value = result.data.breakdown || {};
-          // 🟢 移除 isPremium 賦值
-          renderAllocationChart(); renderCurrencyChart(); renderNetWorthChart();
+          
+          renderAllocationChart();
+          renderTwUsChart();      // 新增
+          renderStockBondChart(); // 新增
+          renderCurrencyChart();
+          renderHoldingValueChart();
+          renderNetWorthChart();
       }
   }
 }
@@ -337,7 +402,6 @@ async function fetchAIAnalysis() {
         const result = await response.json();
         if (result.status === 'success') aiAnalysis.value = result.data;
         else {
-            // 友善顯示後端傳來的限制訊息
             if (result.message && result.message.includes('免費版')) {
                  aiAnalysis.value = result.message; 
             } else {
@@ -387,23 +451,27 @@ function renderAllocationChart() {
     });
 }
 
-function renderCurrencyChart() {
-    if (currChart) currChart.destroy();
-    const labels = []; const data = [];
-    for (const currency in assetBreakdown.value) {
-        const item = assetBreakdown.value[currency];
-        if (item.twd_total > 0) { labels.push(currency); data.push(item.twd_total); }
-    }
-    const colors = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178'];
+// [新增] 渲染 台股 vs 美股 圖表
+function renderTwUsChart() {
+    if (twUsChart) twUsChart.destroy();
     
-    const total = data.reduce((a, b) => a + b, 0);
+    // 以 台股 + 美股 總和為分母
+    const total = chartData.value.tw_invest + chartData.value.us_invest;
 
-    currChart = new Chart(currencyChartCanvas.value, {
-        type: 'pie',
-        data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }] },
+    twUsChart = new Chart(twUsChartCanvas.value, {
+        type: 'doughnut',
+        data: {
+            labels: ['台股 (TWD)', '美股 (USD)'],
+            datasets: [{ 
+                data: [chartData.value.tw_invest, chartData.value.us_invest], 
+                backgroundColor: ['#E9C46A', '#264653'], // 黃色 vs 深藍
+                borderWidth: 0 
+            }]
+        },
         options: { 
+            cutout: '65%', 
             plugins: { 
-                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
+                legend: { display: false },
                 datalabels: {
                     formatter: (value, ctx) => {
                         if (total === 0) return '';
@@ -411,11 +479,137 @@ function renderCurrencyChart() {
                         return percentage >= 5 ? percentage + '%' : '';
                     },
                     color: '#fff',
-                    font: { weight: 'bold', size: 11 },
+                    font: { weight: 'bold', size: 12 },
                     anchor: 'center',
                     align: 'center'
                 }
             } 
+        }
+    });
+}
+
+// [新增] 渲染 股票 vs 債券 圖表
+function renderStockBondChart() {
+    if (stockBondChart) stockBondChart.destroy();
+    
+    const total = chartData.value.stock + chartData.value.bond;
+
+    stockBondChart = new Chart(stockBondChartCanvas.value, {
+        type: 'doughnut',
+        data: {
+            labels: ['股票', '債券'],
+            datasets: [{ 
+                data: [chartData.value.stock, chartData.value.bond], 
+                backgroundColor: ['#F4A261', '#2A9D8F'], // 橘色 vs 綠色
+                borderWidth: 0 
+            }]
+        },
+        options: { 
+            cutout: '65%', 
+            plugins: { 
+                legend: { display: false },
+                datalabels: {
+                    formatter: (value, ctx) => {
+                        if (total === 0) return '';
+                        const percentage = Math.round((value / total) * 100);
+                        return percentage >= 5 ? percentage + '%' : '';
+                    },
+                    color: '#fff',
+                    font: { weight: 'bold', size: 12 },
+                    anchor: 'center',
+                    align: 'center'
+                }
+            } 
+        }
+    });
+}
+
+function renderCurrencyChart() {
+    if (currChart) currChart.destroy();
+    
+    // 篩選邏輯：只包含在 fiatCurrencies 列表中的幣種
+    const sortedData = Object.entries(assetBreakdown.value)
+        .filter(([key, val]) => fiatCurrencies.includes(key) && val.twd_total > 0)
+        .map(([key, val]) => ({ key, val: val.twd_total }))
+        .sort((a, b) => b.val - a.val);
+
+    const labels = []; 
+    const data = [];
+    sortedData.forEach(item => { labels.push(item.key); data.push(item.val); });
+
+    const colors = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D'];
+    const total = data.reduce((a, b) => a + b, 0);
+
+    currChart = new Chart(currencyChartCanvas.value, {
+        type: 'pie',
+        data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 1, borderColor: '#fff' }] },
+        options: { 
+            responsive: true,
+            maintainAspectRatio: false, 
+            layout: { padding: 10 },
+            plugins: { 
+                legend: { 
+                    position: 'bottom', 
+                    labels: { boxWidth: 12, font: { size: 11 }, padding: 15 } 
+                },
+                datalabels: {
+                    formatter: (value, ctx) => {
+                        if (total === 0) return '';
+                        const percentage = Math.round((value / total) * 100);
+                        return percentage >= 3 ? percentage + '%' : '';
+                    },
+                    color: '#fff',
+                    font: { weight: 'bold', size: 12 },
+                    textShadowBlur: 2,
+                    textShadowColor: 'rgba(0,0,0,0.3)'
+                }
+            } 
+        }
+    });
+}
+
+function renderHoldingValueChart() {
+    if (holdingValueChart) holdingValueChart.destroy();
+    
+    // 篩選邏輯：排除法幣列表，即視為加密貨幣
+    const sortedItems = Object.entries(assetBreakdown.value)
+        .filter(([key, val]) => !fiatCurrencies.includes(key) && val.twd_total > 0)
+        .map(([currency, data]) => ({ currency, value: data.twd_total }))
+        .sort((a, b) => b.value - a.value);
+
+    const labels = sortedItems.map(i => i.currency);
+    const data = sortedItems.map(i => i.value);
+
+    holdingValueChart = new Chart(holdingValueChartCanvas.value, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'TWD 價值',
+                data: data,
+                backgroundColor: '#88b0b3', // 加密貨幣使用科技感藍綠色
+                borderRadius: 4,
+                barThickness: 15 
+            }]
+        },
+        options: {
+            indexAxis: 'y', 
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }, 
+                datalabels: {
+                    anchor: 'end',
+                    align: 'end',
+                    formatter: (val) => numberFormat(val, 0), 
+                    color: '#666',
+                    font: { size: 10 }
+                }
+            },
+            scales: {
+                x: { display: false, grid: { display: false } },
+                y: { grid: { display: false }, ticks: { font: { weight: 'bold' } } }
+            }
         }
     });
 }
@@ -493,13 +687,25 @@ onMounted(() => {
 
 /* 圖表容器 */
 .charts-wrapper { display: grid; grid-template-columns: 1fr; gap: 16px; }
-@media (min-width: 600px) { .charts-wrapper { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 600px) { 
+    .charts-wrapper { grid-template-columns: 1fr 1fr; } 
+}
 .chart-card { background: white; padding: 16px; border-radius: 16px; border: 1px solid #f0ebe5; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; align-items: center; }
 .chart-card h3 { font-size: 0.95rem; color: #8c7b75; margin: 0 0 12px 0; align-self: flex-start; }
-.chart-box { width: 100%; height: 160px; position: relative; display: flex; justify-content: center; }
+.chart-box { 
+    width: 100%; 
+    height: 220px; 
+    position: relative; 
+    display: flex; 
+    justify-content: center; 
+}
 .chart-meta { margin-top: 10px; font-size: 0.8rem; color: #666; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .dot.cash { background: #A8DADC; } .dot.invest { background: #457B9D; }
+/* 新增的顏色點樣式 */
+.dot.tw-stock { background: #E9C46A; } .dot.us-stock { background: #264653; }
+.dot.stock { background: #F4A261; } .dot.bond { background: #2A9D8F; }
+
 .ml-2 { margin-left: 8px; }
 .wide-card { grid-column: 1 / -1; display: block; }
 .chart-header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
