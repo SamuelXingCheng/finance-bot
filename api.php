@@ -22,6 +22,7 @@ require_once 'src/AssetService.php';
 require_once 'src/TransactionService.php'; 
 require_once 'src/ExchangeRateService.php'; 
 require_once 'src/GeminiService.php';
+require_once 'src/CryptoService.php';
 
 /**
  * LIFF 專用驗證函式

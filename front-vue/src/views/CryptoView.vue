@@ -108,11 +108,11 @@
             <div class="form-row">
               <div class="form-group half">
                 <label>台幣金額 (TWD)</label>
-                <input type="number" v-model.number="form.total" class="input-std" placeholder="例如 100000" @input="calcFiatRate">
+                <input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" @input="calcFiatRate">
               </div>
               <div class="form-group half">
                 <label>收到/轉出 (USDT)</label>
-                <input type="number" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" @input="calcFiatRate">
+                <input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" @input="calcFiatRate">
               </div>
             </div>
             
@@ -147,17 +147,17 @@
             <div class="form-row">
               <div class="form-group half">
                 <label>成交價格 (Price)</label>
-                <input type="number" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal">
+                <input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal">
               </div>
               <div class="form-group half">
                 <label>數量 (Amount)</label>
-                <input type="number" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal">
+                <input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal">
               </div>
             </div>
 
             <div class="form-group">
               <label>總金額 (Total USDT)</label>
-              <input type="number" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity">
+              <input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity">
             </div>
           </div>
 
@@ -168,7 +168,7 @@
             </div>
             <div class="form-group">
               <label>獲得數量</label>
-              <input type="number" v-model.number="form.quantity" class="input-std" placeholder="0.00">
+              <input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00">
             </div>
             <p class="hint">理財收益或空投的成本將視為 0，這會降低您的持倉均價。</p>
           </div>
@@ -176,7 +176,7 @@
           <div class="form-row mt-4">
             <div class="form-group half">
               <label>手續費 (Fee)</label>
-              <input type="number" v-model.number="form.fee" class="input-std" placeholder="0">
+              <input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0">
             </div>
             <div class="form-group half">
               <label>日期</label>
@@ -204,7 +204,7 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 
-// --- 資料狀態 (預設為 0/空，等待 API 載入) ---
+// --- 資料狀態 ---
 const dashboard = ref({
   totalUsd: 0,
   totalInvestedTwd: 0,
@@ -212,8 +212,8 @@ const dashboard = ref({
   pnlPercent: 0
 });
 
-const holdings = ref([]); // 空陣列
-const usdTwdRate = ref(32); // 預設匯率，API 會更新
+const holdings = ref([]);
+const usdTwdRate = ref(32);
 const loading = ref(false);
 
 // --- UI 狀態 ---
@@ -274,7 +274,6 @@ async function fetchCryptoData() {
 
 // 2. 送出交易
 async function submitTransaction() {
-  // 準備資料
   const payload = { ...form };
   
   if (currentTab.value === 'fiat') {
@@ -283,14 +282,12 @@ async function submitTransaction() {
     payload.baseCurrency = 'USDT';
     payload.quoteCurrency = 'TWD';
   } else if (currentTab.value === 'trade') {
-    // 交易: 確保幣種大寫
     payload.baseCurrency = form.baseCurrency.toUpperCase();
     payload.quoteCurrency = form.quoteCurrency.toUpperCase();
   } else {
     payload.baseCurrency = form.baseCurrency.toUpperCase();
   }
 
-  // 呼叫 API
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_crypto_transaction`, {
     method: 'POST',
     body: JSON.stringify(payload)
@@ -300,7 +297,7 @@ async function submitTransaction() {
     const result = await response.json();
     if (result.status === 'success') {
       closeModal();
-      fetchCryptoData(); // 成功後刷新列表
+      fetchCryptoData();
       alert('✅ 紀錄成功！');
     } else {
       alert('❌ 失敗：' + result.message);
@@ -335,7 +332,6 @@ function resetForm() {
   form.date = new Date().toISOString().substring(0, 10);
 }
 
-// 自動計算 (Excel 體驗)
 function calcTotal() {
   if (form.price && form.quantity) {
     form.total = parseFloat((form.price * form.quantity).toFixed(4));
@@ -346,7 +342,7 @@ function calcQuantity() {
     form.quantity = parseFloat((form.total / form.price).toFixed(6));
   }
 }
-function calcFiatRate() {} // 純顯示用
+function calcFiatRate() {}
 
 onMounted(() => {
   fetchCryptoData();
@@ -354,10 +350,9 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 基本樣式 (與 AccountManager 一致) */
+/* (樣式保持不變，直接沿用即可) */
 .crypto-container { padding-bottom: 40px; color: #5d5d5d; }
 
-/* 1. Dashboard Header (USD 本位，強調大數字) */
 .dashboard-header {
   background: white;
   margin: 0 0 20px 0;
@@ -375,7 +370,6 @@ onMounted(() => {
 .stat-item .label { font-size: 0.75rem; color: #999; margin-bottom: 4px; }
 .stat-item .value { font-size: 0.95rem; font-weight: 600; color: #555; }
 
-/* 2. Holdings List */
 .list-section { padding: 0 16px; }
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .section-header h3 { margin: 0; color: #8c7b75; font-size: 1.1rem; }
@@ -400,7 +394,6 @@ onMounted(() => {
 .detail-item { font-size: 0.8rem; color: #888; }
 .detail-item .val { color: #555; margin-left: 4px; font-weight: 500; }
 
-/* 3. Modal & Tabs */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; justify-content: center; align-items: flex-end; }
 .modal-content { background: white; width: 100%; max-width: 500px; border-radius: 20px 20px 0 0; padding: 24px; animation: slideUp 0.3s ease-out; max-height: 90vh; overflow-y: auto; }
 @media (min-width: 600px) { .modal-overlay { align-items: center; } .modal-content { border-radius: 16px; width: 420px; } }
@@ -409,12 +402,10 @@ onMounted(() => {
 .modal-header h3 { margin: 0; color: #333; }
 .close-btn { background: none; border: none; font-size: 1.5rem; color: #999; cursor: pointer; }
 
-/* Tabs */
 .tabs { display: flex; background: #f2f2f2; padding: 4px; border-radius: 12px; margin-bottom: 20px; }
 .tab-btn { flex: 1; border: none; background: transparent; padding: 8px; font-size: 0.9rem; color: #777; cursor: pointer; border-radius: 10px; transition: all 0.2s; }
 .tab-btn.active { background: white; color: #333; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
-/* Form Elements */
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 0.85rem; color: #888; margin-bottom: 6px; }
 .form-row { display: flex; gap: 12px; }
@@ -438,10 +429,9 @@ onMounted(() => {
 .mt-4 { margin-top: 16px; }
 
 .save-btn { width: 100%; padding: 14px; background: #d4a373; color: white; border: none; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px; }
-.save-btn.fiat { background: #333; } /* 出入金用深色 */
-.save-btn.trade { background: #2A9D8F; } /* 交易用綠色(默認買) - 可配合邏輯變色 */
+.save-btn.fiat { background: #333; }
+.save-btn.trade { background: #2A9D8F; }
 
-/* Colors */
 .text-profit { color: #2A9D8F; }
 .text-loss { color: #e5989b; }
 

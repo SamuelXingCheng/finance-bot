@@ -24,7 +24,7 @@
             @click="currentTab = 'Crypto'" 
             :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']"
           >
-            Crypto
+            Crypto(開發中)
           </button>
         </div>
 
