@@ -441,6 +441,36 @@ try {
                 $response = ['status' => 'error', 'message' => '新增失敗，請檢查欄位'];
             }
             break;
+        
+        case 'get_account_history':
+            $accountName = $_GET['name'] ?? '';
+            if (empty($accountName)) {
+                $response = ['status' => 'error', 'message' => '缺少帳戶名稱'];
+                break;
+            }
+            $history = $assetService->getAccountSnapshots($dbUserId, $accountName);
+            $response = ['status' => 'success', 'data' => $history];
+            break;
+        
+        case 'delete_snapshot':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $accountName = $input['account_name'] ?? '';
+            $snapshotDate = $input['snapshot_date'] ?? '';
+            
+            if (empty($accountName) || empty($snapshotDate)) {
+                $response = ['status' => 'error', 'message' => '缺少帳戶名稱或快照日期'];
+                break;
+            }
+            
+            if ($assetService->deleteSnapshot($dbUserId, $accountName, $snapshotDate)) {
+                $response = ['status' => 'success', 'message' => '歷史快照已刪除'];
+            } else {
+                $response = ['status' => 'error', 'message' => '刪除失敗'];
+            }
+            break;
 
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];

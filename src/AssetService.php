@@ -293,5 +293,44 @@ class AssetService {
             return false;
         }
     }
+
+    /**
+     * 🟢 新增：取得單一帳戶的歷史快照列表
+     */
+    public function getAccountSnapshots(int $userId, string $accountName, int $limit = 50): array {
+        // 限制只撈取最新的 50 筆記錄，按日期遞減排序
+        $sql = "SELECT account_name, balance, currency_unit, snapshot_date 
+                FROM account_balance_history 
+                WHERE user_id = :userId AND account_name = :name 
+                ORDER BY snapshot_date DESC 
+                LIMIT :limit";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':userId', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':name', $accountName, PDO::PARAM_STR);
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("getAccountSnapshots Error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * 🟢 新增：刪除單筆歷史快照
+     */
+    public function deleteSnapshot(int $userId, string $accountName, string $snapshotDate): bool {
+        // 使用複合鍵 (user_id, account_name, snapshot_date) 來唯一識別並刪除快照
+        $sql = "DELETE FROM account_balance_history 
+                WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute([':userId' => $userId, ':name' => $accountName, ':date' => $snapshotDate]);
+        } catch (PDOException $e) {
+            error_log("deleteSnapshot failed: " . $e->getMessage());
+            return false;
+        }
+    }
 }
 ?>

@@ -31,9 +31,9 @@
         <div class="chart-header-row">
             <h3>資產成長趨勢 (歷史淨值)</h3>
             <div class="date-controls">
-                <button @click="fetchAssetHistory('1M')" class="filter-btn-sm">1月</button>
-                <button @click="fetchAssetHistory('6M')" class="filter-btn-sm">6月</button>
-                <button @click="fetchAssetHistory('1Y')" class="filter-btn-sm">1年</button>
+                <button @click="fetchAssetHistory('1m')" class="filter-btn-sm" :class="{active: historyRange==='1m'}">1月</button>
+                <button @click="fetchAssetHistory('6m')" class="filter-btn-sm" :class="{active: historyRange==='6m'}">6月</button>
+                <button @click="fetchAssetHistory('1y')" class="filter-btn-sm" :class="{active: historyRange==='1y'}">1年</button>
             </div>
         </div>
         <div class="chart-box-lg">
@@ -139,12 +139,68 @@
           <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
             {{ numberFormat(account.balance, 2) }}
           </div>
+          
           <div class="action-buttons">
+            <button 
+                class="text-btn view-history" 
+                @click="fetchAccountHistory(account.name)"
+                :disabled="historyLoading"
+            >
+                快照
+            </button>
+            
             <button class="text-btn edit" @click="openModal(account)">編輯</button>
             <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="isHistoryModalOpen" class="modal-backdrop" @click.self="closeHistoryModal">
+        <div class="modal-content history-modal">
+            <div class="modal-header">
+                <h3>{{ currentAccountName }} - 歷史快照</h3>
+                <button @click="closeHistoryModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div v-if="historyLoading" class="list-group">
+                    <li class="list-group-item">載入中...</li>
+                </div>
+                <div v-else-if="accountHistory.length === 0" class="list-group">
+                     <li class="list-group-item">此帳戶尚無歷史快照記錄。</li>
+                </div>
+                <ul v-else class="list-group">
+                    <li 
+                        v-for="item in accountHistory" 
+                        :key="item.snapshot_date"
+                        class="list-group-item"
+                    >
+                        <div class="list-left">
+                            <span class="date">{{ item.snapshot_date }}</span>
+                            <span class="balance">
+                                {{ numberFormat(item.balance, 2) }} {{ item.currency_unit }}
+                            </span>
+                        </div>
+                        <div class="list-actions-sm">
+                            <button 
+                                class="text-btn edit-sm" 
+                                @click="openModalForSnapshot(item)" 
+                                title="修改該日快照"
+                            >
+                                修改
+                            </button>
+                            <button 
+                                class="text-btn delete-sm" 
+                                @click="handleDeleteSnapshot(item.account_name, item.snapshot_date)"
+                                title="刪除該日快照"
+                            >
+                                刪除
+                            </button>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
     </div>
 
     <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
@@ -187,8 +243,8 @@
             <div class="form-group half">
               <label>幣種</label>
               <div v-if="isCustomCurrency" class="custom-currency-wrapper">
-                 <input type="text" v-model="form.currency" class="input-std" placeholder="代碼" required @input="forceUppercase">
-                 <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
+                  <input type="text" v-model="form.currency" class="input-std" placeholder="代碼" required @input="forceUppercase">
+                  <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
               </div>
               <select v-else v-model="currencySelectValue" class="input-std" @change="handleCurrencyChange">
                 <option v-for="c in currencyList" :key="c.code" :value="c.code">
@@ -219,13 +275,17 @@ Chart.register(ChartDataLabels);
 
 const emit = defineEmits(['refreshDashboard']);
 
-// 資料狀態
+// 🌟 狀態變數：避免白屏的關鍵
+const isHistoryModalOpen = ref(false);
+const currentAccountName = ref('');
+const accountHistory = ref([]);
+const historyLoading = ref(false);
+
 const accounts = ref([]);
 const loading = ref(true);
 const aiLoading = ref(false);
 const aiAnalysis = ref('');
 
-// 資產類型中文對照
 const typeNameMap = { 
     'Cash': '現金', 
     'Investment': '投資', 
@@ -234,7 +294,6 @@ const typeNameMap = {
     'Liability': '負債' 
 };
 
-// 幣種清單
 const currencyList = [
   { code: 'TWD', name: '新台幣 (TWD)' }, { code: 'USD', name: '美元 (USD)' },
   { code: 'JPY', name: '日圓 (JPY)' }, { code: 'CNY', name: '人民幣 (CNY)' },
@@ -243,15 +302,14 @@ const currencyList = [
   { code: 'ADA', name: '艾達幣 (ADA)' },
 ];
 
-// 圖表狀態
 const chartData = ref({ 
     cash: 0, investment: 0, total_assets: 0, total_liabilities: 0,
     stock: 0, bond: 0, tw_invest: 0, overseas_invest: 0 
 });
 const assetBreakdown = ref({}); 
 const trendFilter = ref({
-    start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
-    end: new Date().toISOString().substring(0, 10)
+  start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
+  end: new Date().toISOString().substring(0, 10)
 });
 
 // Canvas Refs
@@ -262,8 +320,6 @@ const currencyChartCanvas = ref(null);
 const holdingValueChartCanvas = ref(null);
 const netWorthChartCanvas = ref(null);
 const trendChartCanvas = ref(null);
-
-// 新增 canvas ref
 const assetHistoryChartCanvas = ref(null);
 let assetHistoryChart = null;
 const historyRange = ref('1y');
@@ -281,7 +337,6 @@ let trendChart = null;
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const isSaving = ref(false);
-// 🟢 新增 date 預設值
 const form = ref({ 
     name: '', 
     type: 'Cash', 
@@ -290,14 +345,96 @@ const form = ref({
     date: new Date().toISOString().substring(0, 10)
 });
 
-// 幣種選擇邏輯
 const currencySelectValue = ref('TWD');
 const isCustomCurrency = ref(false);
 
-// 定義法幣列表 (用來過濾)
 const fiatCurrencies = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'HKD', 'AUD', 'CAD', 'SGD', 'KRW'];
 
-// 新增 API 呼叫函式
+
+// --- 歷史快照功能 ---
+
+async function fetchAccountHistory(name) {
+    historyLoading.value = true;
+    currentAccountName.value = name;
+    
+    try {
+        const response = await fetchWithLiffToken(
+            `${window.API_BASE_URL}?action=get_account_history&name=${encodeURIComponent(name)}`
+        );
+
+        if (response && response.ok) {
+            const result = await response.json();
+            if (result.status === 'success') {
+                accountHistory.value = result.data;
+                isHistoryModalOpen.value = true;
+            } else {
+                alert(`查詢歷史失敗: ${result.message}`);
+            }
+        }
+    } catch (error) {
+        console.error("Fetch history error:", error);
+        alert("網路錯誤，無法獲取歷史記錄");
+    } finally {
+        historyLoading.value = false;
+    }
+}
+
+async function handleDeleteSnapshot(accountName, snapshotDate) {
+    if (!confirm(`確定要刪除帳戶 [${accountName}] 在 ${snapshotDate} 的歷史快照嗎？\n此操作不可逆，且會影響歷史圖表。`)) return;
+    
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_snapshot`, {
+        method: 'POST', 
+        body: JSON.stringify({ account_name: accountName, snapshot_date: snapshotDate })
+    });
+    
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            alert(result.message);
+            fetchAccountHistory(accountName); // 刷新 Modal 內的列表
+            fetchAssetHistory();              // 刷新趨勢圖
+        } else {
+            alert('刪除失敗: ' + (result.message || '未知錯誤'));
+        }
+    }
+}
+
+function closeHistoryModal() {
+    isHistoryModalOpen.value = false;
+    accountHistory.value = [];
+}
+
+function openModalForSnapshot(snapshotItem) {
+    closeHistoryModal();
+
+    const sourceAccount = accounts.value.find(acc => acc.name === snapshotItem.account_name);
+    const accountType = sourceAccount ? sourceAccount.type : 'Cash';
+
+    isEditMode.value = true;
+    form.value = { 
+        name: snapshotItem.account_name, 
+        type: accountType, 
+        balance: parseFloat(snapshotItem.balance), 
+        currency: snapshotItem.currency_unit,
+        date: snapshotItem.snapshot_date
+    };
+    
+    const currencyToSet = snapshotItem.currency_unit;
+    const knownCurrency = currencyList.find(c => c.code === currencyToSet);
+    if (knownCurrency) {
+        currencySelectValue.value = currencyToSet;
+        isCustomCurrency.value = false;
+    } else {
+        currencySelectValue.value = 'CUSTOM';
+        isCustomCurrency.value = true;
+    }
+
+    isModalOpen.value = true;
+}
+
+
+// --- 資產趨勢圖表函式 ---
+
 async function fetchAssetHistory(range = '1y') {
     historyRange.value = range;
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_history&range=${range}`);
@@ -305,28 +442,12 @@ async function fetchAssetHistory(range = '1y') {
     if (response && response.ok) {
         const result = await response.json();
         
-        // 🛑 [請看這裡] 這一行會把真相印在 Console
-        console.log("🔍 API 除錯報告:", result); 
-
         if (result.status === 'success') {
-            
-            // 顯示除錯訊息給開發者看
-            if (result.data.debug_info) {
-                console.log(`👤 身分確認: 您是 User ID [ ${result.data.debug_info.resolved_user_id} ]`);
-                console.log(`📊 資料筆數: [ ${result.data.debug_info.data_count} ] 筆`);
-                
-                // 自動警告
-                if (result.data.debug_info.resolved_user_id !== 1) {
-                    alert(`⚠️ 帳號不符！\n資料庫資料在 ID 1，但系統判定您是 ID ${result.data.debug_info.resolved_user_id}。\n請執行 SQL 複製資料指令。`);
-                }
-            }
-
             renderAssetHistoryChart(result.data);
         }
     }
 }
 
-// 新增 繪圖函式
 function renderAssetHistoryChart(resultData) {
     if (assetHistoryChart) assetHistoryChart.destroy();
     if (!assetHistoryChartCanvas.value) return;
@@ -335,7 +456,6 @@ function renderAssetHistoryChart(resultData) {
     const dataValues = resultData.data;
 
     if (labels.length === 0 || dataValues.length === 0) {
-        // 如果沒有資料，可在此處加入圖表為空時的處理邏輯
         return; 
     }
 
@@ -351,7 +471,7 @@ function renderAssetHistoryChart(resultData) {
                 borderWidth: 2,
                 tension: 0.4, 
                 fill: true,
-                pointRadius: 4, // 調整點大小
+                pointRadius: 4, 
                 pointHoverRadius: 6
             }]
         },
@@ -362,12 +482,10 @@ function renderAssetHistoryChart(resultData) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        // 確保 Tooltip 上的數字沒有小數點
                         label: (ctx) => `淨值: NT$ ${numberFormat(ctx.raw, 0)}` 
                     }
                 },
                 datalabels: {
-                    // 🌟 關鍵優化 1: 關閉 datalabels 避免數據標籤與點擠在一起
                     display: false 
                 }
             },
@@ -376,15 +494,12 @@ function renderAssetHistoryChart(resultData) {
                     grid: { display: false } 
                 },
                 y: { 
-                    // 🌟 關鍵優化 2: 數字格式設定 (Y 軸數字不顯示小數點)
                     beginAtZero: false,
                     grid: { color: '#f0f0f0' },
                     ticks: { 
                         callback: function(value, index, values) {
-                            // 使用 numberFormat 確保 Y 軸刻度無小數點
                             return 'NT$' + numberFormat(value, 0); 
                         },
-                        // 🌟 關鍵優化 3: 限制刻度數量，避免擠壓
                         maxTicksLimit: 8 
                     }
                 }
@@ -392,6 +507,9 @@ function renderAssetHistoryChart(resultData) {
         }
     });
 }
+
+
+// --- Modal 邏輯 ---
 
 function handleCurrencyChange() {
     if (currencySelectValue.value === 'CUSTOM') {
@@ -415,7 +533,6 @@ function forceUppercase() {
 
 // --- Modal 操作 ---
 function openModal(account = null) {
-  // 🟢 每次打開都先抓今天的日期
   const today = new Date().toISOString().substring(0, 10);
 
   if (account) {
@@ -425,7 +542,7 @@ function openModal(account = null) {
       type: account.type, 
       balance: parseFloat(account.balance), 
       currency: account.currency_unit,
-      date: today // 編輯時預設填入今天，讓用戶確認
+      date: today
     };
     
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
@@ -444,7 +561,7 @@ function openModal(account = null) {
         type: 'Cash', 
         balance: 0, 
         currency: 'TWD',
-        date: today // 新增時預設今天
+        date: today
     };
     resetCurrency(); 
   }
@@ -453,12 +570,6 @@ function openModal(account = null) {
 
 function closeModal() { isModalOpen.value = false; }
 
-function showCustomModal(message) {
-    console.log(`[Message] ${message}`);
-    openModal();
-}
-
-// 儲存帳戶
 async function handleSave() {
   isSaving.value = true;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, {
@@ -469,7 +580,10 @@ async function handleSave() {
     const result = await response.json();
     if (result.status === 'success') {
       closeModal();
-      fetchAccounts(); fetchChartData(); emit('refreshDashboard');
+      fetchAccounts(); 
+      fetchChartData(); 
+      fetchAssetHistory();
+      emit('refreshDashboard');
     } else {
       alert('儲存失敗：' + result.message);
     }
@@ -479,7 +593,8 @@ async function handleSave() {
   isSaving.value = false;
 }
 
-// --- API 函式 ---
+
+// --- API 函式 (簡化) ---
 async function fetchAccounts() {
   loading.value = true;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_accounts`);
@@ -491,12 +606,12 @@ async function fetchAccounts() {
 }
 
 async function handleDelete(name) {
-  if (!confirm(`確定要刪除 [${name}] 嗎？`)) return;
+  if (!confirm(`確定要刪除 [${name}] 嗎？這會清除該帳戶所有歷史快照和資產紀錄。`)) return;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_account`, {
     method: 'POST', body: JSON.stringify({ name: name })
   });
   if (response && response.ok) {
-      fetchAccounts(); fetchChartData(); emit('refreshDashboard');
+      fetchAccounts(); fetchChartData(); fetchAssetHistory(); emit('refreshDashboard');
   }
 }
 
@@ -505,7 +620,6 @@ async function fetchChartData() {
   if (response && response.ok) {
       const result = await response.json();
       if (result.status === 'success') {
-          // 確保接收後端的新欄位
           chartData.value = {
               ...result.data.charts,
               stock: result.data.charts.stock || 0,
@@ -553,11 +667,9 @@ async function fetchAIAnalysis() {
     aiLoading.value = false;
 }
 
-// --- 圖表渲染 ---
-
+// --- 完整的圖表渲染函式 (修復白屏的關鍵) ---
 function renderAllocationChart() {
     if (allocChart) allocChart.destroy();
-    
     const total = chartData.value.cash + chartData.value.investment;
 
     allocChart = new Chart(allocationChartCanvas.value, {
@@ -657,7 +769,7 @@ function renderFiatCryptoChart() {
             labels: ['法幣', '加密貨幣'], 
             datasets: [{ 
                 data: [totalFiat, totalCrypto], 
-                backgroundColor: ['#A5A58D', '#6B705C'], 
+                backgroundColor: ['#A5A58D', '#6B705C'],
                 borderWidth: 0
             }] 
         },
@@ -778,7 +890,7 @@ onMounted(() => {
     fetchAccounts();
     fetchChartData();
     fetchTrendData();
-    fetchAssetHistory();
+    fetchAssetHistory(); 
 });
 </script>
 
@@ -867,13 +979,34 @@ onMounted(() => {
 .card-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .acc-balance { font-size: 1rem; font-weight: 700; letter-spacing: 0.5px; }
 .text-asset { color: var(--text-primary); } .text-debt { color: var(--color-danger); }
-.action-buttons { display: flex; gap: 12px; margin-top: 6px; }
+
+/* 🌟 修正 action-buttons 樣式 */
+.action-buttons { 
+    display: flex; 
+    gap: 8px; 
+    margin-top: 6px; 
+    align-items: center;
+}
+
 .text-btn { background: transparent; border: none; cursor: pointer; font-size: 0.85rem; padding: 2px 4px; transition: opacity 0.2s; text-decoration: underline; }
 .text-btn:hover { opacity: 0.7; }
 .delete { color: #e5989b; }
 .edit { color: #a98467; }
-.state-box { text-align: center; padding: 30px; color: var(--text-secondary); background: var(--bg-card); border-radius: var(--border-radius); box-shadow: var(--shadow-soft); }
-.mb-6 { margin-bottom: 24px; }
+
+/* 🌟 快照按鈕樣式：使其與「編輯」/「刪除」風格一致 */
+.text-btn.view-history {
+    color: var(--text-secondary); /* 採用中性次要文字色，融入背景 */
+    text-decoration: underline;
+    background: none;
+    border: none;
+    padding: 2px 4px; /* 匹配其他 text-btn */
+    cursor: pointer;
+    font-size: 0.85rem; 
+}
+.text-btn.view-history:hover {
+    color: var(--color-primary); /* Hover 時採用主題色 */
+    opacity: 1; 
+}
 
 /* Modal 樣式 */
 .modal-overlay {
@@ -940,5 +1073,93 @@ select.input-std {
 @media (max-width: 480px) {
     .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
     .date-controls { width: 100%; justify-content: space-between; }
+}
+
+/* --- 歷史快照 Modal 樣式 --- */
+.modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6); 
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000; 
+}
+
+.modal-content.history-modal { 
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 450px; 
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.list-group {
+    list-style: none;
+    padding: 0;
+    max-height: 300px; 
+    overflow-y: auto;
+}
+
+.list-group-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px dashed #f0f0f0;
+    font-size: 0.95rem;
+}
+
+.list-group-item:last-child {
+    border-bottom: none;
+}
+
+/* 🌟 修正：讓日期和金額垂直排列在左側，解決擠壓問題 */
+.list-left {
+    display: flex;
+    flex-direction: column;
+    min-width: 50%; /* 給予左側空間 */
+}
+
+.list-group-item .date {
+    font-weight: bold;
+    color: #8c7b75;
+    margin-bottom: 4px; 
+}
+
+.list-group-item .balance {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* 🌟 快照 Modal 內的 action buttons */
+.list-actions-sm {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0; /* 確保按鈕不被壓縮 */
+}
+
+.text-btn.edit-sm, .text-btn.delete-sm {
+    font-size: 0.8rem;
+    padding: 2px 4px;
+    text-decoration: underline; 
+    font-weight: 500;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.text-btn.edit-sm {
+    color: #a98467; /* 編輯色 */
+}
+
+.text-btn.delete-sm {
+    color: #e5989b; /* 刪除色 */
 }
 </style>
