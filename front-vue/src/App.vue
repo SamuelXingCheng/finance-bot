@@ -12,7 +12,7 @@
             @click="currentTab = 'Dashboard'" 
             :class="['nav-item', currentTab === 'Dashboard' ? 'active' : '']"
           >
-            總覽
+            收支總覽
           </button>
           <button 
             @click="currentTab = 'Accounts'" 

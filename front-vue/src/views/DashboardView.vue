@@ -218,29 +218,38 @@
               本月尚無紀錄
           </div>
           
-          <div v-else class="tx-list">
-              <div v-for="tx in transactions" :key="tx.id" class="tx-item">
-                  <div class="tx-left">
-                      <div class="tx-date">{{ tx.transaction_date.substring(5) }}</div>
-                      <div class="tx-cat-badge" :class="tx.type">
-                          {{ categoryMap[tx.category] || tx.category }}
-                      </div>
+          <div v-else class="tx-grouped-list">
+              <div v-for="dateGroup in groupedTransactions" :key="dateGroup.date" class="tx-date-group">
+                  <div class="date-header">
+                      {{ dateGroup.displayDate }} {{ dateGroup.weekday }}
                   </div>
-                  <div class="tx-mid">
-                      <div class="tx-desc">{{ tx.description }}</div>
-                  </div>
-                  <div class="tx-right">
-                      <div class="tx-amount" :class="tx.type === 'income' ? 'text-income' : 'text-expense'">
-                          {{ tx.type === 'income' ? '+' : '-' }} {{ numberFormat(tx.amount, 0) }}
+                  
+                  <div v-for="catGroup in dateGroup.categories" :key="catGroup.categoryKey" class="tx-category-group">
+                      
+                      <div class="category-subheader" :class="catGroup.items[0].type">
+                          {{ catGroup.categoryName }}
                       </div>
-                      <div class="tx-actions">
-                          <button class="text-btn edit" @click="openEditModal(tx)">編輯</button>
-                          <button class="text-btn delete" @click="handleDeleteTx(tx.id)">刪除</button>
+
+                      <div v-for="tx in catGroup.items" :key="tx.id" class="tx-item-grouped">
+                          
+                          <div class="tx-mid-grouped">
+                              <div class="tx-desc">{{ tx.description }}</div>
+                          </div>
+                          
+                          <div class="tx-right-grouped">
+                              <div class="tx-amount" :class="tx.type === 'income' ? 'text-income' : 'text-expense'">
+                                  {{ tx.type === 'income' ? '+' : '-' }} {{ numberFormat(tx.amount, 0) }}
+                              </div>
+                              <div class="tx-actions">
+                                  <button class="text-btn edit" @click="openEditModal(tx)">編輯</button>
+                                  <button class="text-btn delete" @click="handleDeleteTx(tx.id)">刪除</button>
+                              </div>
+                          </div>
                       </div>
                   </div>
               </div>
           </div>
-      </div>
+          </div>
     </div>
 
     <div v-if="isEditModalOpen" class="modal-overlay" @click.self="closeModal">
@@ -298,7 +307,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { ref, onMounted, nextTick, watch, computed } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto'; 
 import ChartDataLabels from 'chartjs-plugin-datalabels';
@@ -352,6 +361,57 @@ const categoryMap = {
   'Miscellaneous': '其他', 'Salary': '薪水', 'Allowance': '津貼', 'Bonus': '獎金',
 };
 const palette = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2'];
+
+// 🟢 新增：將交易記錄分組 (日期 -> 類別)
+const groupedTransactions = computed(() => {
+    if (transactions.value.length === 0) return [];
+
+    const dateGroupMap = new Map();
+    const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+    
+    // 1. 第一次遍歷：按日期和類別分組
+    transactions.value.forEach(tx => {
+        const date = tx.transaction_date; // YYYY-MM-DD
+        const categoryKey = tx.category;
+        
+        if (!dateGroupMap.has(date)) {
+            const dateObj = new Date(date);
+            dateGroupMap.set(date, {
+                // 內層使用 Map 確保類別的相對順序
+                categories: new Map(), 
+                // 儲存日期和星期幾
+                displayDate: date.substring(5), // MM-DD
+                weekday: `(${weekdayNames[dateObj.getDay()]})`
+            });
+        }
+        
+        const dateGroup = dateGroupMap.get(date);
+        
+        if (!dateGroup.categories.has(categoryKey)) {
+            dateGroup.categories.set(categoryKey, {
+                categoryName: categoryMap[categoryKey] || categoryKey,
+                categoryKey: categoryKey,
+                items: []
+            });
+        }
+        
+        // 將交易項目加入分類組
+        dateGroup.categories.get(categoryKey).items.push(tx);
+    });
+
+    // 2. 轉換為陣列並按日期排序 (日期新到舊)
+    const result = Array.from(dateGroupMap, ([date, data]) => ({
+        date: date,
+        displayDate: data.displayDate,
+        weekday: data.weekday,
+        // 將類別 Map 轉為 Array (分類順序保持插入順序)
+        categories: Array.from(data.categories.values())
+    }));
+    
+    // 最終按日期新到舊排序
+    return result.sort((a, b) => new Date(b.date) - new Date(a.date));
+});
+
 
 // --- 邏輯函式 ---
 
@@ -733,21 +793,77 @@ onMounted(() => {
 .list-controls h3 { margin: 0; font-size: 1rem; color: #8c7b75; }
 .month-selector { display: flex; align-items: center; }
 .month-input-styled { border: 1px solid #ddd; padding: 4px 10px; border-radius: 20px; font-size: 0.9rem; color: #666; background: #f9f9f9; outline: none; box-sizing: border-box; }
-.tx-list { display: flex; flex-direction: column; gap: 12px; }
-.tx-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #eee; }
-.tx-item:last-child { border-bottom: none; }
-.tx-left { display: flex; flex-direction: column; gap: 4px; min-width: 50px; }
-.tx-date { font-size: 0.8rem; color: #aaa; }
-.tx-cat-badge { font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; display: inline-block; width: fit-content; font-weight: bold; }
-.tx-cat-badge.expense { color: #c44536; background: #ffe5d9; }
-.tx-cat-badge.income { color: #556b2f; background: #e9edc9; }
-.tx-mid { flex: 1; padding: 0 8px; font-weight: 500; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tx-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 70px; }
-.tx-amount { font-weight: bold; font-size: 0.95rem; }
-.tx-actions { display: flex; gap: 8px; }
-.text-btn { background: transparent; border: none; cursor: pointer; font-size: 0.8rem; padding: 0; text-decoration: underline; color: #999; transition: color 0.2s; }
-.text-btn:hover { color: #d4a373; }
-.empty-msg { text-align: center; padding: 20px; color: #aaa; }
+
+/* ⬇️ 新增/修改：分組列表樣式 ⬇️ */
+.tx-grouped-list { display: flex; flex-direction: column; gap: 15px; } 
+.tx-date-group { border: 1px solid #f0ebe5; border-radius: 10px; overflow: hidden; }
+
+.date-header { 
+    background-color: #f7f5f0; 
+    color: #a98467; /* 暖棕色 */
+    font-weight: bold;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #f0ebe5;
+}
+
+.tx-category-group {
+    /* 內距：移除頂部和底部的 padding，讓 header 和 item 緊湊 */
+    padding: 0 12px;
+}
+.tx-date-group:last-child .tx-category-group:last-child {
+    /* 移除最後一項底部的內距 */
+    padding-bottom: 10px;
+}
+
+.category-subheader {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 10px; /* 給類別標題留一點空間 */
+    margin-bottom: 5px;
+    padding: 2px 0;
+    border-bottom: 1px dotted #eee;
+    width: 100%;
+}
+
+.category-subheader.expense { color: #d67a7a; } /* 支出分類顏色 */
+.category-subheader.income { color: #8fbc8f; } /* 收入分類顏色 */
+
+/* 單筆交易項目樣式 (針對分組後調整) */
+/* 調整 tx-item 以適應新結構 */
+.tx-item-grouped {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px dashed #eee;
+    font-size: 0.95rem;
+}
+.tx-category-group .tx-item-grouped:last-child {
+    border-bottom: none; /* 移除組內最後一項的虛線 */
+}
+/* 移除舊的 tx-list 和 tx-item 的樣式，改用新的 */
+.tx-list { display: none; } 
+.tx-item { display: none; } 
+.tx-left { display: none; }
+.tx-cat-badge { display: none; } 
+.tx-mid-grouped {
+    flex: 1; 
+    padding-right: 10px; 
+    font-weight: 500; 
+    color: #444; 
+    word-break: break-all;
+}
+.tx-right-grouped {
+    text-align: right; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: flex-end; 
+    gap: 4px; 
+    min-width: 90px;
+}
+/* ⬆️ 新增/修改：分組列表樣式 ⬆️ */
+
 
 /* Modal 樣式 */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box;}
