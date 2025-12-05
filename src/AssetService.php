@@ -1,5 +1,5 @@
 <?php
-// src/AssetService.php (最終完整版 - 包含歷史資產功能)
+// src/AssetService.php (最終修正版 - 歷史數據不覆蓋最新餘額)
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/ExchangeRateService.php';
 
@@ -34,7 +34,7 @@ class AssetService {
     }
 
     /**
-     * 🌟 修正：包含 $snapshotDate 參數，並執行事務寫入主表和歷史表
+     * 🌟 關鍵修正：只有當 $snapshotDate 是「今天或未來」時，才更新 accounts 主表
      *
      * @param int $userId
      * @param string $name
@@ -47,29 +47,37 @@ class AssetService {
     public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null): bool {
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d'); // 預設今天
+        $today = date('Y-m-d');
+
+        // 🌟 核心邏輯：如果輸入的日期 (date) >= 今天 (today)，就更新主表。
+        // 這確保了「過去」的日期不會覆蓋主表，而「今天或未來」的餘額會被視為最新。
+        $shouldUpdateMainTable = ($date >= $today); 
 
         try {
             $this->pdo->beginTransaction();
 
-            // 1. 更新主表 accounts (保持當前最新狀態)
-            $sqlMain = "INSERT INTO accounts (user_id, name, type, balance, currency_unit, last_updated_at)
-                        VALUES (:userId, :name, :type, :balance, :unit, NOW())
-                        ON DUPLICATE KEY UPDATE 
-                        balance = VALUES(balance), 
-                        type = VALUES(type), 
-                        currency_unit = VALUES(currency_unit),
-                        last_updated_at = NOW()";
-            
-            $stmtMain = $this->pdo->prepare($sqlMain);
-            $stmtMain->execute([
-                ':userId' => $userId, 
-                ':name' => $name, 
-                ':type' => $assetType, 
-                ':balance' => $balance, 
-                ':unit' => strtoupper($currencyUnit)
-            ]);
+            // 1. 更新主表 accounts (只在 $shouldUpdateMainTable 為 true 時執行)
+            if ($shouldUpdateMainTable) {
+                $sqlMain = "INSERT INTO accounts (user_id, name, type, balance, currency_unit, last_updated_at)
+                            VALUES (:userId, :name, :type, :balance, :unit, NOW())
+                            ON DUPLICATE KEY UPDATE 
+                            balance = VALUES(balance), 
+                            type = VALUES(type), 
+                            currency_unit = VALUES(currency_unit),
+                            last_updated_at = NOW()"; 
+                
+                $stmtMain = $this->pdo->prepare($sqlMain);
+                $stmtMain->execute([
+                    ':userId' => $userId, 
+                    ':name' => $name, 
+                    ':type' => $assetType, 
+                    ':balance' => $balance, 
+                    ':unit' => strtoupper($currencyUnit)
+                ]);
+            }
 
-            // 2. 寫入歷史表 account_balance_history (覆蓋當日舊快照)
+            // 2. 寫入歷史表 account_balance_history (總是執行，這是歷史快照的職責)
+            // 策略：刪除該用戶、該帳戶、該日期的舊紀錄，寫入新的 (覆蓋當日舊快照)
             $sqlDelHistory = "DELETE FROM account_balance_history  
                               WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date";
             $stmtDel = $this->pdo->prepare($sqlDelHistory);
@@ -100,7 +108,6 @@ class AssetService {
 
     /**
      * 🟢 新增：取得歷史淨值趨勢 (統一使用 $range 參數，回傳 labels/data 陣列)
-     * 對應前端 DashboardView.vue 的 fetchAssetHistory 呼叫
      */
     public function getAssetHistory(int $userId, string $range = '1y'): array {
         // 1. 計算日期範圍
@@ -183,8 +190,8 @@ class AssetService {
             // 新圖表需要的統計變數
             $totalStock = 0.0;
             $totalBond = 0.0;
-            $totalTwInvest = 0.0; // 台股 (TWD 計價的投資)
-            $totalOverseasInvest = 0.0; // 海外 (非 TWD 計價的投資)
+            $totalTwInvest = 0.0; 
+            $totalOverseasInvest = 0.0; 
     
             foreach ($results as $row) {
                 $currency = $row['currency_unit'];
@@ -226,7 +233,7 @@ class AssetService {
                             $totalBond += $twdValue;
                         }
 
-                        // 🟢 統計地區：非 TWD 皆視為海外投資
+                        // 統計地區：非 TWD 皆視為海外投資
                         if ($currency === 'TWD') {
                             $totalTwInvest += $twdValue;
                         } else {
@@ -253,7 +260,7 @@ class AssetService {
                     'stock' => $totalStock,
                     'bond' => $totalBond,
                     'tw_invest' => $totalTwInvest,
-                    'overseas_invest' => $totalOverseasInvest // 🟢 新增回傳欄位
+                    'overseas_invest' => $totalOverseasInvest 
                 ]
             ];
         } catch (PDOException $e) {

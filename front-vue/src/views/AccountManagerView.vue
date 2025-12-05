@@ -367,20 +367,8 @@ function renderAssetHistoryChart(resultData) {
                     }
                 },
                 datalabels: {
-                    color: '#5d5d5d', // 設置顏色
-                    anchor: 'end',    // 設置位置
-                    align: 'end',
-                    formatter: (value, context) => {
-                        // 🌟 僅顯示數據集中的最後一個數據點
-                        if (context.dataIndex === context.dataset.data.length - 1 || context.dataIndex === 0) {
-                            return 'NT$' + numberFormat(value, 0); // 確保無小數點
-                        } else {
-                            return '';
-                        }
-                    },
-                    font: {
-                        weight: 'bold'
-                    }
+                    // 🌟 關鍵優化 1: 關閉 datalabels 避免數據標籤與點擠在一起
+                    display: false 
                 }
             },
             scales: {
