@@ -164,12 +164,19 @@ try {
             break;
         
         case 'asset_history':
-            // 設定預設查詢範圍 (例如過去半年)
-            $start = $_GET['start'] ?? date('Y-m-d', strtotime('-6 months'));
-            $end = $_GET['end'] ?? date('Y-m-d');
-
-            $history = $assetService->getAssetTrend($dbUserId, $start, $end);
-            $response = ['status' => 'success', 'data' => $history];
+            $range = $_GET['range'] ?? '1y';
+            
+            // 1. 執行查詢
+            $historyData = $assetService->getAssetHistory($dbUserId, $range);
+            
+            // 🟢 [除錯關鍵]：強制把「後端認定的 UserID」和「撈到的筆數」塞回去給前端
+            $historyData['debug_info'] = [
+                'resolved_user_id' => $dbUserId,  // 後端認為你是誰
+                'data_count' => count($historyData['labels'] ?? []), // 撈到幾筆資料
+                'server_time' => date('Y-m-d H:i:s')
+            ];
+            
+            $response = ['status' => 'success', 'data' => $historyData];
             break;
             
         case 'monthly_expense_breakdown':

@@ -266,6 +266,7 @@ const trendChartCanvas = ref(null);
 // 新增 canvas ref
 const assetHistoryChartCanvas = ref(null);
 let assetHistoryChart = null;
+const historyRange = ref('1y');
 
 // Chart Instances
 let allocChart = null; 
@@ -297,86 +298,107 @@ const isCustomCurrency = ref(false);
 const fiatCurrencies = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'HKD', 'AUD', 'CAD', 'SGD', 'KRW'];
 
 // 新增 API 呼叫函式
-async function fetchAssetHistory(range = '6M') {
-    // 1. 計算日期物件
-    const end = new Date();
-    const start = new Date();
+async function fetchAssetHistory(range = '1y') {
+    historyRange.value = range;
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_history&range=${range}`);
     
-    if (range === '1M') start.setMonth(start.getMonth() - 1);
-    if (range === '6M') start.setMonth(start.getMonth() - 6);
-    if (range === '1Y') start.setFullYear(start.getFullYear() - 1);
-
-    // 2. 🟢 修正：使用本地時間格式化 (YYYY-MM-DD)
-    // 這樣可以確保傳送的是台灣時間的今天，而不是 UTC 的昨天
-    const formatDate = (date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
-    const startStr = formatDate(start);
-    const endStr = formatDate(end);
-
-    console.log(`Fetching history from ${startStr} to ${endStr}`); // 方便除錯
-
-    // 3. 呼叫 API
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_history&start=${startStr}&end=${endStr}`);
     if (response && response.ok) {
         const result = await response.json();
+        
+        // 🛑 [請看這裡] 這一行會把真相印在 Console
+        console.log("🔍 API 除錯報告:", result); 
+
         if (result.status === 'success') {
-            // 如果資料是空的，可以加個 log 檢查
-            if (result.data.length === 0) console.warn("API 回傳空陣列，請檢查資料庫 account_balance_history 表");
             
+            // 顯示除錯訊息給開發者看
+            if (result.data.debug_info) {
+                console.log(`👤 身分確認: 您是 User ID [ ${result.data.debug_info.resolved_user_id} ]`);
+                console.log(`📊 資料筆數: [ ${result.data.debug_info.data_count} ] 筆`);
+                
+                // 自動警告
+                if (result.data.debug_info.resolved_user_id !== 1) {
+                    alert(`⚠️ 帳號不符！\n資料庫資料在 ID 1，但系統判定您是 ID ${result.data.debug_info.resolved_user_id}。\n請執行 SQL 複製資料指令。`);
+                }
+            }
+
             renderAssetHistoryChart(result.data);
         }
     }
 }
 
 // 新增 繪圖函式
-function renderAssetHistoryChart(data) {
+function renderAssetHistoryChart(resultData) {
     if (assetHistoryChart) assetHistoryChart.destroy();
     if (!assetHistoryChartCanvas.value) return;
 
-    const labels = data.map(d => d.date);
-    const values = data.map(d => d.total);
+    const labels = resultData.labels;
+    const dataValues = resultData.data;
+
+    if (labels.length === 0 || dataValues.length === 0) {
+        // 如果沒有資料，可在此處加入圖表為空時的處理邏輯
+        return; 
+    }
 
     assetHistoryChart = new Chart(assetHistoryChartCanvas.value, {
         type: 'line',
         data: {
             labels: labels,
             datasets: [{
-                label: '總資產 (TWD)',
-                data: values,
-                borderColor: '#D4A373', // 文青棕色
+                label: '總淨值 (TWD)',
+                data: dataValues,
+                borderColor: '#d4a373', 
                 backgroundColor: 'rgba(212, 163, 115, 0.1)',
                 borderWidth: 2,
-                tension: 0.3, // 平滑曲線
+                tension: 0.4, 
                 fill: true,
-                pointRadius: 3,
-                pointBackgroundColor: '#fff',
-                pointBorderColor: '#D4A373'
+                pointRadius: 4, // 調整點大小
+                pointHoverRadius: 6
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: (ctx) => ` 淨值: NT$ ${numberFormat(ctx.raw, 0)}`
+                        // 確保 Tooltip 上的數字沒有小數點
+                        label: (ctx) => `淨值: NT$ ${numberFormat(ctx.raw, 0)}` 
                     }
                 },
-                datalabels: { display: false }
+                datalabels: {
+                    color: '#5d5d5d', // 設置顏色
+                    anchor: 'end',    // 設置位置
+                    align: 'end',
+                    formatter: (value, context) => {
+                        // 🌟 僅顯示數據集中的最後一個數據點
+                        if (context.dataIndex === context.dataset.data.length - 1 || context.dataIndex === 0) {
+                            return 'NT$' + numberFormat(value, 0); // 確保無小數點
+                        } else {
+                            return '';
+                        }
+                    },
+                    font: {
+                        weight: 'bold'
+                    }
+                }
             },
             scales: {
-                x: { grid: { display: false } },
+                x: { 
+                    grid: { display: false } 
+                },
                 y: { 
-                    beginAtZero: false, // 資產趨勢不需要從 0 開始，這樣波動比較明顯
+                    // 🌟 關鍵優化 2: 數字格式設定 (Y 軸數字不顯示小數點)
+                    beginAtZero: false,
                     grid: { color: '#f0f0f0' },
-                    ticks: { callback: (val) => '$' + numberFormat(val, 0) } 
+                    ticks: { 
+                        callback: function(value, index, values) {
+                            // 使用 numberFormat 確保 Y 軸刻度無小數點
+                            return 'NT$' + numberFormat(value, 0); 
+                        },
+                        // 🌟 關鍵優化 3: 限制刻度數量，避免擠壓
+                        maxTicksLimit: 8 
+                    }
                 }
             }
         }

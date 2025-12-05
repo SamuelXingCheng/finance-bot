@@ -1,5 +1,5 @@
 <?php
-// src/AssetService.php
+// src/AssetService.php (最終完整版 - 包含歷史資產功能)
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/ExchangeRateService.php';
 
@@ -34,8 +34,15 @@ class AssetService {
     }
 
     /**
-     * 更新帳戶餘額 (包含寫入歷史快照)
-     * @param string|null $snapshotDate 如果未提供，預設為今日 (YYYY-MM-DD)
+     * 🌟 修正：包含 $snapshotDate 參數，並執行事務寫入主表和歷史表
+     *
+     * @param int $userId
+     * @param string $name
+     * @param float $balance
+     * @param string $type
+     * @param string $currencyUnit
+     * @param string|null $snapshotDate 歷史快照日期，如果為 null 則使用今日
+     * @return bool
      */
     public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null): bool {
         $assetType = $this->sanitizeAssetType($type); 
@@ -62,9 +69,8 @@ class AssetService {
                 ':unit' => strtoupper($currencyUnit)
             ]);
 
-            // 2. 寫入歷史表 account_balance_history (記錄時間序列)
-            // 策略：刪除該用戶、該帳戶、該日期的舊紀錄，寫入新的 (覆蓋當日舊快照)
-            $sqlDelHistory = "DELETE FROM account_balance_history 
+            // 2. 寫入歷史表 account_balance_history (覆蓋當日舊快照)
+            $sqlDelHistory = "DELETE FROM account_balance_history  
                               WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date";
             $stmtDel = $this->pdo->prepare($sqlDelHistory);
             $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date]);
@@ -93,50 +99,61 @@ class AssetService {
     }
 
     /**
-     * 取得資產歷史趨勢 (依日期加總)
+     * 🟢 新增：取得歷史淨值趨勢 (統一使用 $range 參數，回傳 labels/data 陣列)
+     * 對應前端 DashboardView.vue 的 fetchAssetHistory 呼叫
      */
-    public function getAssetTrend(int $userId, string $start, string $end): array {
-        // 1. 撈取範圍內的所有歷史紀錄
-        $sql = "SELECT snapshot_date, balance, currency_unit 
-                FROM account_balance_history 
-                WHERE user_id = :uid AND snapshot_date BETWEEN :start AND :end
-                ORDER BY snapshot_date ASC";
+    public function getAssetHistory(int $userId, string $range = '1y'): array {
+        // 1. 計算日期範圍
+        $interval = '-1 year';
+        if ($range === '1m') $interval = '-1 month';
+        if ($range === '6m') $interval = '-6 months';
         
+        $startDate = date('Y-m-d', strtotime($interval));
+
+        // 2. 撈取歷史資料 (依日期與幣種分組)
+        $sql = "SELECT snapshot_date, currency_unit, SUM(balance) as total_balance 
+                FROM account_balance_history 
+                WHERE user_id = :userId 
+                  AND snapshot_date >= :startDate
+                GROUP BY snapshot_date, currency_unit 
+                ORDER BY snapshot_date ASC";
+
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':uid' => $userId, ':start' => $start, ':end' => $end]);
+            $stmt->execute([':userId' => $userId, ':startDate' => $startDate]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // 2. 依日期分組並換算匯率
-            $dailyTotals = [];
+            // 3. 整合計算：將同一天的多種貨幣換算成 TWD 加總
             $rateService = new ExchangeRateService();
             $usdTwdRate = $rateService->getUsdTwdRate();
+            $dailyNetWorth = [];
 
             foreach ($rows as $row) {
                 $date = $row['snapshot_date'];
                 $currency = strtoupper($row['currency_unit']);
-                $balance = (float)$row['balance'];
+                $balance = (float)$row['total_balance']; 
 
-                // 匯率換算 (使用當前匯率作為估算)
+                // 匯率換算邏輯
                 $rateToUSD = $rateService->getRateToUSD($currency);
                 $twdValue = $balance * $rateToUSD * $usdTwdRate;
-
-                if (!isset($dailyTotals[$date])) {
-                    $dailyTotals[$date] = 0;
+                
+                if (!isset($dailyNetWorth[$date])) {
+                    $dailyNetWorth[$date] = 0.0;
                 }
-                $dailyTotals[$date] += $twdValue;
+                $dailyNetWorth[$date] += $twdValue;
             }
 
-            // 3. 格式化輸出
-            $result = [];
-            foreach ($dailyTotals as $date => $total) {
-                $result[] = ['date' => $date, 'total' => $total];
-            }
+            // 4. 格式化輸出給前端圖表 (Labels 和 Data)
+            $result = [
+                'labels' => array_keys($dailyNetWorth),
+                'data' => array_values($dailyNetWorth)
+            ];
+
             return $result;
 
         } catch (PDOException $e) {
-            error_log("getAssetTrend Error: " . $e->getMessage());
-            return [];
+            error_log("getAssetHistory Error: " . $e->getMessage() . " for User ID: {$userId}");
+            return ['labels' => [], 'data' => []];
         }
     }
     
@@ -244,6 +261,7 @@ class AssetService {
             return ['breakdown' => [], 'global_twd_net_worth' => 0.0, 'usdTwdRate' => 32.0, 'charts' => []];
         }
     }
+
 
     public function getAccounts(int $userId): array {
         $sql = "SELECT name, type, balance, currency_unit, last_updated_at 
