@@ -39,7 +39,7 @@
         <div class="chart-box-lg">
           <canvas ref="assetHistoryChartCanvas"></canvas>
         </div>
-        <p class="chart-hint-sm">* 顯示依據您手動記錄的「資產快照」加總，建議定期更新所有帳戶以維持準確性。</p>
+        <p class="chart-hint-sm">* 顯示依據您手動記錄的「快照」加總，建議定期更新所有帳戶以維持準確性。</p>
       </div>
 
       <div class="chart-card">
@@ -122,35 +122,47 @@
       <p class="subtitle mt-2">請點擊右上方新增按鈕。</p>
     </div>
 
-    <div v-else class="account-list">
-      <div class="list-header">詳細列表</div>
-      <div v-for="account in accounts" :key="account.name" class="account-card">
-        <div class="card-left">
-          <div class="acc-name">{{ account.name }}</div>
-          <div class="acc-meta">
-            <span class="badge" :class="getTypeClass(account.type)">
-              {{ typeNameMap[account.type] || account.type }}
-            </span>
-            <span class="currency">{{ account.currency_unit }}</span>
-          </div>
-        </div>
+    <div v-else class="account-groups">
+        <h3 class="list-header">詳細列表</h3>
+
+      <div v-for="group in groupedAccounts" :key="group.type" class="account-group">
         
-        <div class="card-right">
-          <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
-            {{ numberFormat(account.balance, 2) }}
-          </div>
-          
-          <div class="action-buttons">
-            <button 
-                class="text-btn view-history" 
-                @click="fetchAccountHistory(account.name)"
-                :disabled="historyLoading"
-            >
-                編輯歷史資產
-            </button>
+        <h4 class="group-title">{{ group.title }}</h4>
+
+        <div class="account-list">
+          <div v-for="account in group.items" :key="account.name" class="account-card">
+            <div class="card-left">
+              <div class="acc-name">{{ account.name }}</div>
+              <div class="acc-meta">
+                <span class="badge" :class="getTypeClass(account.type)">
+                  {{ typeNameMap[account.type] || account.type }}
+                </span>
+                <span class="currency">{{ account.currency_unit }}</span>
+              </div>
+            </div>
             
-            <button class="text-btn edit" @click="openModal(account)">更新資產</button>
-            <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
+            <div class="card-right">
+              <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
+                {{ numberFormat(account.balance, 2) }}
+              </div>
+              
+              <div class="action-buttons">
+                
+                <button class="pill-btn update" @click="openModal(account)">
+                    更新快照
+                </button>
+                
+                <button 
+                    class="text-btn view-history" 
+                    @click="fetchAccountHistory(account.name)"
+                    :disabled="historyLoading"
+                >
+                    歷史
+                </button>
+                
+                <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -159,7 +171,7 @@
     <div v-if="isHistoryModalOpen" class="modal-backdrop" @click.self="closeHistoryModal">
         <div class="modal-content history-modal">
             <div class="modal-header">
-                <h3>{{ currentAccountName }} - 歷史資產快照</h3>
+                <h3>{{ currentAccountName }} - 歷史快照</h3>
                 <button @click="closeHistoryModal" class="close-btn">&times;</button>
             </div>
             <div class="modal-body">
@@ -167,7 +179,7 @@
                     <li class="list-group-item">載入中...</li>
                 </div>
                 <div v-else-if="accountHistory.length === 0" class="list-group">
-                     <li class="list-group-item">此帳戶尚無歷史資產快照記錄。</li>
+                     <li class="list-group-item">此帳戶尚無歷史快照記錄。</li>
                 </div>
                 <ul v-else class="list-group">
                     <li 
@@ -185,14 +197,14 @@
                             <button 
                                 class="text-btn edit-sm" 
                                 @click="openModalForSnapshot(item)" 
-                                title="修改該日資產快照"
+                                title="修改該日快照"
                             >
                                 修改
                             </button>
                             <button 
                                 class="text-btn delete-sm" 
                                 @click="handleDeleteSnapshot(item.account_name, item.snapshot_date)"
-                                title="刪除該日資產快照"
+                                title="刪除該日快照"
                             >
                                 刪除
                             </button>
@@ -218,7 +230,7 @@
           </div>
 
           <div class="form-group">
-            <label>資產快照日期 (生效日)</label>
+            <label>快照日期 (生效日)</label>
             <input type="date" v-model="form.date" required class="input-std">
             <p class="hint">系統將以這天作為此餘額的記錄時間點。</p>
           </div>
@@ -236,15 +248,15 @@
 
           <div class="form-row">
             <div class="form-group half">
-              <label>資產快照餘額</label>
+              <label>快照餘額</label>
               <input type="number" v-model.number="form.balance" step="0.01" required class="input-std">
             </div>
             
             <div class="form-group half">
               <label>幣種</label>
               <div v-if="isCustomCurrency" class="custom-currency-wrapper">
-                  <input type="text" v-model="form.currency" class="input-std" placeholder="代碼" required @input="forceUppercase">
-                  <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
+                 <input type="text" v-model="form.currency" class="input-std" placeholder="代碼" required @input="forceUppercase">
+                 <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
               </div>
               <select v-else v-model="currencySelectValue" class="input-std" @change="handleCurrencyChange">
                 <option v-for="c in currencyList" :key="c.code" :value="c.code">
@@ -256,7 +268,7 @@
           </div>
 
           <button type="submit" class="save-btn" :disabled="isSaving">
-            {{ isSaving ? '儲存中...' : '儲存資產快照並更新' }}
+            {{ isSaving ? '儲存中...' : '儲存快照並更新' }}
           </button>
         </form>
       </div>
@@ -266,7 +278,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api'; 
 import { defineEmits } from 'vue';
 import Chart from 'chart.js/auto';
@@ -351,6 +363,54 @@ const isCustomCurrency = ref(false);
 const fiatCurrencies = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'HKD', 'AUD', 'CAD', 'SGD', 'KRW'];
 
 
+// 🟢 新增：定義資產類型的顯示順序和標題 (已移除表情符號)
+const typeDisplayMap = {
+    'Cash': '現金及活存',
+    'Stock': '股票資產 (股權)',
+    'Bond': '債券資產 (債權)',
+    'Investment': '其他投資及加密資產',
+    'Liability': '總負債'
+};
+// 依照用戶要求的順序排列
+const typeOrder = ['Cash', 'Stock', 'Bond', 'Investment', 'Liability'];
+
+// 🟢 新增：對帳戶列表進行排序和分組
+const groupedAccounts = computed(() => {
+    const grouped = {};
+    
+    // 1. 初始化分組
+    typeOrder.forEach(type => {
+        grouped[type] = [];
+    });
+    
+    // 2. 將帳戶分配到對應的組
+    accounts.value.forEach(account => {
+        const type = account.type;
+        // 將未明確分類的類型預設歸類到 Investment
+        if (grouped[type]) {
+            grouped[type].push(account);
+        } else {
+             grouped['Investment'].push(account);
+        }
+    });
+
+    // 3. 按照預定順序返回包含標題和內容的陣列
+    const result = [];
+    typeOrder.forEach(type => {
+        // 只加入有內容的組
+        if (grouped[type].length > 0) {
+            result.push({
+                type: type,
+                title: typeDisplayMap[type],
+                items: grouped[type]
+            });
+        }
+    });
+    
+    return result;
+});
+
+
 // --- 歷史快照功能 ---
 
 async function fetchAccountHistory(name) {
@@ -380,7 +440,7 @@ async function fetchAccountHistory(name) {
 }
 
 async function handleDeleteSnapshot(accountName, snapshotDate) {
-    if (!confirm(`確定要刪除帳戶 [${accountName}] 在 ${snapshotDate} 的歷史資產快照嗎？\n此操作不可逆，且會影響歷史圖表。`)) return;
+    if (!confirm(`確定要刪除帳戶 [${accountName}] 在 ${snapshotDate} 的歷史快照嗎？\n此操作不可逆，且會影響歷史圖表。`)) return;
     
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_snapshot`, {
         method: 'POST', 
@@ -606,7 +666,7 @@ async function fetchAccounts() {
 }
 
 async function handleDelete(name) {
-  if (!confirm(`確定要刪除 [${name}] 嗎？這會清除該帳戶所有歷史資產快照和資產紀錄。`)) return;
+  if (!confirm(`確定要刪除 [${name}] 嗎？這會清除該帳戶所有歷史快照和資產紀錄。`)) return;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_account`, {
     method: 'POST', body: JSON.stringify({ name: name })
   });
@@ -966,9 +1026,35 @@ onMounted(() => {
 .filter-btn:hover { background-color: #c19263; }
 .chart-box-lg { width: 100%; height: 250px; position: relative; }
 
-/* 列表區 */
-.list-header { font-size: 0.9rem; font-weight: bold; color: #8c7b75; margin-bottom: 10px; margin-top: 10px; }
-.account-list { display: flex; flex-direction: column; gap: 12px; }
+/* 列表區 (分組) */
+
+.list-header { 
+    font-size: 0.9rem; 
+    font-weight: bold; 
+    color: #8c7b75; 
+    margin-bottom: 10px; 
+    margin-top: 10px; 
+} 
+
+.account-groups { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 0px; 
+    margin-top: 10px; 
+} 
+.group-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-accent); 
+    margin: 20px 0 10px 0; 
+    padding-bottom: 5px;
+    border-bottom: 2px solid #f0ebe5;
+}
+.account-list { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 12px; 
+}
 .account-card { background: var(--bg-card); padding: 16px; border-radius: 12px; box-shadow: var(--shadow-soft); display: flex; justify-content: space-between; align-items: center; border: 1px solid #f0ebe5; }
 .acc-name { font-weight: 600; font-size: 1rem; color: var(--text-primary); }
 .acc-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
@@ -979,6 +1065,21 @@ onMounted(() => {
 .card-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .acc-balance { font-size: 1rem; font-weight: 700; letter-spacing: 0.5px; }
 .text-asset { color: var(--text-primary); } .text-debt { color: var(--color-danger); }
+
+/* 🌟 新增 Pill Button 樣式 (更新快照) */
+.pill-btn {
+    background-color: var(--color-primary); /* #d4a373 */
+    color: white;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-weight: 500;
+    white-space: nowrap; 
+}
+.pill-btn:hover { background-color: #c19263; }
 
 /* 🌟 修正 action-buttons 樣式 */
 .action-buttons { 
@@ -995,16 +1096,16 @@ onMounted(() => {
 
 /* 🌟 快照按鈕樣式：使其與「編輯」/「刪除」風格一致 */
 .text-btn.view-history {
-    color: var(--text-secondary); /* 採用中性次要文字色，融入背景 */
+    color: var(--text-secondary);
     text-decoration: underline;
     background: none;
     border: none;
-    padding: 2px 4px; /* 匹配其他 text-btn */
+    padding: 2px 4px;
     cursor: pointer;
     font-size: 0.85rem; 
 }
 .text-btn.view-history:hover {
-    color: var(--color-primary); /* Hover 時採用主題色 */
+    color: var(--color-primary);
     opacity: 1; 
 }
 
@@ -1018,7 +1119,7 @@ onMounted(() => {
 .modal-content {
   background: white; width: 100%; max-width: 400px;
   border-radius: 16px; padding: 24px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   animation: slideUp 0.3s ease-out;
 }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
