@@ -5,7 +5,7 @@
         <h2>帳戶管理</h2>
         <p class="subtitle">資產配置與詳細列表</p>
       </div>
-      <button class="add-btn" @click="showCustomModal('新增帳戶請從 LINE Bot 輸入指令')">
+      <button class="add-btn" @click="openModal()">
         <span>+</span> 新增帳戶
       </button>
     </div>
@@ -27,6 +27,21 @@
 
     <div class="charts-wrapper mb-6">
       
+      <div class="chart-card wide-card">
+        <div class="chart-header-row">
+            <h3>資產成長趨勢 (歷史淨值)</h3>
+            <div class="date-controls">
+                <button @click="fetchAssetHistory('1M')" class="filter-btn-sm">1月</button>
+                <button @click="fetchAssetHistory('6M')" class="filter-btn-sm">6月</button>
+                <button @click="fetchAssetHistory('1Y')" class="filter-btn-sm">1年</button>
+            </div>
+        </div>
+        <div class="chart-box-lg">
+          <canvas ref="assetHistoryChartCanvas"></canvas>
+        </div>
+        <p class="chart-hint-sm">* 顯示依據您手動記錄的「快照」加總，建議定期更新所有帳戶以維持準確性。</p>
+      </div>
+
       <div class="chart-card">
         <h3>現金流配置 (現金 vs 投資)</h3>
         <div class="chart-box">
@@ -135,7 +150,7 @@
     <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>{{ isEditMode ? '編輯帳戶' : '新增帳戶' }}</h3>
+          <h3>{{ isEditMode ? '記錄資產快照' : '新增帳戶' }}</h3>
           <button class="close-btn" @click="closeModal">×</button>
         </div>
         
@@ -144,6 +159,12 @@
             <label>帳戶名稱 (唯一識別)</label>
             <input type="text" v-model="form.name" required class="input-std" :disabled="isEditMode" placeholder="例如：錢包、台新銀行">
             <p v-if="isEditMode" class="hint">名稱無法修改，如需更名請刪除後重建。</p>
+          </div>
+
+          <div class="form-group">
+            <label>快照日期 (生效日)</label>
+            <input type="date" v-model="form.date" required class="input-std">
+            <p class="hint">系統將以這天作為此餘額的記錄時間點。</p>
           </div>
 
           <div class="form-group">
@@ -159,7 +180,7 @@
 
           <div class="form-row">
             <div class="form-group half">
-              <label>金額</label>
+              <label>快照餘額</label>
               <input type="number" v-model.number="form.balance" step="0.01" required class="input-std">
             </div>
             
@@ -179,7 +200,7 @@
           </div>
 
           <button type="submit" class="save-btn" :disabled="isSaving">
-            {{ isSaving ? '儲存中...' : '儲存' }}
+            {{ isSaving ? '儲存中...' : '儲存快照並更新' }}
           </button>
         </form>
       </div>
@@ -242,6 +263,10 @@ const holdingValueChartCanvas = ref(null);
 const netWorthChartCanvas = ref(null);
 const trendChartCanvas = ref(null);
 
+// 新增 canvas ref
+const assetHistoryChartCanvas = ref(null);
+let assetHistoryChart = null;
+
 // Chart Instances
 let allocChart = null; 
 let twUsChart = null;
@@ -255,7 +280,14 @@ let trendChart = null;
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const isSaving = ref(false);
-const form = ref({ name: '', type: 'Cash', balance: 0, currency: 'TWD' });
+// 🟢 新增 date 預設值
+const form = ref({ 
+    name: '', 
+    type: 'Cash', 
+    balance: 0, 
+    currency: 'TWD',
+    date: new Date().toISOString().substring(0, 10)
+});
 
 // 幣種選擇邏輯
 const currencySelectValue = ref('TWD');
@@ -263,6 +295,93 @@ const isCustomCurrency = ref(false);
 
 // 定義法幣列表 (用來過濾)
 const fiatCurrencies = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'HKD', 'AUD', 'CAD', 'SGD', 'KRW'];
+
+// 新增 API 呼叫函式
+async function fetchAssetHistory(range = '6M') {
+    // 1. 計算日期物件
+    const end = new Date();
+    const start = new Date();
+    
+    if (range === '1M') start.setMonth(start.getMonth() - 1);
+    if (range === '6M') start.setMonth(start.getMonth() - 6);
+    if (range === '1Y') start.setFullYear(start.getFullYear() - 1);
+
+    // 2. 🟢 修正：使用本地時間格式化 (YYYY-MM-DD)
+    // 這樣可以確保傳送的是台灣時間的今天，而不是 UTC 的昨天
+    const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const startStr = formatDate(start);
+    const endStr = formatDate(end);
+
+    console.log(`Fetching history from ${startStr} to ${endStr}`); // 方便除錯
+
+    // 3. 呼叫 API
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_history&start=${startStr}&end=${endStr}`);
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            // 如果資料是空的，可以加個 log 檢查
+            if (result.data.length === 0) console.warn("API 回傳空陣列，請檢查資料庫 account_balance_history 表");
+            
+            renderAssetHistoryChart(result.data);
+        }
+    }
+}
+
+// 新增 繪圖函式
+function renderAssetHistoryChart(data) {
+    if (assetHistoryChart) assetHistoryChart.destroy();
+    if (!assetHistoryChartCanvas.value) return;
+
+    const labels = data.map(d => d.date);
+    const values = data.map(d => d.total);
+
+    assetHistoryChart = new Chart(assetHistoryChartCanvas.value, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '總資產 (TWD)',
+                data: values,
+                borderColor: '#D4A373', // 文青棕色
+                backgroundColor: 'rgba(212, 163, 115, 0.1)',
+                borderWidth: 2,
+                tension: 0.3, // 平滑曲線
+                fill: true,
+                pointRadius: 3,
+                pointBackgroundColor: '#fff',
+                pointBorderColor: '#D4A373'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => ` 淨值: NT$ ${numberFormat(ctx.raw, 0)}`
+                    }
+                },
+                datalabels: { display: false }
+            },
+            scales: {
+                x: { grid: { display: false } },
+                y: { 
+                    beginAtZero: false, // 資產趨勢不需要從 0 開始，這樣波動比較明顯
+                    grid: { color: '#f0f0f0' },
+                    ticks: { callback: (val) => '$' + numberFormat(val, 0) } 
+                }
+            }
+        }
+    });
+}
 
 function handleCurrencyChange() {
     if (currencySelectValue.value === 'CUSTOM') {
@@ -286,13 +405,17 @@ function forceUppercase() {
 
 // --- Modal 操作 ---
 function openModal(account = null) {
+  // 🟢 每次打開都先抓今天的日期
+  const today = new Date().toISOString().substring(0, 10);
+
   if (account) {
     isEditMode.value = true;
     form.value = { 
       name: account.name, 
       type: account.type, 
       balance: parseFloat(account.balance), 
-      currency: account.currency_unit 
+      currency: account.currency_unit,
+      date: today // 編輯時預設填入今天，讓用戶確認
     };
     
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
@@ -306,8 +429,14 @@ function openModal(account = null) {
 
   } else {
     isEditMode.value = false;
-    form.value = { name: '', type: 'Cash', balance: 0, currency: 'TWD' };
-    resetCurrency(); // 重置幣種選單
+    form.value = { 
+        name: '', 
+        type: 'Cash', 
+        balance: 0, 
+        currency: 'TWD',
+        date: today // 新增時預設今天
+    };
+    resetCurrency(); 
   }
   isModalOpen.value = true;
 }
@@ -372,14 +501,14 @@ async function fetchChartData() {
               stock: result.data.charts.stock || 0,
               bond: result.data.charts.bond || 0,
               tw_invest: result.data.charts.tw_invest || 0,
-              overseas_invest: result.data.charts.overseas_invest || 0 // 🟢
+              overseas_invest: result.data.charts.overseas_invest || 0 
           };
           assetBreakdown.value = result.data.breakdown || {};
           
           renderAllocationChart();
-          renderRegionChart();      // 🟢 改名並更新邏輯
+          renderRegionChart();      
           renderStockBondChart(); 
-          renderFiatCryptoChart();  // 🟢 改名並更新邏輯
+          renderFiatCryptoChart();  
           renderHoldingValueChart();
           renderNetWorthChart();
       }
@@ -451,7 +580,6 @@ function renderAllocationChart() {
     });
 }
 
-// 🟢 [修改] 渲染 台灣 vs 海外 圖表
 function renderRegionChart() {
     if (twUsChart) twUsChart.destroy();
     const total = chartData.value.tw_invest + chartData.value.overseas_invest;
@@ -462,7 +590,7 @@ function renderRegionChart() {
             labels: ['台灣', '海外'],
             datasets: [{ 
                 data: [chartData.value.tw_invest, chartData.value.overseas_invest], 
-                backgroundColor: ['#E9C46A', '#264653'], // 黃色 vs 深藍
+                backgroundColor: ['#E9C46A', '#264653'], 
                 borderWidth: 0 
             }]
         },
@@ -496,11 +624,9 @@ function renderStockBondChart() {
     });
 }
 
-// 🟢 [修改] 法幣 vs 加密貨幣 配置圖 (甜甜圈圖)
 function renderFiatCryptoChart() {
     if (currChart) currChart.destroy();
     
-    // 計算總法幣資產 vs 總加密貨幣資產
     let totalFiat = 0;
     let totalCrypto = 0;
 
@@ -521,7 +647,7 @@ function renderFiatCryptoChart() {
             labels: ['法幣', '加密貨幣'], 
             datasets: [{ 
                 data: [totalFiat, totalCrypto], 
-                backgroundColor: ['#A5A58D', '#6B705C'], // 灰色系/軍綠
+                backgroundColor: ['#A5A58D', '#6B705C'], 
                 borderWidth: 0
             }] 
         },
@@ -547,11 +673,9 @@ function renderFiatCryptoChart() {
     });
 }
 
-// 🟢 [修改] 加密貨幣分佈 (改為 Doughnut 並顯示百分比)
 function renderHoldingValueChart() {
     if (holdingValueChart) holdingValueChart.destroy();
     
-    // 篩選邏輯：排除法幣列表
     const sortedItems = Object.entries(assetBreakdown.value)
         .filter(([key, val]) => !fiatCurrencies.includes(key) && val.twd_total > 0)
         .map(([currency, data]) => ({ currency, value: data.twd_total }))
@@ -561,7 +685,6 @@ function renderHoldingValueChart() {
     const dataValues = sortedItems.map(i => i.value);
     const total = dataValues.reduce((a,b) => a+b, 0);
 
-    // 產生漸層色系 (科技藍)
     const cryptoColors = ['#0077B6', '#0096C7', '#00B4D8', '#48CAE4', '#90E0EF', '#ADE8F4', '#CAF0F8'];
 
     holdingValueChart = new Chart(holdingValueChartCanvas.value, {
@@ -584,7 +707,6 @@ function renderHoldingValueChart() {
                     formatter: (value, ctx) => {
                         if (total === 0) return '';
                         const percentage = Math.round((value / total) * 100);
-                        // 只顯示佔比大於 5% 的標籤
                         return percentage >= 5 ? ctx.chart.data.labels[ctx.dataIndex] + ' ' + percentage + '%' : '';
                     },
                     color: '#fff',
@@ -646,6 +768,7 @@ onMounted(() => {
     fetchAccounts();
     fetchChartData();
     fetchTrendData();
+    fetchAssetHistory();
 });
 </script>
 
@@ -686,6 +809,29 @@ onMounted(() => {
 /* 新增的顏色點樣式 */
 .dot.tw-stock { background: #E9C46A; } .dot.us-stock { background: #264653; }
 .dot.stock { background: #F4A261; } .dot.bond { background: #2A9D8F; }
+
+
+.chart-hint-sm {
+    font-size: 0.75rem;
+    color: #aaa;
+    text-align: center;
+    margin-top: 8px;
+}
+.filter-btn-sm {
+    background: transparent;
+    border: 1px solid #d4a373;
+    color: #d4a373;
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    margin-left: 4px;
+    transition: all 0.2s;
+}
+.filter-btn-sm:hover {
+    background: #d4a373;
+    color: white;
+}
 
 .ml-2 { margin-left: 8px; }
 .wide-card { grid-column: 1 / -1; display: block; }

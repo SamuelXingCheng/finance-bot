@@ -33,23 +33,113 @@ class AssetService {
         return in_array($standardized, self::VALID_TYPES) ? $standardized : 'Cash';
     }
 
-    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit): bool {
+    /**
+     * 更新帳戶餘額 (包含寫入歷史快照)
+     * @param string|null $snapshotDate 如果未提供，預設為今日 (YYYY-MM-DD)
+     */
+    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null): bool {
         $assetType = $this->sanitizeAssetType($type); 
-        $sql = "INSERT INTO accounts (user_id, name, type, balance, currency_unit)
-                VALUES (:userId, :name, :type, :balance, :unit)
-                ON DUPLICATE KEY UPDATE 
-                balance = VALUES(balance), last_updated_at = NOW(), type = VALUES(type), currency_unit = VALUES(currency_unit)";
+        $date = $snapshotDate ?? date('Y-m-d'); // 預設今天
+
         try {
-            $stmt = $this->pdo->prepare($sql);
-            return $stmt->execute([
-                ':userId' => $userId, ':name' => $name, ':type' => $assetType, ':balance' => $balance, ':unit' => strtoupper($currencyUnit)
+            $this->pdo->beginTransaction();
+
+            // 1. 更新主表 accounts (保持當前最新狀態)
+            $sqlMain = "INSERT INTO accounts (user_id, name, type, balance, currency_unit, last_updated_at)
+                        VALUES (:userId, :name, :type, :balance, :unit, NOW())
+                        ON DUPLICATE KEY UPDATE 
+                        balance = VALUES(balance), 
+                        type = VALUES(type), 
+                        currency_unit = VALUES(currency_unit),
+                        last_updated_at = NOW()";
+            
+            $stmtMain = $this->pdo->prepare($sqlMain);
+            $stmtMain->execute([
+                ':userId' => $userId, 
+                ':name' => $name, 
+                ':type' => $assetType, 
+                ':balance' => $balance, 
+                ':unit' => strtoupper($currencyUnit)
             ]);
+
+            // 2. 寫入歷史表 account_balance_history (記錄時間序列)
+            // 策略：刪除該用戶、該帳戶、該日期的舊紀錄，寫入新的 (覆蓋當日舊快照)
+            $sqlDelHistory = "DELETE FROM account_balance_history 
+                              WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date";
+            $stmtDel = $this->pdo->prepare($sqlDelHistory);
+            $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date]);
+
+            $sqlHistory = "INSERT INTO account_balance_history (user_id, account_name, balance, currency_unit, snapshot_date)
+                           VALUES (:userId, :name, :balance, :unit, :date)";
+            $stmtHist = $this->pdo->prepare($sqlHistory);
+            $stmtHist->execute([
+                ':userId' => $userId,
+                ':name' => $name,
+                ':balance' => $balance,
+                ':unit' => strtoupper($currencyUnit),
+                ':date' => $date
+            ]);
+
+            $this->pdo->commit();
+            return true;
+
         } catch (PDOException $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
             error_log("AssetService UPSERT failed: " . $e->getMessage());
             return false;
         }
     }
 
+    /**
+     * 取得資產歷史趨勢 (依日期加總)
+     */
+    public function getAssetTrend(int $userId, string $start, string $end): array {
+        // 1. 撈取範圍內的所有歷史紀錄
+        $sql = "SELECT snapshot_date, balance, currency_unit 
+                FROM account_balance_history 
+                WHERE user_id = :uid AND snapshot_date BETWEEN :start AND :end
+                ORDER BY snapshot_date ASC";
+        
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([':uid' => $userId, ':start' => $start, ':end' => $end]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // 2. 依日期分組並換算匯率
+            $dailyTotals = [];
+            $rateService = new ExchangeRateService();
+            $usdTwdRate = $rateService->getUsdTwdRate();
+
+            foreach ($rows as $row) {
+                $date = $row['snapshot_date'];
+                $currency = strtoupper($row['currency_unit']);
+                $balance = (float)$row['balance'];
+
+                // 匯率換算 (使用當前匯率作為估算)
+                $rateToUSD = $rateService->getRateToUSD($currency);
+                $twdValue = $balance * $rateToUSD * $usdTwdRate;
+
+                if (!isset($dailyTotals[$date])) {
+                    $dailyTotals[$date] = 0;
+                }
+                $dailyTotals[$date] += $twdValue;
+            }
+
+            // 3. 格式化輸出
+            $result = [];
+            foreach ($dailyTotals as $date => $total) {
+                $result[] = ['date' => $date, 'total' => $total];
+            }
+            return $result;
+
+        } catch (PDOException $e) {
+            error_log("getAssetTrend Error: " . $e->getMessage());
+            return [];
+        }
+    }
+    
     public function getNetWorthSummary(int $userId): array {
         $rateService = new ExchangeRateService(); 
         $sql = "SELECT type, currency_unit, SUM(balance) as total 

@@ -144,21 +144,34 @@ try {
             $type = $input['type'] ?? 'Cash';
             $balance = (float)($input['balance'] ?? 0);
             $currency = $input['currency'] ?? 'TWD';
+            
+            // 🟢 獲取快照日期，若無則預設今天
+            $date = $input['date'] ?? date('Y-m-d'); 
 
             if (empty($name)) {
                 $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
                 break;
             }
 
-            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency);
+            // 🟢 傳入 date 參數
+            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date);
 
             if ($success) {
-                $response = ['status' => 'success', 'message' => '帳戶儲存成功'];
+                $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
             } else {
                 $response = ['status' => 'error', 'message' => '儲存失敗'];
             }
             break;
+        
+        case 'asset_history':
+            // 設定預設查詢範圍 (例如過去半年)
+            $start = $_GET['start'] ?? date('Y-m-d', strtotime('-6 months'));
+            $end = $_GET['end'] ?? date('Y-m-d');
 
+            $history = $assetService->getAssetTrend($dbUserId, $start, $end);
+            $response = ['status' => 'success', 'data' => $history];
+            break;
+            
         case 'monthly_expense_breakdown':
             $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
             $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
@@ -334,7 +347,6 @@ try {
             $orderId = 'PREMIUM_' . $dbUserId . '_' . time();
             
             // 設定 Webhook 回調網址 (請確認此網域是否正確指向您的伺服器)
-            // 這裡假設您的網域與 LIFF_DASHBOARD_URL 相同網域，或您可以直接寫死 'https://finbot.tw/crypto_webhook.php'
             $domain = 'https://finbot.tw'; // 🔴 請確認此網域
             $webhookUrl = $domain . '/crypto_webhook.php';
             $returnUrl = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me/';
