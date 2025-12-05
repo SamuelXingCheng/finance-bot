@@ -14,28 +14,41 @@
           </div>
 
           <p class="premium-desc">
-            訂閱會員可立即解鎖以下進階功能，**享受無限制的智慧服務**，真正掌握每一分財富：
-        </p>
-        <ul class="feature-list">
-            <li>
-                **無限次 AI 口語記帳：** 只需用日常對話的方式輸入收支，AI 即可精準識別、自動歸類。
-                **【免費版限制：每日僅限使用 3 次口語記帳】**
-            </li>
-            <li>
-                **無限次 AI 財務健檢：** 整合您的記帳、資產配置情況，**即時**獲取個人化的理財建議與知識。
-                **【免費版限制：每年僅能使用 2 次 AI 財務健檢】**
-            </li>
-            <li>
-                **解鎖長期歷史趨勢圖** 與 **資產負債總覽表**。
-            </li>
-            <li>
-                **資產負債總覽表：** 一目瞭然您的淨值結構、資產與負債的完整配置，做出精準的財務決策。
-            </li>
-            <li>
-                **多幣種整合追蹤：** 專為投資加密貨幣、外幣和海外資產的用戶設計，將所有幣種集中管理，無需手動換算。
-            </li>
-        </ul>
+            訂閱會員可立即解鎖以下進階功能，<strong>享受無限制的智慧服務</strong>，真正掌握每一分財富：
+          </p>
           
+          <div class="feature-group-list">
+            
+            <h4 class="feature-group-title">無限制 AI 智慧服務</h4>
+            <ul class="feature-list">
+              <li>
+                <strong>無限次 AI 口語記帳：</strong> 只需用日常對話的方式輸入收支，AI 即可精準識別、自動歸類。
+                <p class="feature-restriction">【免費版限制：每日僅限使用 3 次口語記帳】</p>
+              </li>
+              <li>
+                <strong>無限次 AI 財務健檢：</strong> 整合您的記帳、資產配置情況，即時獲取個人化的理財建議與知識。
+                <p class="feature-restriction">【免費版限制：每年僅能使用 2 次 AI 財務健檢】</p>
+              </li>
+            </ul>
+
+            <h4 class="feature-group-title">專業財務報表與分析</h4>
+            <ul class="feature-list">
+              <li>
+                <strong>解鎖長期歷史趨勢圖</strong> 與 <strong>資產負債總覽表</strong>。
+              </li>
+              <li>
+                <strong>資產負債總覽表：</strong> 一目瞭然您的淨值結構、資產與負債的完整配置，做出精準的財務決策。
+              </li>
+            </ul>
+
+            <h4 class="feature-group-title">多幣種資產整合追蹤</h4>
+            <ul class="feature-list">
+              <li>
+                <strong>多幣種整合追蹤：</strong> 專為投資加密貨幣、外幣和海外資產的用戶設計，將所有幣種集中管理，無需手動換算。
+              </li>
+            </ul>
+
+          </div>
           <div class="payment-notice">
             <p>⚠<strong>付款前請注意：</strong></p>
             <ul>
@@ -47,12 +60,12 @@
           </div>
 
           <div class="payment-buttons">
-              <button class="btn-pay btn-bmc" @click="openPaymentModal('bmc')">
-                  Apple Pay / 信用卡 / Buy me a Coffee (BMC)
-              </button>
-              <button class="btn-pay btn-crypto" @click="openPaymentModal('crypto')">
-                  加密貨幣支付（NOWPayments）
-              </button>
+            <button class="btn-pay btn-bmc" @click="openPaymentModal('bmc')">
+              Apple Pay / 信用卡 / Buy me a Coffee (BMC)
+            </button>
+            <button class="btn-pay btn-crypto" @click="openPaymentModal('crypto')">
+              加密貨幣支付（NOWPayments）
+            </button>
           </div>
         </div>
       </div>
@@ -88,8 +101,8 @@
             <div class="form-group half">
               <label>幣種</label>
               <div v-if="isCustomCurrency" class="custom-currency-wrapper">
-                 <input type="text" v-model="transactionForm.currency" class="input-minimal" placeholder="代碼" required @input="forceUppercase">
-                 <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
+                <input type="text" v-model="transactionForm.currency" class="input-minimal" placeholder="代碼" required @input="forceUppercase">
+                <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
               </div>
               <select v-else v-model="currencySelectValue" class="input-minimal" @change="handleCurrencyChange">
                 <option value="TWD">新台幣 (TWD)</option>
@@ -204,18 +217,18 @@
       
       <div class="data-box tx-list-wrapper"> 
           <div class="list-controls">
-              <h3>明細列表</h3>
-              <div class="month-selector">
-                  <input type="month" v-model="currentListMonth" @change="fetchTransactions" class="month-input-styled">
-              </div>
+            <h3>明細列表</h3>
+            <div class="month-selector">
+              <input type="month" v-model="currentListMonth" @change="fetchTransactions" class="month-input-styled">
+            </div>
           </div>
 
           <div v-if="txLoading" class="loading-box">
-              <span class="loader"></span> 載入中...
+            <span class="loader"></span> 載入中...
           </div>
           
           <div v-else-if="transactions.length === 0" class="empty-msg">
-              本月尚無紀錄
+            本月尚無紀錄
           </div>
           
           <div v-else class="tx-grouped-list">
@@ -679,8 +692,58 @@ onMounted(() => {
 .premium-price { font-size: 1rem; color: #555; margin-bottom: 12px; font-weight: 500; }
 .price-tag { color: #d97706; font-weight: bold; font-size: 1.1rem; }
 .premium-desc { font-size: 0.9rem; color: #666; margin-bottom: 12px; line-height: 1.5; }
-.feature-list { list-style: none; padding: 0; margin: 0 0 16px 0; }
-.feature-list li { font-size: 0.9rem; color: #555; margin-bottom: 6px; }
+
+/* ⬇️ 新增/修改：優化功能列表結構的樣式 ⬇️ */
+.feature-group-list {
+    margin-bottom: 16px;
+}
+
+.feature-group-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #8c7b75; /* 略深一點的顏色區分群組 */
+    margin-top: 15px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #f0ebe5;
+    padding-bottom: 3px;
+}
+
+.feature-list { 
+    list-style: none; 
+    padding: 0; 
+    margin: 0 0 0 0; /* 調整外邊距 */
+}
+.feature-list li { 
+    font-size: 0.9rem; 
+    color: #555; 
+    margin-bottom: 8px; 
+    padding-left: 15px; /* 留給自定義標記的空間 */
+    position: relative;
+    line-height: 1.4;
+}
+
+/* 自定義列表標記 */
+.feature-list li::before {
+    content: '•'; /* 使用圓點作為標記 */
+    color: #d4a373; /* 主題色 */
+    font-weight: bold;
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-size: 1.2em;
+    line-height: 1;
+}
+
+.feature-restriction {
+    font-size: 0.8rem;
+    color: #b45309; /* 警示色 */
+    margin-top: 2px;
+    margin-bottom: 0;
+    padding-left: 0;
+    font-weight: 500;
+}
+/* ⬆️ 新增/修改：優化功能列表結構的樣式 ⬆️ */
+
 .payment-buttons { display: flex; gap: 10px; width: 100%; flex-wrap: wrap; }
 .btn-pay { flex: 1; padding: 10px; border-radius: 12px; font-weight: bold; border: none; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1); transition: transform 0.1s; font-size: 0.9rem; min-width: 120px; }
 .btn-pay:hover { transform: translateY(-1px); }
