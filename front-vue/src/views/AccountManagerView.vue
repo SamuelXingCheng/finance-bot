@@ -39,7 +39,7 @@
         <div class="chart-box-lg">
           <canvas ref="assetHistoryChartCanvas"></canvas>
         </div>
-        <p class="chart-hint-sm">* 顯示依據您手動記錄的「快照」加總，建議定期更新所有帳戶以維持準確性。</p>
+        <p class="chart-hint-sm">* 顯示依據您手動記錄的「資產快照」加總，建議定期更新所有帳戶以維持準確性。</p>
       </div>
 
       <div class="chart-card">
@@ -146,10 +146,10 @@
                 @click="fetchAccountHistory(account.name)"
                 :disabled="historyLoading"
             >
-                快照
+                編輯歷史資產
             </button>
             
-            <button class="text-btn edit" @click="openModal(account)">編輯</button>
+            <button class="text-btn edit" @click="openModal(account)">更新資產</button>
             <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
           </div>
         </div>
@@ -159,7 +159,7 @@
     <div v-if="isHistoryModalOpen" class="modal-backdrop" @click.self="closeHistoryModal">
         <div class="modal-content history-modal">
             <div class="modal-header">
-                <h3>{{ currentAccountName }} - 歷史快照</h3>
+                <h3>{{ currentAccountName }} - 歷史資產快照</h3>
                 <button @click="closeHistoryModal" class="close-btn">&times;</button>
             </div>
             <div class="modal-body">
@@ -167,7 +167,7 @@
                     <li class="list-group-item">載入中...</li>
                 </div>
                 <div v-else-if="accountHistory.length === 0" class="list-group">
-                     <li class="list-group-item">此帳戶尚無歷史快照記錄。</li>
+                     <li class="list-group-item">此帳戶尚無歷史資產快照記錄。</li>
                 </div>
                 <ul v-else class="list-group">
                     <li 
@@ -185,14 +185,14 @@
                             <button 
                                 class="text-btn edit-sm" 
                                 @click="openModalForSnapshot(item)" 
-                                title="修改該日快照"
+                                title="修改該日資產快照"
                             >
                                 修改
                             </button>
                             <button 
                                 class="text-btn delete-sm" 
                                 @click="handleDeleteSnapshot(item.account_name, item.snapshot_date)"
-                                title="刪除該日快照"
+                                title="刪除該日資產快照"
                             >
                                 刪除
                             </button>
@@ -218,7 +218,7 @@
           </div>
 
           <div class="form-group">
-            <label>快照日期 (生效日)</label>
+            <label>資產快照日期 (生效日)</label>
             <input type="date" v-model="form.date" required class="input-std">
             <p class="hint">系統將以這天作為此餘額的記錄時間點。</p>
           </div>
@@ -236,7 +236,7 @@
 
           <div class="form-row">
             <div class="form-group half">
-              <label>快照餘額</label>
+              <label>資產快照餘額</label>
               <input type="number" v-model.number="form.balance" step="0.01" required class="input-std">
             </div>
             
@@ -256,7 +256,7 @@
           </div>
 
           <button type="submit" class="save-btn" :disabled="isSaving">
-            {{ isSaving ? '儲存中...' : '儲存快照並更新' }}
+            {{ isSaving ? '儲存中...' : '儲存資產快照並更新' }}
           </button>
         </form>
       </div>
@@ -380,7 +380,7 @@ async function fetchAccountHistory(name) {
 }
 
 async function handleDeleteSnapshot(accountName, snapshotDate) {
-    if (!confirm(`確定要刪除帳戶 [${accountName}] 在 ${snapshotDate} 的歷史快照嗎？\n此操作不可逆，且會影響歷史圖表。`)) return;
+    if (!confirm(`確定要刪除帳戶 [${accountName}] 在 ${snapshotDate} 的歷史資產快照嗎？\n此操作不可逆，且會影響歷史圖表。`)) return;
     
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_snapshot`, {
         method: 'POST', 
@@ -606,7 +606,7 @@ async function fetchAccounts() {
 }
 
 async function handleDelete(name) {
-  if (!confirm(`確定要刪除 [${name}] 嗎？這會清除該帳戶所有歷史快照和資產紀錄。`)) return;
+  if (!confirm(`確定要刪除 [${name}] 嗎？這會清除該帳戶所有歷史資產快照和資產紀錄。`)) return;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_account`, {
     method: 'POST', body: JSON.stringify({ name: name })
   });
