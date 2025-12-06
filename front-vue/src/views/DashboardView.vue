@@ -457,7 +457,15 @@ async function fetchAssetSummary() {
 }
 
 async function fetchTransactions() {
-    txLoading.value = true;
+    // 🔴 原本：每次都設為 true，導致列表消失 -> 高度塌陷 -> 捲軸跳回頂部
+    // txLoading.value = true; 
+
+    // 🟢 修正：只有在「目前沒資料」的時候才顯示 loading
+    // 這樣在「刪除/新增」後的更新過程中，舊列表會繼續顯示，直到新資料蓋過去，畫面就不會跳動
+    if (transactions.value.length === 0) {
+        txLoading.value = true;
+    }
+
     const monthToSend = currentListMonth.value.substring(0, 7); 
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_transactions&month=${monthToSend}`);
     
@@ -509,7 +517,10 @@ function refreshAllData() {
     fetchTransactions(); 
 }
 
-watch(currentListMonth, (newMonth) => { fetchTransactions(); });
+watch(currentListMonth, (newMonth) => { 
+    transactions.value = []; // 清空當前列表
+    fetchTransactions(); 
+});
 
 async function fetchExpenseData() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=monthly_expense_breakdown`);

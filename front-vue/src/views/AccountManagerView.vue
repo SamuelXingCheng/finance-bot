@@ -663,7 +663,11 @@ async function handleSave() {
 
 // --- API 函式 (簡化) ---
 async function fetchAccounts() {
-  loading.value = true;
+  // 🟢 修正：只有沒帳戶時才顯示 loading，避免刪除後畫面跳動
+  if (accounts.value.length === 0) {
+      loading.value = true;
+  }
+  
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_accounts`);
   if (response && response.ok) {
       const result = await response.json();
