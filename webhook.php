@@ -1,6 +1,6 @@
 <?php
 // webhook.php
-// 設置 PHP 錯誤顯示，用於診斷 (測試完成後應移除或設為 0)
+// 設置 PHP 錯誤顯示，用於診斷 (上線後建議移除或設為 0)
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -67,7 +67,7 @@ try {
             $dbUserId = $userService->findOrCreateUser($lineUserId);
             
             // ====================================================
-            // 🟢 CASE C: 處理新增好友事件 (Follow Event) - 新增區塊
+            // 🟢 CASE C: 處理新增好友事件 (Follow Event)
             // ====================================================
             if ($event['type'] === 'follow') {
                 
@@ -95,7 +95,7 @@ try {
                                 'action' => [
                                     'type' => 'uri', 
                                     'label' => '🚀 開始新手引導', 
-                                    'uri' => $liffUrl // 這會打開前端 App.vue，觸發 checkUserStatus -> 顯示 Onboarding
+                                    'uri' => $liffUrl 
                                 ], 
                                 'style' => 'primary', 
                                 'color' => '#D4A373'
@@ -136,8 +136,172 @@ try {
                     }
                     $isProcessed = true;
                 } 
+
+                // --- [新增] 記帳教學指令 ---
+                elseif ($text === '記帳教學' || $text === '教學' || $text === 'help') {
+                    
+                    $tutorialFlex = [
+                        'type' => 'bubble',
+                        'size' => 'giga', 
+                        'header' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'backgroundColor' => '#D4A373', 
+                            'paddingAll' => 'lg',
+                            'contents' => [
+                                [
+                                    'type' => 'text',
+                                    'text' => 'FinBot 記帳教學',
+                                    'weight' => 'bold',
+                                    'color' => '#FFFFFF',
+                                    'size' => 'xl'
+                                ]
+                            ]
+                        ],
+                        'body' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'spacing' => 'md',
+                            'contents' => [
+                                // --- 第一區塊：文字記帳 ---
+                                [
+                                    'type' => 'text',
+                                    'text' => '文字記帳',
+                                    'weight' => 'bold',
+                                    'color' => '#8C7B75', 
+                                    'size' => 'md'
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => '直接輸入「品項 + 金額」，AI 助手會自動幫您歸類！',
+                                    'size' => 'xs',
+                                    'color' => '#666666',
+                                    'wrap' => true
+                                ],
+                                [
+                                    'type' => 'button',
+                                    'style' => 'secondary',
+                                    'height' => 'sm',
+                                    'color' => '#f7f5f0', 
+                                    'action' => [
+                                        'type' => 'message',
+                                        'label' => '試試看：早餐蛋餅 45', 
+                                        'text' => '早餐蛋餅 45'
+                                    ]
+                                ],
+                                
+                                ['type' => 'separator', 'margin' => 'lg'],
+
+                                // --- 第二區塊：語音記帳 ---
+                                [
+                                    'type' => 'box',
+                                    'layout' => 'horizontal',
+                                    'alignItems' => 'center',
+                                    'contents' => [
+                                        [
+                                            'type' => 'text',
+                                            'text' => '語音記帳',
+                                            'weight' => 'bold',
+                                            'color' => '#8C7B75',
+                                            'size' => 'md',
+                                            'flex' => 1
+                                        ],
+                                        [
+                                            'type' => 'text',
+                                            'text' => '語音超方便！',
+                                            'size' => 'xxs',
+                                            'color' => '#1DB446',
+                                            'weight' => 'bold',
+                                            'align' => 'end'
+                                        ]
+                                    ]
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => '不用打字！按住麥克風，像跟朋友聊天一樣說出來即可。',
+                                    'size' => 'xs',
+                                    'color' => '#666666',
+                                    'wrap' => true
+                                ],
+                                [
+                                    'type' => 'box',
+                                    'layout' => 'vertical',
+                                    'backgroundColor' => '#f0f7f0', 
+                                    'cornerRadius' => 'md',
+                                    'paddingAll' => 'md',
+                                    'margin' => 'sm',
+                                    'contents' => [
+                                        [
+                                            'type' => 'text',
+                                            'text' => '您可以這樣說：',
+                                            'size' => 'xxs',
+                                            'color' => '#1DB446',
+                                            'weight' => 'bold'
+                                        ],
+                                        [
+                                            'type' => 'text',
+                                            'text' => '「昨天晚餐吃火鍋 500元，還有去全聯買菜 300」',
+                                            'size' => 'xs',
+                                            'color' => '#555555',
+                                            'wrap' => true,
+                                            'margin' => 'xs'
+                                        ]
+                                    ]
+                                ],
+
+                                ['type' => 'separator', 'margin' => 'lg'],
+
+                                // --- 第三區塊：查詢報表 ---
+                                [
+                                    'type' => 'text',
+                                    'text' => '查詢資產與收支',
+                                    'weight' => 'bold',
+                                    'color' => '#8C7B75',
+                                    'size' => 'md'
+                                ],
+                                [
+                                    'type' => 'button',
+                                    'style' => 'secondary',
+                                    'height' => 'sm',
+                                    'action' => [
+                                        'type' => 'message',
+                                        'label' => '查詢本月收支',
+                                        'text' => '查詢收支'
+                                    ]
+                                ],
+                                [
+                                    'type' => 'button',
+                                    'style' => 'link',
+                                    'height' => 'sm',
+                                    'color' => '#D4A373',
+                                    'action' => [
+                                        'type' => 'message',
+                                        'label' => '查詢淨資產',
+                                        'text' => '查詢資產'
+                                    ]
+                                ]
+                            ]
+                        ],
+                        'footer' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'contents' => [
+                                [
+                                    'type' => 'text',
+                                    'text' => '💡 小撇步：輸入「儀表板」可開啟網頁圖表',
+                                    'size' => 'xs',
+                                    'color' => '#aaaaaa',
+                                    'align' => 'center'
+                                ]
+                            ]
+                        ]
+                    ];
+
+                    $lineService->replyFlexMessage($replyToken, "FinBot 記帳教學", $tutorialFlex);
+                    $isProcessed = true;
+                }
                 
-                // --- 2. 資產設定指令 (恢復原版 Flex) ---
+                // --- 2. 資產設定指令 ---
                 elseif (preg_match('/^設定\s+([^\s]+)\s+([^\s]+)\s+([-\d\.,]+)(.*?)$/u', $text, $matches)) {
                     $name = trim($matches[1]);
                     $typeInput = trim($matches[2]);
@@ -160,7 +324,6 @@ try {
                         $trimmedZeros = rtrim($formattedBalance, '0');
                         $displayBalance = rtrim($trimmedZeros, '.');
 
-                        // 🎨 恢復：原版資產更新成功 Flex Message
                         $flexPayload = [
                             'type' => 'bubble', 'size' => 'kilo',
                             'header' => ['type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'backgroundColor' => '#1DB446',
@@ -184,7 +347,7 @@ try {
                     $isProcessed = true;
                 } 
                 
-                // --- 3. 資產查詢指令 (恢復原版 Flex) ---
+                // --- 3. 資產查詢指令 ---
                 elseif (in_array($text, ['查詢資產', '資產總覽', '淨值'])) {
                     $result = $assetService->getNetWorthSummary($dbUserId);
                     $summary = $result['breakdown']; 
@@ -199,19 +362,13 @@ try {
                     $heroSize = ($textLength > 16) ? 'xl' : (($textLength > 12) ? 'xl' : 'xxl');
                     $globalNetWorthColor = $globalNetWorthTWD >= 0 ? '#007AFF' : '#FF334B';
                     
-                    // ====================================================
-                    // 🌟 淨值資產排序優化邏輯 (法幣在前，加密貨幣在後)
-                    // ====================================================
                     $fiatSummary = [];
                     $cryptoSummary = [];
 
-                    // 1. 定義法幣與加密貨幣的優先順序
                     $fiatOrder = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'CAD', 'AUD', 'HKD', 'SGD'];
-                    $cryptoOrder = ['BTC', 'ETH', 'USDT', 'ADA', 'XMR']; // 從 ExchangeRateService::COIN_ID_MAP 擷取
+                    $cryptoOrder = ['BTC', 'ETH', 'USDT', 'ADA', 'XMR']; 
 
-                    // 2. 分離幣種
                     foreach ($summary as $currency => $data) {
-                        // 使用 ExchangeRateService 中的常量判斷是否為已知加密貨幣
                         if (isset(ExchangeRateService::COIN_ID_MAP[$currency])) {
                             $cryptoSummary[$currency] = $data;
                         } else {
@@ -219,7 +376,6 @@ try {
                         }
                     }
 
-                    // 3. 排序法幣：優先順序在前，其餘字母排序
                     $sortedFiat = [];
                     foreach ($fiatOrder as $key) {
                         if (isset($fiatSummary[$key])) {
@@ -227,10 +383,9 @@ try {
                             unset($fiatSummary[$key]);
                         }
                     }
-                    ksort($fiatSummary); // 剩餘的法幣按字母排序
+                    ksort($fiatSummary); 
                     $sortedFiat = array_merge($sortedFiat, $fiatSummary);
 
-                    // 4. 排序加密貨幣：優先順序在前，其餘字母排序
                     $sortedCrypto = [];
                     foreach ($cryptoOrder as $key) {
                         if (isset($cryptoSummary[$key])) {
@@ -238,12 +393,10 @@ try {
                             unset($cryptoSummary[$key]);
                         }
                     }
-                    ksort($cryptoSummary); // 剩餘的加密貨幣按字母排序
+                    ksort($cryptoSummary); 
                     $sortedCrypto = array_merge($sortedCrypto, $cryptoSummary);
 
-                    // 5. 合併：法幣在前 + 加密貨幣在後
                     $summary = array_merge($sortedFiat, $sortedCrypto);
-                    // ====================================================
 
                     if (!empty($summary)) {
                         foreach ($summary as $currency => $data) {
@@ -253,7 +406,7 @@ try {
                             $twdTotal = number_format($data['twd_total'], 2);
 
                             $netWorthColor = $data['net_worth'] >= 0 ? '#1DB446' : '#FF334B';
-                            $netWorthEmoji = ''; // 🌟 已移除表情符號 (原為 '🟢' 或 '🔴')
+                            $netWorthEmoji = ''; 
 
                             $assetBodyContents[] = [
                                 'type' => 'text', 'text' => "{$currency} 資產總覽", 'weight' => 'bold', 'color' => '#333333', 'size' => 'md', 'margin' => 'xl'
@@ -324,7 +477,6 @@ try {
                         $assetBodyContents[] = ['type' => 'text', 'text' => '目前沒有任何資產記錄。請輸入「設定...」新增。', 'size' => 'sm', 'color' => '#AAAAAA', 'margin' => 'xl'];
                     }
 
-                    // 🎨 恢復：原版淨資產總覽 Flex Message
                     $flexPayload = [
                         'type' => 'bubble', 'size' => 'mega',
                         'header' => ['type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'contents' => [['type' => 'text', 'text' => '淨資產總覽', 'weight' => 'bold', 'size' => 'xl']]],
@@ -349,7 +501,7 @@ try {
                     $isProcessed = true;
                 }
                 
-                // --- 4. 記帳查詢指令 (恢復原版 Flex) ---
+                // --- 4. 記帳查詢指令 ---
                 elseif (in_array($text, ['查詢收支', '收支出', '報表', '總覽', '支出', '收入'])) {
                     $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
                     $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
@@ -363,7 +515,6 @@ try {
                     $fmtAsset = number_format($globalNetWorth);
                     $balanceColor = $netIncome >= 0 ? '#1DB446' : '#FF334B';
 
-                    // 🎨 恢復：原版收支報表 Flex Message
                     $flexPayload = [
                         'type' => 'bubble', 'size' => 'kilo',
                         'header' => [
@@ -418,7 +569,7 @@ try {
             } 
             
             // ====================================================
-            // CASE B: 處理語音訊息 (新增功能 🎤)
+            // CASE B: 處理語音訊息
             // ====================================================
             elseif ($event['type'] === 'message' && $msgType === 'audio') {
                 
@@ -448,6 +599,7 @@ try {
                 }
             }
 
+            
             // ====================================================
             // 統一處理 AI 任務 (權限檢查 -> 寫入資料庫)
             // ====================================================
