@@ -5,6 +5,11 @@
       <p>❌ {{ liffState.error }}</p>
     </div>
 
+    <div v-else-if="isLoading" class="loading-container">
+      <div class="spinner"></div>
+      <p>FinBot 啟動中...</p>
+    </div>
+
     <div v-else-if="!liffState.isLoggedIn" class="onboarding-container">
       <OnboardingView @trigger-login="handleOnboardingLogin" />
     </div>
@@ -19,7 +24,7 @@
             <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto</button>
           </div>
           <div class="nav-user">
-            <img v-if="liffState.profile" :src="liffState.profile.pictureUrl" class="user-avatar" />
+            <img v-if="liffState.profile?.pictureUrl" :src="liffState.profile.pictureUrl" class="user-avatar" />
           </div>
         </div>
       </nav>
@@ -48,15 +53,19 @@ import liff from '@line/liff';
 import { liffState } from './liffState';
 import { fetchWithLiffToken } from '@/utils/api';
 
-// 引入元件 (請確保路徑正確)
+// 引入元件
 import OnboardingView from './views/OnboardingView.vue';
 import DashboardView from './views/DashboardView.vue';
 import AccountManagerView from './views/AccountManagerView.vue';
 import CryptoView from './views/CryptoView.vue'; 
 
+// 環境變數設定
 const LIFF_ID = import.meta.env.VITE_LIFF_ID;
+const API_URL = import.meta.env.VITE_API_BASE_URL || window.API_BASE_URL;
+
 const currentTab = ref('Dashboard');
 const currentViewRef = ref(null);
+const isLoading = ref(true); 
 
 const currentView = computed(() => {
   if (currentTab.value === 'Dashboard') return DashboardView;
@@ -72,101 +81,219 @@ const handleRefreshDashboard = () => {
 };
 
 // --- 核心邏輯：處理引導與登入 ---
-
-// 1. 當用戶在 OnboardingView 點擊登入時觸發
 function handleOnboardingLogin(data) {
-  // 將用戶填寫的目標、預算等資料暫存入 localStorage
   localStorage.setItem('pending_onboarding', JSON.stringify(data));
-  
-  // 執行 LINE 登入 (會跳轉)
   if (!liff.isLoggedIn()) {
     liff.login();
   }
 }
 
-// 2. 用戶登入回來後，檢查是否有暫存資料需要寫入後端
 async function processPendingOnboarding() {
   const pendingData = localStorage.getItem('pending_onboarding');
-  
   if (pendingData) {
     try {
       const formData = JSON.parse(pendingData);
-      
-      // 呼叫後端 API 寫入設定
-      const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=submit_onboarding`, {
+      const response = await fetchWithLiffToken(`${API_URL}?action=submit_onboarding`, {
         method: 'POST',
         body: JSON.stringify(formData)
       });
 
       if (response && response.ok) {
-        // 成功後提示並刷新
         alert('🎉 歡迎加入！已成功為您開通 FinPoints 獎勵與試用權限。');
         if (currentViewRef.value?.refreshAllData) currentViewRef.value.refreshAllData();
       }
     } catch (e) {
       console.error('Onboarding submission failed', e);
     } finally {
-      // 無論成功失敗，都清除暫存，避免下次重整又跳出來
       localStorage.removeItem('pending_onboarding');
     }
   }
 }
 
 onMounted(async () => {
-    if (!liff) return;
+    if (!liff) {
+        liffState.error = 'LIFF SDK 未載入';
+        isLoading.value = false;
+        return;
+    }
+
     try {
         await liff.init({ liffId: LIFF_ID });
         
         if (liff.isLoggedIn()) {
             liffState.isLoggedIn = true;
-            liffState.profile = await liff.getProfile();
-            
-            // 登入後檢查：是否有剛剛填寫的引導資料？
+            try {
+                liffState.profile = await liff.getProfile();
+            } catch (pErr) {
+                console.warn('無法獲取個人資料', pErr);
+            }
             await processPendingOnboarding();
         } 
-        // 若未登入，template 中的 v-else-if 會自動顯示 OnboardingView
     } catch (err) {
         console.error('LIFF Error:', err);
-        liffState.error = '連線失敗，請檢查網路';
+        liffState.error = '連線失敗，請檢查網路設定';
+    } finally {
+        isLoading.value = false;
     }
 });
 </script>
 
 <style scoped>
-/* 確保引導頁面全螢幕置中 */
-.onboarding-container {
+/* =========================================
+   ★★★ 關鍵修復：全域 Box-Sizing ★★★
+   解決「padding 把版面撐大導致右邊被切掉」的問題
+   ========================================= */
+* {
+  box-sizing: border-box;
+}
+
+/* --- 全域變數 --- */
+:root {
+  --bg-nav: #ffffff;
+  --text-primary: #5A483C;
+  --text-secondary: #999999;
+  --text-accent: #d4a373;
+  --bg-main: #f9f7f2;
+}
+
+/* --- 版面基礎設定 --- */
+.app-layout { 
+  display: flex; 
+  flex-direction: column; 
+  min-height: 100vh; 
+  min-height: 100dvh; /* 解決 Chrome 網址列跳動 */
+  width: 100%; 
+  overflow-x: hidden; 
+  background-color: var(--bg-main);
+}
+
+.onboarding-container, .loading-container {
   min-height: 100vh;
-  background-color: #f9f7f2;
+  min-height: 100dvh;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   padding: 20px;
 }
 
-/* App 佈局 */
-.app-layout { display: flex; flex-direction: column; min-height: 100vh; width: 100%; overflow-x: hidden; }
+/* --- 導覽列 (Navbar) --- */
+.navbar { 
+  background-color: var(--bg-nav); 
+  box-shadow: 0 2px 10px rgba(0,0,0,0.03); 
+  position: sticky; 
+  top: 0; 
+  z-index: 100; 
+  height: 60px; 
+  display: flex; 
+  align-items: center; 
+  width: 100%; 
+}
 
-/* Navbar */
-.navbar { background-color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.03); position: sticky; top: 0; z-index: 100; height: 60px; display: flex; align-items: center; width: 100%; }
-.nav-container { width: 100%; max-width: 800px; margin: 0 auto; padding: 0 16px; display: flex; justify-content: space-between; align-items: center; }
-.nav-brand { display: flex; align-items: center; gap: 6px; font-size: 1.2rem; font-weight: 700; color: #5A483C; }
-.nav-links { display: flex; gap: 4px; background: #f7f5f0; padding: 4px; border-radius: 30px; }
-.nav-item { background: transparent; border: none; padding: 6px 12px; border-radius: 20px; color: #999; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease; white-space: nowrap; }
-.nav-item.active { background-color: #ffffff; color: #d4a373; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font-weight: 600; }
-.nav-user { display: flex; align-items: center; }
-.user-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.nav-container { 
+  width: 100%; 
+  max-width: 800px; 
+  margin: 0 auto; 
+  padding: 0 16px; 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+}
 
-/* Main Content */
-.main-content { flex: 1; width: 100%; max-width: 800px; margin: 0 auto; padding: 20px 16px; }
+.nav-brand { 
+  display: flex; 
+  align-items: center; 
+  gap: 6px; 
+  font-size: 1.2rem; 
+  font-weight: 700; 
+  color: #5A483C;
+  flex-shrink: 0; 
+}
 
-/* Floating Action Button */
+.nav-links { 
+  display: flex; 
+  gap: 4px; 
+  background: #f7f5f0; 
+  padding: 4px; 
+  border-radius: 30px; 
+  flex-shrink: 1; 
+  white-space: nowrap;
+}
+
+.nav-item { 
+  background: transparent; 
+  border: none; 
+  padding: 6px 12px; 
+  border-radius: 20px; 
+  color: #999; 
+  font-size: 0.85rem; 
+  font-weight: 500; 
+  cursor: pointer; 
+  transition: all 0.3s ease; 
+}
+
+.nav-item.active { 
+  background-color: #ffffff; 
+  color: #d4a373; 
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05); 
+  font-weight: 600; 
+}
+
+.nav-user { 
+  display: flex; 
+  align-items: center; 
+  flex-shrink: 0; 
+}
+
+.user-avatar { 
+  width: 36px; 
+  height: 36px; 
+  border-radius: 50%; 
+  object-fit: cover; 
+  border: 2px solid #fff; 
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1); 
+}
+
+/* --- Main Content --- */
+.main-content { 
+  flex: 1; 
+  width: 100%; 
+  max-width: 800px; 
+  margin: 0 auto; 
+  padding: 20px 16px; 
+}
+
+/* --- 其他元件 --- */
 .fab-chat { position: fixed; bottom: 24px; right: 20px; background-color: #1DB446; color: white; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 20px; border-radius: 50px; box-shadow: 0 4px 12px rgba(29, 180, 70, 0.4); text-decoration: none; z-index: 999; transition: transform 0.2s, box-shadow 0.2s; }
 .fab-chat:active { transform: scale(0.95); }
-
-/* Error Banner */
 .error-banner { background-color: #ffeaea; color: #d67a7a; padding: 12px; text-align: center; font-size: 0.9rem; }
-
-/* Transition */
+.spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #d4a373; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-container p { color: #5A483C; font-weight: 500; font-size: 0.95rem; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* =========================================
+   ★★★ 手機版優化區 ★★★ 
+   解決：1. Navbar 擠壓 2. 內容邊距
+   ========================================= */
+@media (max-width: 480px) {
+  /* 縮小 Navbar 邊距 */
+  .nav-container { padding: 0 8px; }
+  
+  /* 縮小 Logo 字體，防止佔用太多空間 */
+  .nav-brand { font-size: 1rem; gap: 4px; }
+  
+  /* 縮小按鈕內距，讓 3 個按鈕能排進中間 */
+  .nav-item { padding: 5px 8px; font-size: 0.8rem; }
+  
+  /* 縮小按鈕群組間距 */
+  .nav-links { gap: 2px; }
+  
+  /* 微調頭像大小 */
+  .user-avatar { width: 32px; height: 32px; }
+  
+  /* 縮小內容區塊的左右 Padding，讓卡片更寬 */
+  .main-content { padding: 16px 12px; }
+}
 </style>
