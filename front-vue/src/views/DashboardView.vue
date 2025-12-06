@@ -954,4 +954,59 @@ onMounted(() => {
     .date-controls { width: 100%; justify-content: space-between; }
     .stat-item .value { font-size: 1rem; } /* 手機版數字變小 */
 }
+
+/* --- 列表按鈕優化樣式 --- */
+
+/* 按鈕容器：讓按鈕橫向排列並靠右 */
+.tx-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px; /* 按鈕之間的間距 */
+    margin-top: 6px;
+}
+
+/* 基礎按鈕樣式：清除預設外觀，改為膠囊狀 */
+.text-btn { 
+    background: #ffffff; 
+    border: 1px solid #e0e0e0; 
+    border-radius: 20px; /* 圓角膠囊造型 */
+    padding: 4px 10px;   /* 內距 */
+    font-size: 0.75rem;  /* 字體縮小 */
+    cursor: pointer; 
+    transition: all 0.2s ease; 
+    font-weight: 500;
+    color: #888;
+    line-height: 1.2;
+}
+
+/* 按鈕懸停效果：微微上浮 */
+.text-btn:hover { 
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 按鈕點擊效果 */
+.text-btn:active {
+    transform: scale(0.95);
+}
+
+/* 「編輯」按鈕專屬樣式 (暖棕色) */
+.text-btn.edit { 
+    border-color: #d4a373; /* 主題色邊框 */
+    color: #d4a373;        /* 主題色文字 */
+}
+.text-btn.edit:hover { 
+    background-color: #d4a373; 
+    color: white; 
+}
+
+/* 「刪除」按鈕專屬樣式 (乾燥玫瑰粉) */
+.text-btn.delete { 
+    border-color: #e5989b; /* 警告色邊框 */
+    color: #e5989b;        /* 警告色文字 */
+}
+.text-btn.delete:hover { 
+    background-color: #e5989b; 
+    color: white; 
+}
 </style>
