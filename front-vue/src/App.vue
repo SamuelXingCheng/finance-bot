@@ -1,6 +1,13 @@
 <template>
   <div class="app-layout">
     
+    <transition name="fade">
+      <OnboardingView 
+        v-if="showOnboarding" 
+        @complete="handleOnboardingComplete" 
+      />
+    </transition>
+
     <nav class="navbar">
       <div class="nav-container">
         <div class="nav-brand">
@@ -73,20 +80,26 @@
 import { ref, computed, onMounted } from 'vue';
 import liff from '@line/liff';
 import { liffState } from './liffState';
+// 🟢 2. 引入 API 工具與新的引導視圖
+import { fetchWithLiffToken } from '@/utils/api';
+import OnboardingView from './views/OnboardingView.vue';
+
 // 引入所有視圖元件
 import DashboardView from './views/DashboardView.vue';
 import AccountManagerView from './views/AccountManagerView.vue';
-import CryptoView from './views/CryptoView.vue'; // 🟢 請確認您已建立此檔案
+import CryptoView from './views/CryptoView.vue'; 
 
 const LIFF_ID = import.meta.env.VITE_LIFF_ID;
 const currentTab = ref('Dashboard');
 const currentViewRef = ref(null);
+// 🟢 3. 控制引導顯示的狀態
+const showOnboarding = ref(false);
 
-// 🟢 路由切換邏輯
+// 路由切換邏輯
 const currentView = computed(() => {
   if (currentTab.value === 'Dashboard') return DashboardView;
   if (currentTab.value === 'Accounts') return AccountManagerView;
-  if (currentTab.value === 'Crypto') return CryptoView; // 🟢 新增路由
+  if (currentTab.value === 'Crypto') return CryptoView;
   return null;
 });
 
@@ -96,8 +109,31 @@ const handleRefreshDashboard = () => {
     }
 };
 
+// 🟢 4. 檢查用戶引導狀態的函式 (呼叫後端 API)
+async function checkUserStatus() {
+  // 確保 API_BASE_URL 已定義 (通常在 utils/api.js 中設定)
+  const baseUrl = window.API_BASE_URL || 'https://finbot.tw/api.php';
+  
+  const response = await fetchWithLiffToken(`${baseUrl}?action=get_user_status`);
+  if (response && response.ok) {
+    const result = await response.json();
+    // 如果 is_onboarded 為 0 (false)，則顯示引導
+    if (result.status === 'success' && result.data.is_onboarded == 0) {
+      showOnboarding.value = true;
+    }
+  }
+}
+
+// 🟢 5. 引導完成後的處理
+function handleOnboardingComplete() {
+  showOnboarding.value = false;
+  // 重新整理目前的視圖資料 (例如刷新 Dashboard 以顯示試用狀態)
+  if (currentViewRef.value?.refreshAllData) {
+    currentViewRef.value.refreshAllData();
+  }
+}
+
 onMounted(async () => {
-    // 開發模式下若無 LIFF 環境，可暫時略過 (Optional)
     if (!liff) {
         liffState.error = 'LIFF SDK 未載入';
         return;
@@ -107,12 +143,14 @@ onMounted(async () => {
         if (liff.isLoggedIn()) {
             liffState.isLoggedIn = true;
             liffState.profile = await liff.getProfile();
+            
+            // 🟢 6. 登入成功後，檢查是否需要顯示引導
+            checkUserStatus(); 
         } else {
             liff.login(); 
         }
     } catch (err) {
         console.error('LIFF Error:', err);
-        // 若在瀏覽器測試可暫時註解下一行
         liffState.error = '初始化失敗，請檢查網路或 ID 設定。';
     }
 });

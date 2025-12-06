@@ -472,6 +472,69 @@ try {
             }
             break;
 
+        // 🟢 3. 校正加密貨幣餘額
+        case 'adjust_crypto_balance':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $symbol = $input['symbol'] ?? '';
+            $newBalance = $input['new_balance'] ?? null;
+            $date = $input['date'] ?? date('Y-m-d H:i:s'); // 🟢 接收日期參數
+
+            if (empty($symbol) || $newBalance === null) {
+                $response = ['status' => 'error', 'message' => '參數錯誤'];
+                break;
+            }
+
+            $cryptoService = new CryptoService();
+            // 🟢 傳入 date
+            if ($cryptoService->adjustBalance($dbUserId, $symbol, (float)$newBalance, $date)) {
+                $response = ['status' => 'success', 'message' => '快照已更新'];
+            } else {
+                $response = ['status' => 'error', 'message' => '更新失敗'];
+            }
+            break;
+
+        // 🟢 4. 獲取加密貨幣歷史趨勢
+        case 'get_crypto_history':
+            $range = $_GET['range'] ?? '1y';
+            $cryptoService = new CryptoService();
+            $chartData = $cryptoService->getHistoryChartData($dbUserId, $range);
+            $response = ['status' => 'success', 'data' => $chartData];
+            break;
+        
+        // 🟢 1. 新增：獲取用戶狀態 (用於前端判斷是否顯示引導頁)
+        case 'get_user_status':
+            // 注意：請確保 UserService.php 已新增 getUserStatus 方法
+            $status = $userService->getUserStatus($dbUserId);
+            $response = ['status' => 'success', 'data' => $status];
+            break;
+
+        // 🟢 2. 新增：提交引導資料並開通試用
+        case 'submit_onboarding':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); 
+                $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            // A. 儲存用戶偏好 (目標、預算、提醒時間)
+            // 注意：請確保 UserService.php 已新增 updateUserProfile 方法
+            $userService->updateUserProfile($dbUserId, [
+                'financial_goal' => $input['goal'] ?? '',
+                'monthly_budget' => $input['budget'] ?? 0,
+                'reminder_time'  => $input['reminder_time'] ?? null
+            ]);
+
+            // B. 開通 7 天試用獎勵
+            // 注意：請確保 UserService.php 已新增 activateTrial 方法
+            $userService->activateTrial($dbUserId, 7);
+
+            $response = ['status' => 'success', 'message' => '歡迎加入 FinBot！試用已開通。'];
+            break;
+            
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
             break;

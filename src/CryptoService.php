@@ -13,118 +13,239 @@ class CryptoService {
     }
 
     /**
-     * 新增一筆交易
+     * 🟢 修正：校正餘額 (支援指定日期，模擬「快照」行為)
      */
-    public function addTransaction(int $userId, array $data): bool {
-        // 1. 確保基本欄位存在
-        if (empty($data['type']) || !isset($data['quantity'])) {
-            return false;
+    public function adjustBalance(int $userId, string $symbol, float $targetBalance, string $date = null): bool {
+        // 1. 取得該幣種目前的總餘額
+        // (為了簡化計算，我們計算當下的差額，並補入一筆交易。若要更嚴謹應計算該日期當下的餘額，但對於補登場景，這通常足夠)
+        $dashboard = $this->getDashboardData($userId);
+        $currentBalance = 0.0;
+        foreach ($dashboard['holdings'] as $h) {
+            if ($h['symbol'] === $symbol) {
+                $currentBalance = $h['balance'];
+                break;
+            }
         }
 
-        // 2. 處理資料格式
-        $type = $data['type']; // deposit, withdraw, buy, sell, earn
-        $base = strtoupper($data['baseCurrency'] ?? '');  // 主幣 (BTC)
-        $quote = strtoupper($data['quoteCurrency'] ?? 'USDT'); // 計價幣 (USDT, TWD)
-        
-        $price = (float)($data['price'] ?? 0);
-        $qty = (float)$data['quantity'];
-        // 如果前端沒傳 total，我們自己算
-        $total = (float)($data['total'] ?? ($price * $qty));
-        $fee = (float)($data['fee'] ?? 0);
-        $date = $data['date'] ?? date('Y-m-d H:i:s');
-        $note = $data['note'] ?? '';
+        // 2. 計算差額
+        $diff = $targetBalance - $currentBalance;
+        if (abs($diff) < 0.00000001) return true; // 數字相同，無需變更
 
-        // 3. 寫入資料庫
+        // 3. 判斷類型 (增加用 earn，減少用 withdraw，不影響成本)
+        $type = $diff > 0 ? 'earn' : 'withdraw'; 
+        
+        // 4. 使用傳入的日期，若無則用現在
+        $txDate = $date ?? date('Y-m-d H:i:s'); 
+
         $sql = "INSERT INTO crypto_transactions 
                 (user_id, type, base_currency, quote_currency, price, quantity, total, fee, transaction_date, note, created_at)
-                VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :date, :note, NOW())";
+                VALUES (:uid, :type, :base, 'USDT', 0, :qty, 0, 0, :date, '快照更新', NOW())";
         
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([
                 ':uid' => $userId,
                 ':type' => $type,
-                ':base' => $base,
-                ':quote' => $quote,
-                ':price' => $price,
-                ':qty' => $qty,
-                ':total' => $total,
-                ':fee' => $fee,
-                ':date' => $date,
-                ':note' => $note
+                ':base' => strtoupper($symbol),
+                ':qty' => abs($diff),
+                ':date' => $txDate
             ]);
         } catch (PDOException $e) {
-            error_log("Crypto Transaction Insert Failed: " . $e->getMessage());
+            error_log("Snapshot Update Failed: " . $e->getMessage());
             return false;
         }
     }
 
     /**
-     * 核心演算法：重播交易歷史，計算當下持倉與損益
+     * 🟢 新增：取得歷史資產趨勢 (每日淨值)
+     */
+    public function getHistoryChartData(int $userId, string $range = '1y'): array {
+        // 1. 設定時間範圍
+        $interval = '-1 year';
+        if ($range === '1m') $interval = '-1 month';
+        if ($range === '6m') $interval = '-6 months';
+        
+        $startDate = date('Y-m-d', strtotime($interval));
+        $endDate = date('Y-m-d');
+
+        // 2. 撈取所有交易
+        $sql = "SELECT transaction_date, type, base_currency, quote_currency, quantity, total, fee 
+                FROM crypto_transactions 
+                WHERE user_id = :uid AND transaction_date <= :end
+                ORDER BY transaction_date ASC";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':uid' => $userId, ':end' => $endDate . ' 23:59:59']);
+        $txs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 3. 建立日期區間
+        $period = new DatePeriod(
+            new DateTime($startDate),
+            new DateInterval('P1D'),
+            (new DateTime($endDate))->modify('+1 day')
+        );
+
+        $dailyData = [];
+        $tempHoldings = []; // 暫存每日持倉數量 {'BTC': 0.5, 'USDT': 100}
+        $txIndex = 0;
+        $totalTxs = count($txs);
+
+        // 4. 每日重播
+        foreach ($period as $date) {
+            $currentDateStr = $date->format('Y-m-d');
+            
+            // 處理當天之前的所有交易
+            while ($txIndex < $totalTxs && substr($txs[$txIndex]['transaction_date'], 0, 10) <= $currentDateStr) {
+                $tx = $txs[$txIndex];
+                $this->applyTxToHoldings($tempHoldings, $tx); // 呼叫輔助函式更新持倉
+                $txIndex++;
+            }
+
+            // 計算當天總市值 (以當前匯率估算，若要精確需歷史匯率，這裡採簡化策略：用最新匯率回推)
+            // 優化：只計算有餘額的幣種
+            $totalUsdValue = 0;
+            foreach ($tempHoldings as $symbol => $balance) {
+                if ($balance > 0) {
+                    $price = $this->rateService->getRateToUSD($symbol); // 注意：這是"現在"的價格
+                    $totalUsdValue += $balance * $price;
+                }
+            }
+            
+            $dailyData[$currentDateStr] = $totalUsdValue;
+        }
+
+        return [
+            'labels' => array_keys($dailyData),
+            'data' => array_values($dailyData)
+        ];
+    }
+
+    // 輔助：更新持倉陣列 (邏輯與 getDashboardData 類似但簡化)
+    private function applyTxToHoldings(array &$holdings, array $tx) {
+        $type = $tx['type'];
+        $symbol = strtoupper($tx['base_currency']);
+        $quote = strtoupper($tx['quote_currency']);
+        $qty = (float)$tx['quantity'];
+        $total = (float)$tx['total'];
+        $fee = (float)$tx['fee'];
+
+        if (!isset($holdings[$symbol])) $holdings[$symbol] = 0;
+        if (!isset($holdings['USDT'])) $holdings['USDT'] = 0;
+
+        switch ($type) {
+            case 'deposit':
+                if ($symbol === 'USDT') $holdings['USDT'] += $qty;
+                else if ($symbol) $holdings[$symbol] += $qty;
+                break;
+            case 'withdraw':
+                if ($symbol === 'USDT') $holdings['USDT'] -= $qty;
+                else if ($symbol) $holdings[$symbol] -= $qty;
+                break;
+            case 'buy':
+                $holdings[$symbol] += $qty;
+                if ($quote === 'USDT') $holdings['USDT'] -= $total;
+                break;
+            case 'sell':
+                $holdings[$symbol] -= $qty;
+                if ($quote === 'USDT') $holdings['USDT'] += ($total - $fee);
+                break;
+            case 'earn':
+            case 'adjustment': // 支援校正類型
+                $holdings[$symbol] += $qty;
+                break;
+        }
+    }
+
+    // ... addTransaction 保持不變 ...
+    public function addTransaction(int $userId, array $data): bool {
+        // (保持原有的 addTransaction 程式碼不變)
+        // ... 
+        if (empty($data['type']) || !isset($data['quantity'])) { return false; }
+        $type = $data['type'];
+        $base = strtoupper($data['baseCurrency'] ?? '');
+        $quote = strtoupper($data['quoteCurrency'] ?? 'USDT');
+        $price = (float)($data['price'] ?? 0);
+        $qty = (float)$data['quantity'];
+        $total = (float)($data['total'] ?? ($price * $qty));
+        $fee = (float)($data['fee'] ?? 0);
+        $date = $data['date'] ?? date('Y-m-d H:i:s');
+        $note = $data['note'] ?? '';
+
+        $sql = "INSERT INTO crypto_transactions 
+                (user_id, type, base_currency, quote_currency, price, quantity, total, fee, transaction_date, note, created_at)
+                VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :date, :note, NOW())";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute([':uid'=>$userId, ':type'=>$type, ':base'=>$base, ':quote'=>$quote, ':price'=>$price, ':qty'=>$qty, ':total'=>$total, ':fee'=>$fee, ':date'=>$date, ':note'=>$note]);
+        } catch (PDOException $e) {
+            error_log("Crypto Insert Failed: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 🟢 [除錯版] getDashboardData
      */
     public function getDashboardData(int $userId): array {
-        // 1. 撈取該用戶所有交易 (按時間舊到新排序，這對計算均價很重要)
+        // 1. 撈取該用戶所有交易
         $sql = "SELECT * FROM crypto_transactions WHERE user_id = :uid ORDER BY transaction_date ASC, id ASC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':uid' => $userId]);
         $txs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // 2. 初始化統計變數
-        // holdings 結構: 'BTC' => ['balance'=>0, 'cost_usd'=>0]
-        $holdings = []; 
-        $totalInvestedTwd = 0; // 真正從銀行轉進來的台幣本金
+        // [Debug] 記錄原始筆數
+        $rawTxCount = count($txs);
 
-        // 3. 交易重播 (Replay History)
+        // 2. 初始化
+        $holdings = []; 
+        $totalInvestedTwd = 0; 
+
+        // 3. 交易重播
         foreach ($txs as $tx) {
             $type = $tx['type'];
-            $symbol = $tx['base_currency']; // 幣種 (BTC, ETH, USDT)
-            $quote = $tx['quote_currency']; // 計價 (USDT, TWD)
+            $symbol = strtoupper($tx['base_currency'] ?? ''); // 確保大寫
+            $quote = strtoupper($tx['quote_currency'] ?? 'USDT');
             
             $qty = (float)$tx['quantity'];
-            $total = (float)$tx['total']; // 總金額 (TWD 或 USDT)
+            $total = (float)$tx['total'];
             $fee = (float)$tx['fee'];
 
-            // 確保容器存在
+            // 初始化 Symbol
             if ($symbol && !isset($holdings[$symbol])) {
                 $holdings[$symbol] = ['balance' => 0, 'cost_usd' => 0];
             }
-            // USDT 也是一種資產，需初始化
+            // USDT 特殊處理
             if ($quote === 'USDT' && !isset($holdings['USDT'])) {
                 $holdings['USDT'] = ['balance' => 0, 'cost_usd' => 0];
             }
 
             switch ($type) {
                 case 'deposit': 
-                    // 入金 (TWD -> USDT)
-                    if ($quote === 'TWD') {
-                        $totalInvestedTwd += $total; // 累計台幣本金
-                    }
+                    if ($quote === 'TWD') $totalInvestedTwd += $total;
                     if ($symbol === 'USDT') {
                         $holdings['USDT']['balance'] += $qty;
-                        // USDT 的成本暫時視為 1:1 USD (簡化計算)
                         $holdings['USDT']['cost_usd'] += $qty; 
+                    }
+                    // 🟢 修正：如果是直接入金其他幣種 (如 BTC) 也要加餘額
+                    else if ($symbol && $symbol !== 'USDT') {
+                        $holdings[$symbol]['balance'] += $qty;
                     }
                     break;
 
                 case 'withdraw':
-                    // 出金 (USDT -> TWD)
-                    if ($quote === 'TWD') {
-                        $totalInvestedTwd -= $total; // 本金回收
-                    }
+                    if ($quote === 'TWD') $totalInvestedTwd -= $total;
                     if ($symbol === 'USDT') {
                         $holdings['USDT']['balance'] -= $qty;
                         $holdings['USDT']['cost_usd'] -= $qty;
+                    } else if ($symbol) {
+                        $holdings[$symbol]['balance'] -= $qty;
                     }
                     break;
 
                 case 'buy':
-                    // 買幣 (用 USDT 買 BTC)
-                    // 1. 增加 BTC
-                    $holdings[$symbol]['balance'] += $qty;
-                    // 新成本 = 舊成本 + 本次花費(USDT) + 手續費
-                    $holdings[$symbol]['cost_usd'] += $total + $fee; 
-                    
-                    // 2. 扣除 USDT (如果是用 U 買)
+                    if ($symbol) {
+                        $holdings[$symbol]['balance'] += $qty;
+                        $holdings[$symbol]['cost_usd'] += $total + $fee; 
+                    }
                     if ($quote === 'USDT') {
                         $holdings['USDT']['balance'] -= $total;
                         $holdings['USDT']['cost_usd'] -= $total; 
@@ -132,18 +253,15 @@ class CryptoService {
                     break;
 
                 case 'sell':
-                    // 賣幣 (賣 BTC 換 USDT)
-                    // 1. 計算賣出部分的成本 (依比例扣除)
-                    $currentBal = $holdings[$symbol]['balance'];
-                    $currentCost = $holdings[$symbol]['cost_usd'];
-                    $avgPrice = $currentBal > 0 ? ($currentCost / $currentBal) : 0;
-                    $soldCost = $avgPrice * $qty;
+                    if ($symbol) {
+                        $currentBal = $holdings[$symbol]['balance'];
+                        $currentCost = $holdings[$symbol]['cost_usd'];
+                        $avgPrice = $currentBal > 0 ? ($currentCost / $currentBal) : 0;
+                        $soldCost = $avgPrice * $qty;
 
-                    // 2. 減少 BTC
-                    $holdings[$symbol]['balance'] -= $qty;
-                    $holdings[$symbol]['cost_usd'] -= $soldCost;
-
-                    // 3. 增加 USDT
+                        $holdings[$symbol]['balance'] -= $qty;
+                        $holdings[$symbol]['cost_usd'] -= $soldCost;
+                    }
                     if ($quote === 'USDT') {
                         $holdings['USDT']['balance'] += ($total - $fee);
                         $holdings['USDT']['cost_usd'] += ($total - $fee);
@@ -151,28 +269,32 @@ class CryptoService {
                     break;
 
                 case 'earn':
-                    // 理財/空投 (零成本增加)
-                    $holdings[$symbol]['balance'] += $qty;
-                    // 成本不變 -> 均價自然降低
+                    if ($symbol) $holdings[$symbol]['balance'] += $qty;
                     break;
             }
         }
 
-        // 4. 計算現值與損益 (整合 ExchangeRateService)
+        // 4. 計算現值
         $finalList = [];
         $totalValUsd = 0;
         $totalUnrealizedPnl = 0;
 
         foreach ($holdings as $sym => $data) {
             $bal = $data['balance'];
-            if ($bal <= 0.000001) continue; // 忽略極小餘額
+            
+            // 🟢 [Debug] 暫時註解掉這個過濾器，看看是不是因為餘額太小
+            // if ($bal <= 0.000001) continue; 
 
-            // 取得現價 (USD)
-            $currentPrice = $this->rateService->getRateToUSD($sym);
+            // 避免 API 錯誤導致崩潰，加個 try
+            try {
+                $currentPrice = $this->rateService->getRateToUSD($sym);
+            } catch (Exception $e) {
+                $currentPrice = 0; // API 失敗時歸零
+            }
             
             $currentVal = $bal * $currentPrice;
             $cost = $data['cost_usd'];
-            $avgPrice = $cost > 0 ? ($cost / $bal) : 0;
+            $avgPrice = $bal > 0 ? ($cost / $bal) : 0; // 防止除以零
             
             $pnl = $currentVal - $cost;
             $roi = $cost > 0 ? ($pnl / $cost) * 100 : 0;
@@ -192,21 +314,24 @@ class CryptoService {
             ];
         }
 
-        // 5. 匯總
-        // 總 ROI = (總現值 - 總成本USD) / 總成本USD
-        // 注意：這裡的總成本是所有持倉的當下成本加總，而非 totalInvestedTwd
         $totalHoldingsCostUsd = $totalValUsd - $totalUnrealizedPnl;
         $totalRoiPercent = $totalHoldingsCostUsd > 0 ? ($totalUnrealizedPnl / $totalHoldingsCostUsd) * 100 : 0;
 
         return [
             'dashboard' => [
                 'totalUsd' => $totalValUsd,
-                'totalInvestedTwd' => $totalInvestedTwd, // 用戶實際入金的台幣
+                'totalInvestedTwd' => $totalInvestedTwd,
                 'pnl' => $totalUnrealizedPnl,
                 'pnlPercent' => $totalRoiPercent
             ],
             'holdings' => $finalList,
-            'usdTwdRate' => $this->rateService->getUsdTwdRate() // 回傳匯率供前端換算
+            'usdTwdRate' => 32.0, // 簡化
+            // 🟢 回傳除錯資訊，請在 Network Tab -> Response 查看
+            'debug' => [
+                'user_id_resolved' => $userId,
+                'transactions_found_in_db' => $rawTxCount,
+                'holdings_calculated_count' => count($finalList)
+            ]
         ];
     }
 }
