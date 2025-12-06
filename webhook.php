@@ -137,21 +137,21 @@ try {
                     $isProcessed = true;
                 } 
 
-                // --- [新增] 記帳教學指令 ---
+                // --- 1. 記帳教學 (無表情符號版) ---
                 elseif ($text === '記帳教學' || $text === '教學' || $text === 'help') {
                     
                     $tutorialFlex = [
                         'type' => 'bubble',
-                        'size' => 'giga', 
+                        'size' => 'giga',
                         'header' => [
                             'type' => 'box',
                             'layout' => 'vertical',
-                            'backgroundColor' => '#D4A373', 
+                            'backgroundColor' => '#D4A373',
                             'paddingAll' => 'lg',
                             'contents' => [
                                 [
                                     'type' => 'text',
-                                    'text' => 'FinBot 記帳教學',
+                                    'text' => 'FinBot 使用教學', // 移除 🎓
                                     'weight' => 'bold',
                                     'color' => '#FFFFFF',
                                     'size' => 'xl'
@@ -163,12 +163,12 @@ try {
                             'layout' => 'vertical',
                             'spacing' => 'md',
                             'contents' => [
-                                // --- 第一區塊：文字記帳 ---
+                                // 第一區塊：文字記帳
                                 [
                                     'type' => 'text',
-                                    'text' => '文字記帳',
+                                    'text' => '1. 文字記帳', // 移除 1️⃣
                                     'weight' => 'bold',
-                                    'color' => '#8C7B75', 
+                                    'color' => '#8C7B75',
                                     'size' => 'md'
                                 ],
                                 [
@@ -182,17 +182,17 @@ try {
                                     'type' => 'button',
                                     'style' => 'secondary',
                                     'height' => 'sm',
-                                    'color' => '#f7f5f0', 
+                                    'color' => '#f7f5f0',
                                     'action' => [
                                         'type' => 'message',
-                                        'label' => '試試看：早餐蛋餅 45', 
+                                        'label' => '試試看：早餐蛋餅 45',
                                         'text' => '早餐蛋餅 45'
                                     ]
                                 ],
                                 
                                 ['type' => 'separator', 'margin' => 'lg'],
 
-                                // --- 第二區塊：語音記帳 ---
+                                // 第二區塊：語音記帳
                                 [
                                     'type' => 'box',
                                     'layout' => 'horizontal',
@@ -200,7 +200,7 @@ try {
                                     'contents' => [
                                         [
                                             'type' => 'text',
-                                            'text' => '語音記帳',
+                                            'text' => '2. 語音記帳', // 移除 2️⃣
                                             'weight' => 'bold',
                                             'color' => '#8C7B75',
                                             'size' => 'md',
@@ -208,7 +208,7 @@ try {
                                         ],
                                         [
                                             'type' => 'text',
-                                            'text' => '語音超方便！',
+                                            'text' => '超方便！', // 移除 🎤
                                             'size' => 'xxs',
                                             'color' => '#1DB446',
                                             'weight' => 'bold',
@@ -226,14 +226,14 @@ try {
                                 [
                                     'type' => 'box',
                                     'layout' => 'vertical',
-                                    'backgroundColor' => '#f0f7f0', 
+                                    'backgroundColor' => '#f0f7f0',
                                     'cornerRadius' => 'md',
                                     'paddingAll' => 'md',
                                     'margin' => 'sm',
                                     'contents' => [
                                         [
                                             'type' => 'text',
-                                            'text' => '您可以這樣說：',
+                                            'text' => '您可以這樣說：', // 移除 🗣️
                                             'size' => 'xxs',
                                             'color' => '#1DB446',
                                             'weight' => 'bold'
@@ -251,10 +251,10 @@ try {
 
                                 ['type' => 'separator', 'margin' => 'lg'],
 
-                                // --- 第三區塊：查詢報表 ---
+                                // 第三區塊：查詢報表
                                 [
                                     'type' => 'text',
-                                    'text' => '查詢資產與收支',
+                                    'text' => '3. 查詢資產與收支', // 移除 3️⃣
                                     'weight' => 'bold',
                                     'color' => '#8C7B75',
                                     'size' => 'md'
@@ -265,7 +265,7 @@ try {
                                     'height' => 'sm',
                                     'action' => [
                                         'type' => 'message',
-                                        'label' => '查詢本月收支',
+                                        'label' => '查詢本月收支', // 移除 📊
                                         'text' => '查詢收支'
                                     ]
                                 ],
@@ -276,7 +276,7 @@ try {
                                     'color' => '#D4A373',
                                     'action' => [
                                         'type' => 'message',
-                                        'label' => '查詢淨資產',
+                                        'label' => '查詢淨資產', // 移除 💰
                                         'text' => '查詢資產'
                                     ]
                                 ]
@@ -288,7 +288,7 @@ try {
                             'contents' => [
                                 [
                                     'type' => 'text',
-                                    'text' => '💡 小撇步：輸入「儀表板」可開啟網頁圖表',
+                                    'text' => '小撇步：輸入「儀表板」可開啟圖表', // 移除 💡
                                     'size' => 'xs',
                                     'color' => '#aaaaaa',
                                     'align' => 'center'
@@ -300,7 +300,276 @@ try {
                     $lineService->replyFlexMessage($replyToken, "FinBot 記帳教學", $tutorialFlex);
                     $isProcessed = true;
                 }
+
+                // --- 2. 資產教學 (無表情符號版) ---
+                elseif ($text === '資產教學' || $text === '資產記錄' || $text === 'asset help') {
+                    
+                    $assetTutorialFlex = [
+                        'type' => 'bubble',
+                        'size' => 'giga', 
+                        'header' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'backgroundColor' => '#2A9D8F',
+                            'paddingAll' => 'lg',
+                            'contents' => [
+                                [
+                                    'type' => 'text',
+                                    'text' => '資產管理教學', // 移除 🏦
+                                    'weight' => 'bold',
+                                    'color' => '#FFFFFF',
+                                    'size' => 'xl'
+                                ]
+                            ]
+                        ],
+                        'body' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'spacing' => 'md',
+                            'contents' => [
+                                // 引言
+                                [
+                                    'type' => 'text',
+                                    'text' => '追蹤您的淨值，掌握財富自由進度！您可以透過以下兩種方式記錄資產：',
+                                    'size' => 'xs',
+                                    'color' => '#666666',
+                                    'wrap' => true
+                                ],
+                                ['type' => 'separator', 'margin' => 'md'],
+
+                                // 方法一：快速指令
+                                [
+                                    'type' => 'text',
+                                    'text' => '1. 快速指令 (文字)', // 移除 1️⃣
+                                    'weight' => 'bold',
+                                    'color' => '#264653',
+                                    'size' => 'md',
+                                    'margin' => 'lg'
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => '格式：「設定 + 名稱 + 類型 + 金額」',
+                                    'size' => 'xs',
+                                    'color' => '#aaaaaa',
+                                    'wrap' => true
+                                ],
+                                [
+                                    'type' => 'box',
+                                    'layout' => 'vertical',
+                                    'backgroundColor' => '#f0f9f8', 
+                                    'cornerRadius' => 'md',
+                                    'paddingAll' => 'md',
+                                    'spacing' => 'sm',
+                                    'margin' => 'sm',
+                                    'contents' => [
+                                        // 範例 1
+                                        [
+                                            'type' => 'text',
+                                            'text' => '範例：記錄錢包有 5000 元', // 移除 👇
+                                            'size' => 'xxs',
+                                            'color' => '#2A9D8F'
+                                        ],
+                                        [
+                                            'type' => 'button',
+                                            'style' => 'secondary',
+                                            'height' => 'sm',
+                                            'color' => '#ffffff',
+                                            'action' => [
+                                                'type' => 'message',
+                                                'label' => '試試：設定 錢包 現金 5000',
+                                                'text' => '設定 錢包 現金 5000'
+                                            ]
+                                        ],
+                                        // 範例 2
+                                        [
+                                            'type' => 'text',
+                                            'text' => '範例：記錄美股帳戶 (指定 USD)', // 移除 👇
+                                            'size' => 'xxs',
+                                            'color' => '#2A9D8F',
+                                            'margin' => 'md'
+                                        ],
+                                        [
+                                            'type' => 'button',
+                                            'style' => 'secondary',
+                                            'height' => 'sm',
+                                            'color' => '#ffffff',
+                                            'action' => [
+                                                'type' => 'message',
+                                                'label' => '試試：設定 美股 股票 3000 USD',
+                                                'text' => '設定 美股 股票 3000 USD'
+                                            ]
+                                        ]
+                                    ]
+                                ],
+
+                                ['type' => 'separator', 'margin' => 'lg'],
+
+                                // 方法二：圖形介面
+                                [
+                                    'type' => 'text',
+                                    'text' => '2. 圖形介面 (推薦)', // 移除 2️⃣ ⭐
+                                    'weight' => 'bold',
+                                    'color' => '#264653',
+                                    'size' => 'md',
+                                    'margin' => 'lg'
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => '不想打字？開啟網頁版，點擊「新增帳戶」按鈕，操作更直覺！',
+                                    'size' => 'xs',
+                                    'color' => '#666666',
+                                    'wrap' => true
+                                ],
+                                [
+                                    'type' => 'button',
+                                    'style' => 'primary',
+                                    'color' => '#2A9D8F',
+                                    'margin' => 'md',
+                                    'action' => [
+                                        'type' => 'uri',
+                                        'label' => '開啟資產管理頁面', // 移除 📱
+                                        'uri' => defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me'
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ];
+
+                    $lineService->replyFlexMessage($replyToken, "FinBot 資產教學", $assetTutorialFlex);
+                    $isProcessed = true;
+                }
                 
+                // --- [新增] 隱私權政策指令 (重點摘要版) ---
+                elseif ($text === '隱私權政策' || $text === '使用條款' || $text === 'terms') {
+                    
+                    $termsFlex = [
+                        'type' => 'bubble',
+                        'size' => 'giga', 
+                        'header' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'backgroundColor' => '#5A483C', // 深棕色，傳遞穩重與信任感
+                            'paddingAll' => 'lg',
+                            'contents' => [
+                                [
+                                    'type' => 'text',
+                                    'text' => '使用條款與隱私權重點',
+                                    'weight' => 'bold',
+                                    'color' => '#FFFFFF',
+                                    'size' => 'lg'
+                                ]
+                            ]
+                        ],
+                        'body' => [
+                            'type' => 'box',
+                            'layout' => 'vertical',
+                            'spacing' => 'md',
+                            'contents' => [
+                                // 引言
+                                [
+                                    'type' => 'text',
+                                    'text' => 'FinBot 致力於保護您的隱私。以下為我們的服務承諾摘要：',
+                                    'size' => 'xs',
+                                    'color' => '#888888',
+                                    'wrap' => true
+                                ],
+                                ['type' => 'separator', 'margin' => 'md'],
+
+                                // --- 重點 1：資料收集與用途 ---
+                                [
+                                    'type' => 'text',
+                                    'text' => '1. 資料收集與用途',
+                                    'weight' => 'bold',
+                                    'color' => '#D4A373', // 品牌強調色
+                                    'size' => 'sm',
+                                    'margin' => 'lg'
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => '我們僅收集必要的 LINE ID、暱稱與您輸入的財務數據，用於提供記帳、資產管理及 AI 分析服務。我們絕不將您的財務數據出售給第三方。',
+                                    'size' => 'xs',
+                                    'color' => '#555555',
+                                    'wrap' => true,
+                                    'margin' => 'sm',
+                                    'lineSpacing' => '4px' // 增加行距提升閱讀舒適度
+                                ],
+
+                                // --- 重點 2：安全與權利 ---
+                                [
+                                    'type' => 'text',
+                                    'text' => '2. 資料安全與用戶權利',
+                                    'weight' => 'bold',
+                                    'color' => '#D4A373',
+                                    'size' => 'sm',
+                                    'margin' => 'lg'
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => '您的資料傳輸過程採用加密技術 (SSL/TLS) 保護。您擁有隨時查詢、匯出備份及要求刪除帳號（被遺忘權）的完整權利。',
+                                    'size' => 'xs',
+                                    'color' => '#555555',
+                                    'wrap' => true,
+                                    'margin' => 'sm',
+                                    'lineSpacing' => '4px'
+                                ],
+
+                                // --- 重點 3：AI 免責 ---
+                                [
+                                    'type' => 'text',
+                                    'text' => '3. AI 分析免責聲明',
+                                    'weight' => 'bold',
+                                    'color' => '#D4A373',
+                                    'size' => 'sm',
+                                    'margin' => 'lg'
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'text' => 'AI 生成的理財建議僅供參考，不構成專業投資顧問意見。在做出重大財務決策前，請務必諮詢專業人士。',
+                                    'size' => 'xs',
+                                    'color' => '#555555',
+                                    'wrap' => true,
+                                    'margin' => 'sm',
+                                    'lineSpacing' => '4px'
+                                ],
+
+                                ['type' => 'separator', 'margin' => 'lg'],
+
+                                // --- 聯絡資訊 ---
+                                [
+                                    'type' => 'box',
+                                    'layout' => 'vertical',
+                                    'margin' => 'lg',
+                                    'spacing' => 'sm',
+                                    'contents' => [
+                                        [
+                                            'type' => 'text',
+                                            'text' => '如有任何疑問，歡迎聯繫我們：',
+                                            'size' => 'xxs',
+                                            'color' => '#aaaaaa',
+                                            'align' => 'center'
+                                        ],
+                                        [
+                                            'type' => 'text',
+                                            'text' => 'support@finbot.tw',
+                                            'size' => 'sm',
+                                            'color' => '#264653', // 深色連結感
+                                            'weight' => 'bold',
+                                            'align' => 'center',
+                                            'action' => [
+                                                'type' => 'uri',
+                                                'label' => 'Email',
+                                                'uri' => 'mailto:support@finbot.tw'
+                                            ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ];
+
+                    $lineService->replyFlexMessage($replyToken, "使用條款與隱私權重點", $termsFlex);
+                    $isProcessed = true;
+                }
                 // --- 2. 資產設定指令 ---
                 elseif (preg_match('/^設定\s+([^\s]+)\s+([^\s]+)\s+([-\d\.,]+)(.*?)$/u', $text, $matches)) {
                     $name = trim($matches[1]);

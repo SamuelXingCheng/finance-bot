@@ -1,64 +1,73 @@
-:root {
-  /* --- 文青米色系色票 (Muji / Cafe Style) --- */
-  --bg-body: #f9f7f2;       /* 溫暖的米白色背景 */
-  --bg-card: #ffffff;       /* 純白卡片背景 */
-  --bg-nav: #ffffff;        /* 導航列背景 */
+/* =========================================
+   ★★★ 核心修復：全域 Box-Sizing ★★★
+   將此設定移至全域樣式表，確保所有子元件都能吃到設定
+   解決「padding 把版面撐大導致右邊被切掉」的問題
+   ========================================= */
+   *, *::before, *::after {
+    box-sizing: border-box;
+  }
   
-  --text-primary: #5d5d5d;  /* 柔和的深灰色 (取代純黑) */
-  --text-secondary: #8c8c8c;/* 淺灰色 */
-  --text-accent: #a98467;   /* 暖棕色 (強調色) */
+  :root {
+    /* --- 文青米色系色票 (Muji / Cafe Style) --- */
+    --bg-body: #f9f7f2;       /* 溫暖的米白色背景 */
+    --bg-card: #ffffff;       /* 純白卡片背景 */
+    --bg-nav: #ffffff;        /* 導航列背景 */
+    
+    --text-primary: #5d5d5d;  /* 柔和的深灰色 (取代純黑) */
+    --text-secondary: #8c8c8c;/* 淺灰色 */
+    --text-accent: #a98467;   /* 暖棕色 (強調色) */
+    
+    --color-primary: #d4a373; /* 經典大地色/奶茶色 (按鈕、重點) */
+    --color-success: #ccd5ae; /* 抹茶綠 (成功/收入) */
+    --color-danger: #e5989b;  /* 乾燥玫瑰粉 (錯誤/支出) */
+    
+    --shadow-soft: 0 4px 20px rgba(212, 163, 115, 0.15); /* 暖色調陰影 */
+    --border-radius: 16px;    /* 圓潤的邊角 */
+    
+    /* 字體優化 */
+    font-family: "Helvetica Neue", Helvetica, "PingFang TC", "Microsoft JhengHei", Arial, sans-serif;
+    line-height: 1.6;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
   
-  --color-primary: #d4a373; /* 經典大地色/奶茶色 (按鈕、重點) */
-  --color-success: #ccd5ae; /* 抹茶綠 (成功/收入) */
-  --color-danger: #e5989b;  /* 乾燥玫瑰粉 (錯誤/支出) */
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background-color: var(--bg-body);
+    transition: background-color 0.3s;
+  }
   
-  --shadow-soft: 0 4px 20px rgba(212, 163, 115, 0.15); /* 暖色調陰影 */
-  --border-radius: 16px;    /* 圓潤的邊角 */
+  /* 讓連結和按鈕有質感 */
+  a {
+    font-weight: 500;
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+  a:hover {
+    opacity: 0.8;
+  }
   
-  /* 字體優化 */
-  font-family: "Helvetica Neue", Helvetica, "PingFang TC", "Microsoft JhengHei", Arial, sans-serif;
-  line-height: 1.6;
-  font-weight: 400;
-  color: var(--text-primary);
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background-color: var(--bg-body);
-  transition: background-color 0.3s;
-}
-
-/* 讓連結和按鈕有質感 */
-a {
-  font-weight: 500;
-  color: var(--color-primary);
-  text-decoration: none;
-  transition: opacity 0.2s;
-}
-a:hover {
-  opacity: 0.8;
-}
-
-/* 滾動條美化 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-body); 
-}
-::-webkit-scrollbar-thumb {
-  background: #e0e0e0; 
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #d4a373; 
-}
-
-/* 響應式容器 */
-#app {
-  width: 100%;
-  margin: 0 auto;
-}
+  /* 滾動條美化 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg-body); 
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #e0e0e0; 
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #d4a373; 
+  }
+  
+  /* 響應式容器 */
+  #app {
+    width: 100%;
+    margin: 0 auto;
+  }

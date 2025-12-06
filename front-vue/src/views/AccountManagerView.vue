@@ -1134,10 +1134,16 @@ onMounted(() => {
   padding: 20px;
 }
 .modal-content {
-  background: white; width: 100%; max-width: 400px;
-  border-radius: 16px; padding: 24px;
+  background: white; 
+  width: 100%; 
+  max-width: 400px;
+  border-radius: 16px; 
+  padding: 24px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   animation: slideUp 0.3s ease-out;
+  
+  /* 強制將 padding 算在寬度內，防止撐爆 */
+  box-sizing: border-box; 
 }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .modal-header h3 { margin: 0; color: #8c7b75; font-size: 1.1rem; }
