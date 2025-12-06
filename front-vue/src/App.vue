@@ -10,7 +10,7 @@
       <p>FinBot 啟動中...</p>
     </div>
 
-    <div v-else-if="!liffState.isLoggedIn" class="onboarding-container">
+    <div v-else-if="!liffState.isLoggedIn || !isOnboarded" class="onboarding-container">
       <OnboardingView @trigger-login="handleOnboardingLogin" />
     </div>
 
@@ -67,6 +67,9 @@ const currentTab = ref('Dashboard');
 const currentViewRef = ref(null);
 const isLoading = ref(true); 
 
+// 🟢 修正點 1 (狀態)：用來儲存從後端查到的「是否已引導」狀態
+const isOnboarded = ref(false); 
+
 const currentView = computed(() => {
   if (currentTab.value === 'Dashboard') return DashboardView;
   if (currentTab.value === 'Accounts') return AccountManagerView;
@@ -81,10 +84,20 @@ const handleRefreshDashboard = () => {
 };
 
 // --- 核心邏輯：處理引導與登入 ---
-function handleOnboardingLogin(data) {
+
+// 🟢 修正點 2 (按鈕行為)：如果已登入，直接送出資料；未登入才轉跳
+async function handleOnboardingLogin(data) {
+  // 1. 存入暫存 (以防萬一)
   localStorage.setItem('pending_onboarding', JSON.stringify(data));
+  
+  // 2. 判斷狀態
   if (!liff.isLoggedIn()) {
+    // 情況 A：真的還沒登入 -> 呼叫登入 (會跳轉)
     liff.login();
+  } else {
+    // 情況 B：其實已經登入了 (只是被擋在引導頁) -> 直接執行資料提交
+    console.log("已登入，直接執行提交...");
+    await processPendingOnboarding();
   }
 }
 
@@ -100,6 +113,10 @@ async function processPendingOnboarding() {
 
       if (response && response.ok) {
         alert('🎉 歡迎加入！已成功為您開通 FinPoints 獎勵與試用權限。');
+        
+        // 🟢 修正點 3 (即時切換)：提交成功後，立刻在前端標記為已完成，讓畫面自動切換到 Dashboard
+        isOnboarded.value = true; 
+
         if (currentViewRef.value?.refreshAllData) currentViewRef.value.refreshAllData();
       }
     } catch (e) {
@@ -124,9 +141,23 @@ onMounted(async () => {
             liffState.isLoggedIn = true;
             try {
                 liffState.profile = await liff.getProfile();
+
+                // 🟢 修正點 4 (初始化檢查)：登入後，立刻呼叫 API 檢查 DB 中的引導狀態
+                const statusResponse = await fetchWithLiffToken(`${API_URL}?action=get_user_status`);
+                if (statusResponse && statusResponse.ok) {
+                    const result = await statusResponse.json();
+                    if (result.status === 'success') {
+                        // 將 DB 的狀態 (0 或 1) 同步到前端變數
+                        isOnboarded.value = Number(result.data.is_onboarded) === 1;
+                        console.log("User Status Checked: Onboarded =", isOnboarded.value);
+                    }
+                }
+
             } catch (pErr) {
-                console.warn('無法獲取個人資料', pErr);
+                console.warn('無法獲取個人資料或狀態', pErr);
             }
+            
+            // 處理剛填完引導表單並登入的情況
             await processPendingOnboarding();
         } 
     } catch (err) {
@@ -140,7 +171,7 @@ onMounted(async () => {
 
 <style scoped>
 /* =========================================
-   ★★★ 關鍵修復：全域 Box-Sizing ★★★
+   ★★★ 全域 Box-Sizing ★★★
    解決「padding 把版面撐大導致右邊被切掉」的問題
    ========================================= */
 * {
