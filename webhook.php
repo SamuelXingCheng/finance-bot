@@ -67,9 +67,51 @@ try {
             $dbUserId = $userService->findOrCreateUser($lineUserId);
             
             // ====================================================
+            // 🟢 CASE C: 處理新增好友事件 (Follow Event) - 新增區塊
+            // ====================================================
+            if ($event['type'] === 'follow') {
+                
+                // 確保 LIFF URL 已設定
+                $liffUrl = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me'; 
+                
+                $welcomeFlex = [
+                    'type' => 'bubble',
+                    'header' => [
+                        'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'backgroundColor' => '#D4A373',
+                        'contents' => [['type' => 'text', 'text' => '歡迎使用 FinBot！', 'weight' => 'bold', 'size' => 'lg', 'color' => '#FFFFFF']]
+                    ],
+                    'body' => [
+                        'type' => 'box', 'layout' => 'vertical', 'spacing' => 'md',
+                        'contents' => [
+                            ['type' => 'text', 'text' => '我是您的 AI 記帳與資產管理助手。', 'wrap' => true, 'color' => '#555555'],
+                            ['type' => 'text', 'text' => '點擊下方按鈕，開始設定您的理財目標，僅需 30 秒即可完成！', 'size' => 'sm', 'color' => '#888888', 'wrap' => true]
+                        ]
+                    ],
+                    'footer' => [
+                        'type' => 'box', 'layout' => 'vertical', 
+                        'contents' => [
+                            [
+                                'type' => 'button', 
+                                'action' => [
+                                    'type' => 'uri', 
+                                    'label' => '🚀 開始新手引導', 
+                                    'uri' => $liffUrl // 這會打開前端 App.vue，觸發 checkUserStatus -> 顯示 Onboarding
+                                ], 
+                                'style' => 'primary', 
+                                'color' => '#D4A373'
+                            ]
+                        ]
+                    ]
+                ];
+                
+                $lineService->replyFlexMessage($replyToken, "歡迎使用 FinBot！", $welcomeFlex);
+                $isProcessed = true;
+            }
+
+            // ====================================================
             // CASE A: 處理文字訊息 (指令 + 文字記帳)
             // ====================================================
-            if ($event['type'] === 'message' && $msgType === 'text') {
+            elseif ($event['type'] === 'message' && $msgType === 'text') {
                 $text = trim($event['message']['text']);
                 $lowerText = strtolower($text); 
                 

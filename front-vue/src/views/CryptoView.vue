@@ -153,6 +153,7 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto';
+import liff from '@line/liff';
 
 const dashboard = ref({ totalUsd: 0, totalInvestedTwd: 0, pnl: 0, pnlPercent: 0 });
 const holdings = ref([]);
@@ -295,7 +296,16 @@ async function submitTransaction() {
   } else { alert('網路錯誤'); }
 }
 
-function openTransactionModal() { resetForm(); isModalOpen.value = true; }
+function openTransactionModal() {
+    // 🟢 新增：檢查登入
+    if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+    }
+    
+    resetForm(); 
+    isModalOpen.value = true; 
+}
 function closeModal() { isModalOpen.value = false; }
 function switchTab(tabId) { 
     currentTab.value = tabId; resetForm(); 

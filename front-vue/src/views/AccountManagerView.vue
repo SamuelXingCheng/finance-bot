@@ -283,6 +283,7 @@ import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import { defineEmits } from 'vue';
 import Chart from 'chart.js/auto';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
+import liff from '@line/liff';
 Chart.register(ChartDataLabels);
 
 const emit = defineEmits(['refreshDashboard']);
@@ -593,6 +594,12 @@ function forceUppercase() {
 
 // --- Modal 操作 ---
 function openModal(account = null) {
+    // 🟢 新增：檢查登入
+  if (!liff.isLoggedIn()) {
+      liff.login({ redirectUri: window.location.href });
+      return;
+  }
+
   const today = new Date().toISOString().substring(0, 10);
 
   if (account) {
@@ -709,6 +716,12 @@ async function fetchTrendData() {
 }
 
 async function fetchAIAnalysis() {
+    // 🟢 新增：檢查登入
+    if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: window.location.href });
+        return;
+    }
+    
     aiLoading.value = true;
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_portfolio`);
     if (response && response.ok) {

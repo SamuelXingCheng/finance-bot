@@ -324,6 +324,7 @@ import { ref, onMounted, nextTick, watch, computed } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto'; 
 import ChartDataLabels from 'chartjs-plugin-datalabels';
+import liff from '@line/liff';
 Chart.register(ChartDataLabels);
 
 // --- 狀態管理 ---
@@ -581,6 +582,13 @@ function renderTrendChart(data) {
 }
 
 async function handleTransactionSubmit() {
+    // 🟢 新增：檢查登入狀態
+  if (!liff.isLoggedIn()) {
+      // 記錄當前頁面，讓登入後可以跳回來 (LINE 預設行為)
+      liff.login({ redirectUri: window.location.href });
+      return;
+  }
+
   formMessage.value = '處理中...';
   messageClass.value = 'msg-processing';
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_transaction`, {
