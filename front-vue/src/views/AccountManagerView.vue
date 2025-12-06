@@ -721,7 +721,7 @@ async function fetchAIAnalysis() {
         liff.login({ redirectUri: window.location.href });
         return;
     }
-    
+
     aiLoading.value = true;
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_portfolio`);
     if (response && response.ok) {
@@ -989,7 +989,7 @@ onMounted(() => {
 @media (min-width: 600px) { 
     .charts-wrapper { grid-template-columns: 1fr 1fr; } 
 }
-.chart-card { background: white; padding: 16px; border-radius: 16px; border: 1px solid #f0ebe5; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; align-items: center; }
+.chart-card { background: white; padding: 16px; border-radius: 16px; border: 1px solid #f0ebe5; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; align-items: center; min-width: 0;}
 .chart-card h3 { font-size: 0.95rem; color: #8c7b75; margin: 0 0 12px 0; align-self: flex-start; }
 .chart-box { 
     width: 100%; 

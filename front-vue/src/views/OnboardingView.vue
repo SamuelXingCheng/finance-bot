@@ -101,7 +101,7 @@
         
         <div class="reward-card">
             <p class="reward-label">獲得新手獎勵</p>
-            <p class="reward-amount">FinPoints 10 點</p>
+            <p class="reward-amount">FinPoints 50 點</p>
             <p class="reward-note">點數可折抵訂閱費，比特幣回饋即將上線！</p>
         </div>
 
