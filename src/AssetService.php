@@ -107,59 +107,113 @@ class AssetService {
     }
 
     /**
-     * 🟢 新增：取得歷史淨值趨勢 (統一使用 $range 參數，回傳 labels/data 陣列)
+     * 🟢 優化版：取得歷史淨值趨勢 (每日重播計算，但長週期只取每月 1/15 號顯示)
      */
     public function getAssetHistory(int $userId, string $range = '1y'): array {
-        // 1. 計算日期範圍
-        $interval = '-1 year';
-        if ($range === '1m') $interval = '-1 month';
-        if ($range === '6m') $interval = '-6 months';
+        // 1. 計算查詢範圍
+        $now = new DateTime();
+        $today = $now->format('Y-m-d');
         
-        $startDate = date('Y-m-d', strtotime($interval));
+        $intervalStr = '-1 year';
+        if ($range === '1m') $intervalStr = '-1 month';
+        if ($range === '6m') $intervalStr = '-6 months';
+        
+        $startDate = (new DateTime())->modify($intervalStr)->format('Y-m-d');
 
-        // 2. 撈取歷史資料 (依日期與幣種分組)
-        $sql = "SELECT snapshot_date, currency_unit, SUM(balance) as total_balance 
+        // 2. 撈取該用戶 "所有" 歷史資料 (為了正確計算期初餘額，必須從頭撈)
+        $sql = "SELECT snapshot_date, account_name, balance, currency_unit 
                 FROM account_balance_history 
                 WHERE user_id = :userId 
-                  AND snapshot_date >= :startDate
-                GROUP BY snapshot_date, currency_unit 
-                ORDER BY snapshot_date ASC";
+                ORDER BY snapshot_date ASC, id ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':startDate' => $startDate]);
+            $stmt->execute([':userId' => $userId]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // 3. 整合計算：將同一天的多種貨幣換算成 TWD 加總
-            $rateService = new ExchangeRateService();
-            $usdTwdRate = $rateService->getUsdTwdRate();
-            $dailyNetWorth = [];
-
-            foreach ($rows as $row) {
-                $date = $row['snapshot_date'];
-                $currency = strtoupper($row['currency_unit']);
-                $balance = (float)$row['total_balance']; 
-
-                // 匯率換算邏輯
-                $rateToUSD = $rateService->getRateToUSD($currency);
-                $twdValue = $balance * $rateToUSD * $usdTwdRate;
-                
-                if (!isset($dailyNetWorth[$date])) {
-                    $dailyNetWorth[$date] = 0.0;
-                }
-                $dailyNetWorth[$date] += $twdValue;
+            if (empty($rows)) {
+                return ['labels' => [], 'data' => []];
             }
 
-            // 4. 格式化輸出給前端圖表 (Labels 和 Data)
-            $result = [
-                'labels' => array_keys($dailyNetWorth),
-                'data' => array_values($dailyNetWorth)
+            // 3. 準備工具
+            $rateService = new ExchangeRateService();
+            $usdTwdRate = $rateService->getUsdTwdRate();
+            
+            // 資料分組
+            $historyByDate = [];
+            $firstDateInData = null;
+            foreach ($rows as $row) {
+                $d = $row['snapshot_date'];
+                if (!$firstDateInData) $firstDateInData = $d;
+                $historyByDate[$d][] = $row;
+            }
+
+            // 4. 重播 (Replay)
+            // 確保從資料最早那天開始算，才不會漏掉舊餘額
+            $replayStart = min($firstDateInData, $startDate);
+            
+            $period = new DatePeriod(
+                new DateTime($replayStart),
+                new DateInterval('P1D'), // 🌟 依然每天跑，確保餘額狀態連續
+                (new DateTime($today))->modify('+1 day')
+            );
+
+            $currentBalances = [];
+            $chartLabels = [];
+            $chartData = [];
+
+            foreach ($period as $dt) {
+                $currentDate = $dt->format('Y-m-d');
+                $dayOfMonth = $dt->format('d'); // 取得日期 (01, 02... 31)
+
+                // A. 狀態更新 (每日都要做，不能跳過)
+                if (isset($historyByDate[$currentDate])) {
+                    foreach ($historyByDate[$currentDate] as $record) {
+                        $acc = $record['account_name'];
+                        $currentBalances[$acc] = [
+                            'balance' => (float)$record['balance'],
+                            'unit' => strtoupper($record['currency_unit'])
+                        ];
+                    }
+                }
+
+                // B. 輸出過濾 (決定這一天要不要畫在圖上)
+                if ($currentDate >= $startDate) {
+                    
+                    // 預設規則：若是 '1m' 短週期，依然顯示每天 (不然點會太少)
+                    $shouldRecord = true;
+
+                    // 🟢 針對長週期 (6m, 1y) 實施減量：只取 1號、15號、以及今天
+                    if ($range !== '1m') {
+                        $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
+                    }
+
+                    if ($shouldRecord) {
+                        $dailyTotalTwd = 0.0;
+                        
+                        foreach ($currentBalances as $accData) {
+                            $bal = $accData['balance'];
+                            $curr = $accData['unit'];
+                            try {
+                                $rateToUSD = $rateService->getRateToUSD($curr);
+                                $valTwd = $bal * $rateToUSD * $usdTwdRate;
+                                $dailyTotalTwd += $valTwd;
+                            } catch (Exception $e) {}
+                        }
+
+                        $chartLabels[] = $currentDate;
+                        $chartData[] = round($dailyTotalTwd, 0);
+                    }
+                }
+            }
+
+            return [
+                'labels' => $chartLabels,
+                'data' => $chartData
             ];
 
-            return $result;
-
         } catch (PDOException $e) {
-            error_log("getAssetHistory Error: " . $e->getMessage() . " for User ID: {$userId}");
+            error_log("getAssetHistory Error: " . $e->getMessage());
             return ['labels' => [], 'data' => []];
         }
     }
