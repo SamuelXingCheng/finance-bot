@@ -128,6 +128,15 @@ async function processPendingOnboarding() {
 }
 
 onMounted(async () => {
+  // 🟢 1. 新增：優先檢查網址參數，自動切換分頁
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetTab = urlParams.get('tab');
+    
+    // 如果參數存在，且是有效的分頁名稱，就切換
+    if (targetTab && ['Dashboard', 'Accounts', 'Crypto'].includes(targetTab)) {
+        currentTab.value = targetTab;
+    }
+    
     if (!liff) {
         liffState.error = 'LIFF SDK 未載入';
         isLoading.value = false;

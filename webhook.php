@@ -428,7 +428,7 @@ try {
                                     'action' => [
                                         'type' => 'uri',
                                         'label' => '開啟資產管理頁面', // 移除 📱
-                                        'uri' => defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me'
+                                        'uri' => (defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me') . '?tab=Accounts'
                                     ]
                                 ]
                             ]
