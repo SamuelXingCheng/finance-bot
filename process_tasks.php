@@ -162,23 +162,41 @@ try {
         $flexPayload = [
             'type' => 'bubble',
             'size' => 'kilo',
-            // Header: 標題與筆數 (綠色成功背景)
+            // Header: 標題與筆數
             'header' => [
-                'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'backgroundColor' => '#27AE60',
+                'type' => 'box', 
+                'layout' => 'vertical', 
+                'paddingAll' => 'lg', 
+                'backgroundColor' => '#D4A373', // 🟢 [修改]：品牌暖棕色背景
                 'contents' => [
-                    ['type' => 'text', 'text' => "🎉 記帳成功 ({$successCount}筆)", 'weight' => 'bold', 'size' => 'md', 'color' => '#FFFFFF'],
+                    [
+                        'type' => 'text', 
+                        'text' => "記帳成功 ({$successCount}筆)", 
+                        'weight' => 'bold', 
+                        'size' => 'md', 
+                        'color' => '#FFFFFF' // 白字
+                    ],
                 ]
             ],
             // Body: 明細列表
             'body' => [
-                'type' => 'box', 'layout' => 'vertical', 'spacing' => 'sm',
+                'type' => 'box', 
+                'layout' => 'vertical', 
+                'spacing' => 'sm',
                 'contents' => $detailContents
             ],
             // Footer: 確認訊息
             'footer' => [
-                'type' => 'box', 'layout' => 'vertical',
+                'type' => 'box', 
+                'layout' => 'vertical',
                 'contents' => [
-                    ['type' => 'text', 'text' => '數據已存入資料庫，感謝您的使用。', 'color' => '#AAAAAA', 'align' => 'center', 'size' => 'xs']
+                    [
+                        'type' => 'text', 
+                        'text' => '數據已存入資料庫，感謝您的使用。', 
+                        'color' => '#AAAAAA', 
+                        'align' => 'center', 
+                        'size' => 'xs'
+                    ]
                 ]
             ]
         ];

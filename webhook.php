@@ -121,21 +121,72 @@ try {
                          $lineService->replyMessage($replyToken, "❌ 錯誤：LIFF 儀表板 URL 尚未配置。");
                     } else {
                         $liffUrl = LIFF_DASHBOARD_URL; 
+                        
+                        // 🟢 [修改開始]：更新為大地色系風格
                         $flexPayload = [
                             'type' => 'bubble',
-                            'body' => [
-                                'type' => 'box', 'layout' => 'vertical',
+                            'size' => 'kilo', // 設定標準寬度
+                            'header' => [
+                                'type' => 'box',
+                                'layout' => 'vertical',
+                                'paddingAll' => 'lg',
+                                'backgroundColor' => '#D4A373', // 品牌主色 (暖棕色)
                                 'contents' => [
-                                    ['type' => 'text', 'text' => '財務儀表板', 'weight' => 'bold', 'size' => 'xl', 'color' => '#007AFF'],
-                                    ['type' => 'text', 'text' => '點擊按鈕，即可開啟您的個人淨資產總覽與報表。', 'margin' => 'md', 'size' => 'sm', 'wrap' => true],
-                                    ['type' => 'button', 'action' => ['type' => 'uri', 'label' => '開啟儀表板（專業版網頁）', 'uri' => $liffUrl], 'style' => 'primary', 'color' => '#00B900', 'margin' => 'xl']
+                                    [
+                                        'type' => 'text', 
+                                        'text' => '財務儀表板', 
+                                        'weight' => 'bold', 
+                                        'size' => 'lg', 
+                                        'color' => '#FFFFFF' // 白字
+                                    ]
+                                ]
+                            ],
+                            'body' => [
+                                'type' => 'box', 
+                                'layout' => 'vertical',
+                                'contents' => [
+                                    [
+                                        'type' => 'text', 
+                                        'text' => '個人資產管家', 
+                                        'weight' => 'bold', 
+                                        'size' => 'md', 
+                                        'color' => '#8C7B75' // 深棕色副標
+                                    ],
+                                    [
+                                        'type' => 'text', 
+                                        'text' => '點擊下方按鈕，即可開啟您的個人淨資產總覽、收支報表與 Crypto 投資組合。', 
+                                        'margin' => 'md', 
+                                        'size' => 'sm', 
+                                        'color' => '#666666', // 柔和深灰內文
+                                        'wrap' => true,
+                                        'lineSpacing' => '4px'
+                                    ]
+                                ]
+                            ],
+                            'footer' => [
+                                'type' => 'box',
+                                'layout' => 'vertical',
+                                'contents' => [
+                                    [
+                                        'type' => 'button', 
+                                        'action' => [
+                                            'type' => 'uri', 
+                                            'label' => '開啟儀表板', 
+                                            'uri' => $liffUrl
+                                        ], 
+                                        'style' => 'primary', 
+                                        'color' => '#D4A373', // 按鈕改為品牌色
+                                        'height' => 'sm'
+                                    ]
                                 ]
                             ]
                         ];
+                        // 🟢 [修改結束]
+
                         $lineService->replyFlexMessage($replyToken, "開啟財務儀表板", $flexPayload);
                     }
                     $isProcessed = true;
-                } 
+                }
 
                 // --- 1. 記帳教學 (無表情符號版) ---
                 elseif ($text === '記帳教學' || $text === '教學' || $text === 'help') {
@@ -628,8 +679,11 @@ try {
                     
                     $globalNetWorthText = number_format($globalNetWorthTWD, 2);
                     $textLength = strlen($globalNetWorthText);
+                    // 動態調整字體大小，避免數字過長換行
                     $heroSize = ($textLength > 16) ? 'xl' : (($textLength > 12) ? 'xl' : 'xxl');
-                    $globalNetWorthColor = $globalNetWorthTWD >= 0 ? '#007AFF' : '#FF334B';
+                    
+                    // 🟢 [修改 1]：將原本的藍色改成品牌主色 (暖棕色)，負數維持紅色
+                    $globalNetWorthColor = $globalNetWorthTWD >= 0 ? '#D4A373' : '#FF334B';
                     
                     $fiatSummary = [];
                     $cryptoSummary = [];
@@ -645,6 +699,7 @@ try {
                         }
                     }
 
+                    // 排序邏輯 (保持不變)
                     $sortedFiat = [];
                     foreach ($fiatOrder as $key) {
                         if (isset($fiatSummary[$key])) {
@@ -674,11 +729,17 @@ try {
                             $netWorthDisplay = rtrim(rtrim(number_format($data['net_worth'], 8), '0'), '.');
                             $twdTotal = number_format($data['twd_total'], 2);
 
-                            $netWorthColor = $data['net_worth'] >= 0 ? '#1DB446' : '#FF334B';
+                            $netWorthColor = $data['net_worth'] >= 0 ? '#1DB446' : '#FF334B'; // 分項維持紅綠，方便閱讀
                             $netWorthEmoji = ''; 
 
+                            // 🟢 [修改 2]：分項標題改為深棕色，呼應主題
                             $assetBodyContents[] = [
-                                'type' => 'text', 'text' => "{$currency} 資產總覽", 'weight' => 'bold', 'color' => '#333333', 'size' => 'md', 'margin' => 'xl'
+                                'type' => 'text', 
+                                'text' => "{$currency} 資產總覽", 
+                                'weight' => 'bold', 
+                                'color' => '#8C7B75', // 深棕色
+                                'size' => 'md', 
+                                'margin' => 'xl'
                             ];
                             
                             $assetBodyContents[] = [
@@ -694,12 +755,12 @@ try {
                                     ]],
                                     ['type' => 'separator', 'margin' => 'md'],
                                     ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
-                                        ['type' => 'text', 'text' => '淨值', 'size' => 'md', 'weight' => 'bold', 'flex' => 1],
+                                        ['type' => 'text', 'text' => '淨值', 'size' => 'md', 'weight' => 'bold', 'flex' => 1, 'color' => '#333333'],
                                         ['type' => 'text', 'text' => "{$netWorthEmoji} {$netWorthDisplay}", 'size' => 'md', 'weight' => 'bold', 'color' => $netWorthColor, 'align' => 'end', 'flex' => 1]
                                     ]],
                                     ['type' => 'box', 'layout' => 'horizontal', 'margin' => 'xs', 'contents' => [
                                         ['type' => 'text', 'text' => 'TWD 價值', 'size' => 'xs', 'color' => '#AAAAAA', 'flex' => 1],
-                                        ['type' => 'text', 'text' => "NT$ {$twdTotal}", 'size' => 'xs', 'color' => '#555555', 'align' => 'end', 'flex' => 1]
+                                        ['type' => 'text', 'text' => "NT$ {$twdTotal}", 'size' => 'xs', 'color' => '#888888', 'align' => 'end', 'flex' => 1]
                                     ]],
                                 ]
                             ];
@@ -731,7 +792,8 @@ try {
 
                         if (!empty($rateContents)) {
                             $assetBodyContents[] = ['type' => 'separator', 'margin' => 'xl'];
-                            $assetBodyContents[] = ['type' => 'text', 'text' => '實時匯率參考', 'weight' => 'bold', 'size' => 'sm', 'margin' => 'lg'];
+                            // 🟢 [修改 3]：匯率參考標題也改為深棕色
+                            $assetBodyContents[] = ['type' => 'text', 'text' => '實時匯率參考', 'weight' => 'bold', 'size' => 'sm', 'margin' => 'lg', 'color' => '#8C7B75'];
                             $assetBodyContents = array_merge($assetBodyContents, $rateContents);
                             $assetBodyContents[] = ['type' => 'separator', 'margin' => 'md'];
                             $assetBodyContents[] = [
@@ -746,15 +808,22 @@ try {
                         $assetBodyContents[] = ['type' => 'text', 'text' => '目前沒有任何資產記錄。請輸入「設定...」新增。', 'size' => 'sm', 'color' => '#AAAAAA', 'margin' => 'xl'];
                     }
 
+                    // 🟢 [修改 4]：Header 加上暖棕色背景，文字轉白，整體風格統一
                     $flexPayload = [
                         'type' => 'bubble', 'size' => 'mega',
-                        'header' => ['type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 'contents' => [['type' => 'text', 'text' => '淨資產總覽', 'weight' => 'bold', 'size' => 'xl']]],
+                        'header' => [
+                            'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'lg', 
+                            'backgroundColor' => '#D4A373', // 品牌色背景
+                            'contents' => [
+                                ['type' => 'text', 'text' => '淨資產總覽', 'weight' => 'bold', 'size' => 'lg', 'color' => '#FFFFFF'] // 白字
+                            ]
+                        ],
                         'hero' => [
                             'type' => 'box', 'layout' => 'vertical', 'paddingAll' => 'xl', 'paddingBottom' => 'none',
                             'contents' => [
-                                ['type' => 'text', 'text' => '全球淨值 (TWD)', 'color' => '#aaaaaa', 'size' => 'xs', 'align' => 'center'],
+                                ['type' => 'text', 'text' => '全球淨值 (TWD)', 'color' => '#8C7B75', 'size' => 'xs', 'align' => 'center'], // 副標改深棕色
                                 ['type' => 'text', 'text' => "NT$ {$globalNetWorthText}", 'weight' => 'bold', 'size' => $heroSize, 'color' => $globalNetWorthColor, 'align' => 'center', 'margin' => 'sm'],
-                                ['type' => 'text', 'text' => '依據快照匯率計算', 'size' => 'xs', 'color' => '#aaaaaa', 'align' => 'center']
+                                ['type' => 'text', 'text' => '依據快照匯率計算', 'size' => 'xxs', 'color' => '#aaaaaa', 'align' => 'center']
                             ]
                         ],
                         'body' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $assetBodyContents],
@@ -775,6 +844,8 @@ try {
                     $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
                     $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
                     $netIncome = $totalIncome - $totalExpense;
+                    
+                    // 取得總資產供參考
                     $assetResult = $assetService->getNetWorthSummary($dbUserId);
                     $globalNetWorth = $assetResult['global_twd_net_worth'] ?? 0;
 
@@ -782,28 +853,48 @@ try {
                     $fmtIncome = number_format($totalIncome);
                     $fmtNet = number_format($netIncome);
                     $fmtAsset = number_format($globalNetWorth);
+                    
+                    // 結餘顏色：正數綠色，負數紅色
                     $balanceColor = $netIncome >= 0 ? '#1DB446' : '#FF334B';
+                    
+                    // LIFF 連結
+                    $liffUrl = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me';
 
                     $flexPayload = [
-                        'type' => 'bubble', 'size' => 'kilo',
+                        'type' => 'bubble', 
+                        'size' => 'kilo',
                         'header' => [
-                            'type' => 'box', 'layout' => 'vertical', 'backgroundColor' => '#f7f9fc', 'paddingAll' => 'lg',
-                            'contents' => [['type' => 'text', 'text' => '本月財務概況', 'weight' => 'bold', 'size' => 'lg', 'color' => '#555555']]
+                            'type' => 'box', 
+                            'layout' => 'vertical', 
+                            'backgroundColor' => '#D4A373', // 🟢 修改：品牌暖棕色背景
+                            'paddingAll' => 'lg',
+                            'contents' => [
+                                [
+                                    'type' => 'text', 
+                                    'text' => '本月財務概況', 
+                                    'weight' => 'bold', 
+                                    'size' => 'lg', 
+                                    'color' => '#FFFFFF' // 🟢 修改：白字
+                                ]
+                            ]
                         ],
                         'body' => [
                             'type' => 'box', 'layout' => 'vertical', 'spacing' => 'md',
                             'contents' => [
+                                // 收入列
                                 ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
-                                    ['type' => 'text', 'text' => '總收入', 'size' => 'sm', 'color' => '#555555', 'flex' => 1],
+                                    ['type' => 'text', 'text' => '總收入', 'size' => 'sm', 'color' => '#8C7B75', 'flex' => 1], // 深棕色標籤
                                     ['type' => 'text', 'text' => "NT$ {$fmtIncome}", 'size' => 'sm', 'color' => '#1DB446', 'weight' => 'bold', 'align' => 'end', 'flex' => 2]
                                 ]],
+                                // 支出列
                                 ['type' => 'box', 'layout' => 'horizontal', 'contents' => [
-                                    ['type' => 'text', 'text' => '總支出', 'size' => 'sm', 'color' => '#555555', 'flex' => 1],
+                                    ['type' => 'text', 'text' => '總支出', 'size' => 'sm', 'color' => '#8C7B75', 'flex' => 1], // 深棕色標籤
                                     ['type' => 'text', 'text' => "NT$ {$fmtExpense}", 'size' => 'sm', 'color' => '#FF334B', 'weight' => 'bold', 'align' => 'end', 'flex' => 2]
                                 ]],
                                 ['type' => 'separator', 'margin' => 'md'],
+                                // 結餘列
                                 ['type' => 'box', 'layout' => 'horizontal', 'margin' => 'md', 'contents' => [
-                                    ['type' => 'text', 'text' => '本月結餘', 'size' => 'md', 'weight' => 'bold', 'color' => '#333333', 'flex' => 1, 'gravity' => 'center'],
+                                    ['type' => 'text', 'text' => '本月結餘', 'size' => 'md', 'weight' => 'bold', 'color' => '#5A483C', 'flex' => 1, 'gravity' => 'center'], // 深咖啡色強調
                                     ['type' => 'text', 'text' => "NT$ {$fmtNet}", 'size' => 'xl', 'weight' => 'bold', 'color' => $balanceColor, 'align' => 'end', 'flex' => 2]
                                 ]],
                             ]
@@ -811,8 +902,21 @@ try {
                         'footer' => [
                             'type' => 'box', 'layout' => 'vertical',
                             'contents' => [
+                                // 顯示總資產小字
                                 ['type' => 'text', 'text' => "目前總資產: NT$ {$fmtAsset}", 'size' => 'xs', 'color' => '#aaaaaa', 'align' => 'center', 'margin' => 'sm'],
-                                ['type' => 'button', 'action' => ['type' => 'message', 'label' => '查看資產明細', 'text' => '查詢資產'], 'height' => 'sm', 'style' => 'link', 'margin' => 'sm']
+                                
+                                // 🟢 修改：按鈕改為開啟 LIFF 網頁
+                                [
+                                    'type' => 'button', 
+                                    'style' => 'primary', 
+                                    'color' => '#D4A373', // 品牌色按鈕
+                                    'margin' => 'md',
+                                    'action' => [
+                                        'type' => 'uri', // 改為 URI 動作
+                                        'label' => '開啟收支總覽', 
+                                        'uri' => $liffUrl // 跳轉至網頁
+                                    ]
+                                ]
                             ]
                         ]
                     ];
@@ -934,15 +1038,49 @@ try {
                         ];
                         $lineService->replyFlexMessage($replyToken, "收到語音記帳", $flexPayload);
                     } else {
+                        // 🟢 [修改]：統一風格 - 記帳已送出 (加上 Header 背景色)
                         $flexPayload = [
                             'type' => 'bubble',
                             'size' => 'kilo',
-                            'body' => [
-                                'type' => 'box', 'layout' => 'vertical',
+                            // 1. 新增 Header 區塊
+                            'header' => [
+                                'type' => 'box',
+                                'layout' => 'vertical',
+                                'backgroundColor' => '#D4A373', // 品牌暖棕色背景
+                                'paddingAll' => 'lg',
                                 'contents' => [
-                                    ['type' => 'text', 'text' => '記帳已送出', 'weight' => 'bold', 'color' => '#1DB446', 'size' => 'md'],
-                                    ['type' => 'text', 'text' => "內容： {$text}", 'margin' => 'sm', 'size' => 'xs', 'color' => '#555555'],
-                                    ['type' => 'text', 'text' => 'AI 助手正在分析中，可繼續其他操作，稍後通知您...', 'margin' => 'md', 'size' => 'sm', 'color' => '#aaaaaa'],
+                                    [
+                                        'type' => 'text',
+                                        'text' => '記帳已送出',
+                                        'weight' => 'bold',
+                                        'color' => '#FFFFFF', // 白字
+                                        'size' => 'lg'
+                                    ]
+                                ]
+                            ],
+                            // 2. Body 只放內容
+                            'body' => [
+                                'type' => 'box', 
+                                'layout' => 'vertical',
+                                'contents' => [
+                                    [
+                                        'type' => 'text', 
+                                        'text' => "內容： {$text}", 
+                                        'color' => '#555555',
+                                        'size' => 'sm',
+                                        'wrap' => true
+                                    ],
+                                    [
+                                        'type' => 'separator', 
+                                        'margin' => 'md'
+                                    ],
+                                    [
+                                        'type' => 'text', 
+                                        'text' => 'AI 助手正在分析中，可繼續其他操作...', 
+                                        'margin' => 'md', 
+                                        'size' => 'xs', 
+                                        'color' => '#aaaaaa'
+                                    ]
                                 ]
                             ]
                         ];
