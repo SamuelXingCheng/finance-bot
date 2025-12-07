@@ -44,22 +44,19 @@ class AssetService {
      * @param string|null $snapshotDate 歷史快照日期，如果為 null 則使用今日
      * @return bool
      */
-    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null): bool {
+    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null, ?int $ledgerId = null): bool {
         $assetType = $this->sanitizeAssetType($type); 
-        $date = $snapshotDate ?? date('Y-m-d'); // 預設今天
+        $date = $snapshotDate ?? date('Y-m-d');
         $today = date('Y-m-d');
-
-        // 🌟 核心邏輯：如果輸入的日期 (date) >= 今天 (today)，就更新主表。
-        // 這確保了「過去」的日期不會覆蓋主表，而「今天或未來」的餘額會被視為最新。
         $shouldUpdateMainTable = ($date >= $today); 
 
         try {
             $this->pdo->beginTransaction();
 
-            // 1. 更新主表 accounts (只在 $shouldUpdateMainTable 為 true 時執行)
             if ($shouldUpdateMainTable) {
-                $sqlMain = "INSERT INTO accounts (user_id, name, type, balance, currency_unit, last_updated_at)
-                            VALUES (:userId, :name, :type, :balance, :unit, NOW())
+                // [修正] SQL 加入 ledger_id
+                $sqlMain = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
+                            VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, NOW())
                             ON DUPLICATE KEY UPDATE 
                             balance = VALUES(balance), 
                             type = VALUES(type), 
@@ -69,6 +66,7 @@ class AssetService {
                 $stmtMain = $this->pdo->prepare($sqlMain);
                 $stmtMain->execute([
                     ':userId' => $userId, 
+                    ':ledgerId' => $ledgerId, // 可能為 null
                     ':name' => $name, 
                     ':type' => $assetType, 
                     ':balance' => $balance, 
@@ -76,18 +74,18 @@ class AssetService {
                 ]);
             }
 
-            // 2. 寫入歷史表 account_balance_history (總是執行，這是歷史快照的職責)
-            // 策略：刪除該用戶、該帳戶、該日期的舊紀錄，寫入新的 (覆蓋當日舊快照)
+            // [修正] 歷史記錄也加入 ledger_id
             $sqlDelHistory = "DELETE FROM account_balance_history  
-                              WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date";
+                              WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date AND (ledger_id = :ledgerId OR (ledger_id IS NULL AND :ledgerId IS NULL))";
             $stmtDel = $this->pdo->prepare($sqlDelHistory);
-            $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date]);
+            $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date, ':ledgerId' => $ledgerId]);
 
-            $sqlHistory = "INSERT INTO account_balance_history (user_id, account_name, balance, currency_unit, snapshot_date)
-                           VALUES (:userId, :name, :balance, :unit, :date)";
+            $sqlHistory = "INSERT INTO account_balance_history (user_id, ledger_id, account_name, balance, currency_unit, snapshot_date)
+                           VALUES (:userId, :ledgerId, :name, :balance, :unit, :date)";
             $stmtHist = $this->pdo->prepare($sqlHistory);
             $stmtHist->execute([
                 ':userId' => $userId,
+                ':ledgerId' => $ledgerId,
                 ':name' => $name,
                 ':balance' => $balance,
                 ':unit' => strtoupper($currencyUnit),
@@ -98,9 +96,7 @@ class AssetService {
             return true;
 
         } catch (PDOException $e) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             error_log("AssetService UPSERT failed: " . $e->getMessage());
             return false;
         }
@@ -109,37 +105,40 @@ class AssetService {
     /**
      * 🟢 優化版：取得歷史淨值趨勢 (每日重播計算，但長週期只取每月 1/15 號顯示)
      */
-    public function getAssetHistory(int $userId, string $range = '1y'): array {
-        // 1. 計算查詢範圍
+    public function getAssetHistory(int $userId, string $range = '1y', ?int $ledgerId = null): array {
+        // ... (日期計算保持不變) ...
         $now = new DateTime();
         $today = $now->format('Y-m-d');
-        
-        $intervalStr = '-1 year';
-        if ($range === '1m') $intervalStr = '-1 month';
-        if ($range === '6m') $intervalStr = '-6 months';
-        
+        $intervalStr = ($range === '1m') ? '-1 month' : (($range === '6m') ? '-6 months' : '-1 year');
         $startDate = (new DateTime())->modify($intervalStr)->format('Y-m-d');
 
-        // 2. 撈取該用戶 "所有" 歷史資料 (為了正確計算期初餘額，必須從頭撈)
+        // [修正] SQL 增加 ledger_id 判斷
         $sql = "SELECT snapshot_date, account_name, balance, currency_unit 
                 FROM account_balance_history 
-                WHERE user_id = :userId 
-                ORDER BY snapshot_date ASC, id ASC";
+                WHERE user_id = :userId ";
+        
+        $params = [':userId' => $userId];
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId ";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            // 如果沒指定 ledgerId，預設只撈 user_id 且 ledger_id 為 NULL (個人) 或者是全部？
+            // 這裡建議：如果不指定，撈該用戶「所有」資產 (包含所有帳本)
+            // 保持原樣即可 (WHERE user_id = :userId)
+        }
+        
+        $sql .= " ORDER BY snapshot_date ASC, id ASC";
 
+        // ... (後續處理邏輯保持不變) ...
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId]);
+            $stmt->execute($params);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            if (empty($rows)) {
-                return ['labels' => [], 'data' => []];
-            }
-
-            // 3. 準備工具
+            
+            // ... (原本的資料處理邏輯，直接複製過來即可) ...
+            if (empty($rows)) return ['labels' => [], 'data' => []];
             $rateService = new ExchangeRateService();
             $usdTwdRate = $rateService->getUsdTwdRate();
-            
-            // 資料分組
             $historyByDate = [];
             $firstDateInData = null;
             foreach ($rows as $row) {
@@ -147,195 +146,112 @@ class AssetService {
                 if (!$firstDateInData) $firstDateInData = $d;
                 $historyByDate[$d][] = $row;
             }
-
-            // 4. 重播 (Replay)
-            // 確保從資料最早那天開始算，才不會漏掉舊餘額
             $replayStart = min($firstDateInData, $startDate);
-            
-            $period = new DatePeriod(
-                new DateTime($replayStart),
-                new DateInterval('P1D'), // 🌟 依然每天跑，確保餘額狀態連續
-                (new DateTime($today))->modify('+1 day')
-            );
-
-            $currentBalances = [];
-            $chartLabels = [];
-            $chartData = [];
+            $period = new DatePeriod(new DateTime($replayStart), new DateInterval('P1D'), (new DateTime($today))->modify('+1 day'));
+            $currentBalances = []; $chartLabels = []; $chartData = [];
 
             foreach ($period as $dt) {
                 $currentDate = $dt->format('Y-m-d');
-                $dayOfMonth = $dt->format('d'); // 取得日期 (01, 02... 31)
-
-                // A. 狀態更新 (每日都要做，不能跳過)
+                $dayOfMonth = $dt->format('d');
                 if (isset($historyByDate[$currentDate])) {
                     foreach ($historyByDate[$currentDate] as $record) {
                         $acc = $record['account_name'];
-                        $currentBalances[$acc] = [
-                            'balance' => (float)$record['balance'],
-                            'unit' => strtoupper($record['currency_unit'])
-                        ];
+                        $currentBalances[$acc] = ['balance' => (float)$record['balance'], 'unit' => strtoupper($record['currency_unit'])];
                     }
                 }
-
-                // B. 輸出過濾 (決定這一天要不要畫在圖上)
                 if ($currentDate >= $startDate) {
-                    
-                    // 預設規則：若是 '1m' 短週期，依然顯示每天 (不然點會太少)
                     $shouldRecord = true;
-
-                    // 🟢 針對長週期 (6m, 1y) 實施減量：只取 1號、15號、以及今天
-                    if ($range !== '1m') {
-                        $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
-                    }
-
+                    if ($range !== '1m') $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
                     if ($shouldRecord) {
                         $dailyTotalTwd = 0.0;
-                        
                         foreach ($currentBalances as $accData) {
-                            $bal = $accData['balance'];
-                            $curr = $accData['unit'];
+                            $bal = $accData['balance']; $curr = $accData['unit'];
                             try {
                                 $rateToUSD = $rateService->getRateToUSD($curr);
-                                $valTwd = $bal * $rateToUSD * $usdTwdRate;
-                                $dailyTotalTwd += $valTwd;
+                                $dailyTotalTwd += $bal * $rateToUSD * $usdTwdRate;
                             } catch (Exception $e) {}
                         }
-
                         $chartLabels[] = $currentDate;
                         $chartData[] = round($dailyTotalTwd, 0);
                     }
                 }
             }
-
-            return [
-                'labels' => $chartLabels,
-                'data' => $chartData
-            ];
-
-        } catch (PDOException $e) {
-            error_log("getAssetHistory Error: " . $e->getMessage());
-            return ['labels' => [], 'data' => []];
-        }
+            return ['labels' => $chartLabels, 'data' => $chartData];
+        } catch (PDOException $e) { return ['labels' => [], 'data' => []]; }
     }
     
-    public function getNetWorthSummary(int $userId): array {
+    public function getNetWorthSummary(int $userId, ?int $ledgerId = null): array {
         $rateService = new ExchangeRateService(); 
+        
+        // [修正] SQL 加入 ledger_id 判斷
         $sql = "SELECT type, currency_unit, SUM(balance) as total 
                 FROM accounts 
-                WHERE user_id = :userId 
-                GROUP BY type, currency_unit 
-                ORDER BY currency_unit, type";
+                WHERE user_id = :userId ";
+        
+        $params = [':userId' => $userId];
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId ";
+            $params[':ledgerId'] = $ledgerId;
+        }
+        
+        $sql .= " GROUP BY type, currency_unit ORDER BY currency_unit, type";
     
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId]);
+            $stmt->execute($params);
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-            $summary = [];
-            $globalNetWorthUSD = 0.0;
-            $usdTwdRate = $rateService->getUsdTwdRate();
             
-            // 統計變數
-            $totalCash = 0.0;
-            $totalInvest = 0.0; 
-            $totalAssets = 0.0;
-            $totalLiabilities = 0.0;
-
-            // 新圖表需要的統計變數
-            $totalStock = 0.0;
-            $totalBond = 0.0;
-            $totalTwInvest = 0.0; 
-            $totalOverseasInvest = 0.0; 
-    
+            // ... (原本的計算邏輯完全保持不變) ...
+            $summary = []; $globalNetWorthUSD = 0.0; $usdTwdRate = $rateService->getUsdTwdRate();
+            $totalCash = 0.0; $totalInvest = 0.0; $totalAssets = 0.0; $totalLiabilities = 0.0;
+            $totalStock = 0.0; $totalBond = 0.0; $totalTwInvest = 0.0; $totalOverseasInvest = 0.0; 
+            
             foreach ($results as $row) {
-                $currency = $row['currency_unit'];
-                $type = $row['type'];
-                $total = (float)$row['total'];
-                
+                // ... (複製原本邏輯) ...
+                $currency = $row['currency_unit']; $type = $row['type']; $total = (float)$row['total'];
                 $rateToUSD = $rateService->getRateToUSD($currency);
-                $usdValue = $total * $rateToUSD;
-                $twdValue = $usdValue * $usdTwdRate;
-    
-                if (!isset($summary[$currency])) {
-                    $summary[$currency] = [
-                        'assets' => 0.0, 'liabilities' => 0.0, 'net_worth' => 0.0, 
-                        'usd_total' => 0.0, 'twd_total' => 0.0
-                    ];
-                }
-                
+                $usdValue = $total * $rateToUSD; $twdValue = $usdValue * $usdTwdRate;
+                if (!isset($summary[$currency])) $summary[$currency] = ['assets' => 0.0, 'liabilities' => 0.0, 'net_worth' => 0.0, 'usd_total' => 0.0, 'twd_total' => 0.0];
                 if ($type === 'Liability') {
-                    $summary[$currency]['liabilities'] += $total;
-                    $summary[$currency]['net_worth'] -= $total;
-                    $globalNetWorthUSD -= $usdValue;
-                    $totalLiabilities += $twdValue;
+                    $summary[$currency]['liabilities'] += $total; $summary[$currency]['net_worth'] -= $total;
+                    $globalNetWorthUSD -= $usdValue; $totalLiabilities += $twdValue;
                 } else {
-                    $summary[$currency]['assets'] += $total;
-                    $summary[$currency]['net_worth'] += $total;
-                    $globalNetWorthUSD += $usdValue;
-                    $totalAssets += $twdValue;
-
-                    // 分類統計
-                    if ($type === 'Cash') {
-                        $totalCash += $twdValue;
-                    } else {
-                        // 廣義投資
+                    $summary[$currency]['assets'] += $total; $summary[$currency]['net_worth'] += $total;
+                    $globalNetWorthUSD += $usdValue; $totalAssets += $twdValue;
+                    if ($type === 'Cash') $totalCash += $twdValue;
+                    else {
                         $totalInvest += $twdValue;
-
-                        if ($type === 'Stock' || $type === 'Investment') {
-                            $totalStock += $twdValue;
-                        } elseif ($type === 'Bond') {
-                            $totalBond += $twdValue;
-                        }
-
-                        // 統計地區：非 TWD 皆視為海外投資
-                        if ($currency === 'TWD') {
-                            $totalTwInvest += $twdValue;
-                        } else {
-                            $totalOverseasInvest += $twdValue;
-                        }
+                        if ($type === 'Stock' || $type === 'Investment') $totalStock += $twdValue; elseif ($type === 'Bond') $totalBond += $twdValue;
+                        if ($currency === 'TWD') $totalTwInvest += $twdValue; else $totalOverseasInvest += $twdValue;
                     }
                 }
-                
-                $summary[$currency]['usd_total'] += $usdValue;
-                $summary[$currency]['twd_total'] += $twdValue;
+                $summary[$currency]['usd_total'] += $usdValue; $summary[$currency]['twd_total'] += $twdValue;
             }
-    
             $globalNetWorthTWD = $globalNetWorthUSD * $usdTwdRate;
-    
             return [
-                'breakdown' => $summary, 
-                'global_twd_net_worth' => $globalNetWorthTWD,
-                'usdTwdRate' => $usdTwdRate,
-                'charts' => [
-                    'cash' => $totalCash,
-                    'investment' => $totalInvest,
-                    'total_assets' => $totalAssets,
-                    'total_liabilities' => $totalLiabilities,
-                    'stock' => $totalStock,
-                    'bond' => $totalBond,
-                    'tw_invest' => $totalTwInvest,
-                    'overseas_invest' => $totalOverseasInvest 
-                ]
+                'breakdown' => $summary, 'global_twd_net_worth' => $globalNetWorthTWD, 'usdTwdRate' => $usdTwdRate,
+                'charts' => ['cash' => $totalCash, 'investment' => $totalInvest, 'total_assets' => $totalAssets, 'total_liabilities' => $totalLiabilities, 'stock' => $totalStock, 'bond' => $totalBond, 'tw_invest' => $totalTwInvest, 'overseas_invest' => $totalOverseasInvest]
             ];
-        } catch (PDOException $e) {
-            error_log("AssetService query failed: " . $e->getMessage());
-            return ['breakdown' => [], 'global_twd_net_worth' => 0.0, 'usdTwdRate' => 32.0, 'charts' => []];
-        }
+        } catch (PDOException $e) { return ['breakdown' => [], 'global_twd_net_worth' => 0.0, 'usdTwdRate' => 32.0, 'charts' => []]; }
     }
 
 
-    public function getAccounts(int $userId): array {
+    public function getAccounts(int $userId, ?int $ledgerId = null): array {
         $sql = "SELECT name, type, balance, currency_unit, last_updated_at 
                 FROM accounts 
-                WHERE user_id = :userId 
-                ORDER BY type ASC, balance DESC";
+                WHERE user_id = :userId ";
+        $params = [':userId' => $userId];
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId ";
+            $params[':ledgerId'] = $ledgerId;
+        }
+        $sql .= " ORDER BY type ASC, balance DESC";
+        
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId]);
+            $stmt->execute($params);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            return [];
-        }
+        } catch (PDOException $e) { return []; }
     }
 
     public function deleteAccount(int $userId, string $name): bool {

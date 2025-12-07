@@ -19,7 +19,7 @@
         <div class="illustration">🏦</div>
         <h3>建立您的第一個金庫</h3>
         <p class="description">
-          目前尚無帳戶資料。<br>
+          目前這個帳本尚無帳戶資料。<br>
           建立後，您將可以解鎖以下功能：
         </p>
         <ul class="benefit-list">
@@ -270,7 +270,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'; // 新增 nextTick
+// 1. 引入 watch
+import { ref, onMounted, computed, nextTick, watch } from 'vue'; 
 import { fetchWithLiffToken, numberFormat } from '@/utils/api'; 
 import { defineEmits } from 'vue';
 import Chart from 'chart.js/auto';
@@ -282,6 +283,9 @@ import "driver.js/dist/driver.css";
 Chart.register(ChartDataLabels);
 
 const emit = defineEmits(['refreshDashboard']);
+
+// 2. 定義 Props 接收 ledgerId
+const props = defineProps(['ledgerId']);
 
 // 狀態變數
 const isHistoryModalOpen = ref(false);
@@ -391,12 +395,10 @@ const groupedAccounts = computed(() => {
     return result;
 });
 
-// 🌟 新增：導覽邏輯
+// 導覽邏輯
 function runHasDataTutorial() {
-  // 檢查：如果 localStorage 已經有紀錄，代表看過了，直接跳出
   if (localStorage.getItem('finbot_web_tutorial_seen')) return;
 
-  // 定義導覽步驟
   const driverObj = driver({
     showProgress: true,
     nextBtnText: '下一步',
@@ -410,21 +412,21 @@ function runHasDataTutorial() {
         } 
       },
       { 
-        element: '.account-card:first-child', // 指向列表中的第一個帳戶
+        element: '.account-card:first-child', 
         popover: { 
           title: '這是您的帳戶', 
           description: '點擊這裡可以查看歷史快照，或是進行編輯。' 
         } 
       },
       { 
-        element: '.add-btn', // 指向右上角的新增按鈕
+        element: '.add-btn', 
         popover: { 
           title: '新增更多', 
           description: '想要建立新的分類？點擊這裡新增。' 
         } 
       },
       { 
-        element: '.charts-wrapper', // 指向圖表區
+        element: '.charts-wrapper', 
         popover: { 
           title: '自動化圖表', 
           description: '系統會根據您的所有帳戶，自動計算並繪製資產分佈圖。' 
@@ -432,18 +434,156 @@ function runHasDataTutorial() {
       }
     ],
     onDestroyed: () => {
-      // 🌟 結束後，寫入 localStorage，下次就不會再跳出來
       localStorage.setItem('finbot_web_tutorial_seen', 'true');
     }
   });
 
-  // 稍微延遲一點點，確保 DOM 已經渲染完成
   setTimeout(() => {
     driverObj.drive();
   }, 800);
 }
 
-// --- 歷史快照功能 (邏輯保持不變) ---
+// 3. 監聽 Ledger 切換
+watch(() => props.ledgerId, (newVal) => {
+    refreshAllData();
+});
+
+// --- API 函式 (已修正 ledger_id 傳遞) ---
+
+async function fetchAccounts() {
+  // 切換時先顯示 Loading，避免混淆
+  loading.value = true;
+  accounts.value = []; // 清空舊資料
+
+  try {
+    // 修正：帶上 ledger_id
+    let url = `${window.API_BASE_URL}?action=get_accounts`;
+    if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
+
+    const response = await fetchWithLiffToken(url);
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            accounts.value = result.data;
+            if (accounts.value.length > 0) {
+                await nextTick(); 
+                fetchChartData();
+                fetchTrendData();
+                fetchAssetHistory();
+                runHasDataTutorial();
+            }
+        }
+    }
+  } catch (e) {
+      console.error(e);
+  } finally {
+      loading.value = false;
+  }
+}
+
+async function fetchChartData() {
+  if (accounts.value.length === 0) return;
+  // 修正：帶上 ledger_id
+  let url = `${window.API_BASE_URL}?action=asset_summary`;
+  if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
+
+  const response = await fetchWithLiffToken(url);
+  if (response && response.ok) {
+      const result = await response.json();
+      if (result.status === 'success') {
+          chartData.value = { ...result.data.charts, stock: result.data.charts.stock || 0, bond: result.data.charts.bond || 0, tw_invest: result.data.charts.tw_invest || 0, overseas_invest: result.data.charts.overseas_invest || 0 };
+          assetBreakdown.value = result.data.breakdown || {};
+          renderAllocationChart(); renderRegionChart(); renderStockBondChart(); renderFiatCryptoChart(); renderHoldingValueChart(); renderNetWorthChart();
+      }
+  }
+}
+
+async function fetchTrendData() {
+  if (accounts.value.length === 0) return;
+  const { start, end } = trendFilter.value;
+  // 修正：帶上 ledger_id
+  let url = `${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}`;
+  if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
+
+  const response = await fetchWithLiffToken(url);
+  if (response && response.ok) {
+      const result = await response.json();
+      if (result.status === 'success') renderTrendChart(result.data);
+  }
+}
+
+async function fetchAssetHistory(range = '1y') {
+    if (accounts.value.length === 0) return;
+    historyRange.value = range;
+    // 修正：帶上 ledger_id
+    let url = `${window.API_BASE_URL}?action=asset_history&range=${range}`;
+    if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
+
+    const response = await fetchWithLiffToken(url);
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            renderAssetHistoryChart(result.data);
+        }
+    }
+}
+
+async function fetchAIAnalysis() {
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
+    aiLoading.value = true;
+    
+    // 修正：AI 分析也應該帶上 ledger_id
+    let url = `${window.API_BASE_URL}?action=analyze_portfolio`;
+    if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
+
+    const response = await fetchWithLiffToken(url);
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') aiAnalysis.value = result.data;
+        else {
+            if (result.message && result.message.includes('免費版')) aiAnalysis.value = result.message; 
+            else aiAnalysis.value = "AI 回傳錯誤: " + result.message;
+        }
+    } else {
+        aiAnalysis.value = "連線失敗。";
+    }
+    aiLoading.value = false;
+}
+
+// 4. 修正儲存邏輯，確保寫入正確帳本
+async function handleSave() {
+  isSaving.value = true;
+  
+  // 準備 Payload
+  const payload = { ...form.value };
+  // [修正] 注入當前帳本 ID
+  if (props.ledgerId) {
+      payload.ledger_id = props.ledgerId;
+  }
+
+  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { 
+      method: 'POST', 
+      body: JSON.stringify(payload) // 改傳 payload
+  });
+
+  if (response && response.ok) {
+    const result = await response.json();
+    if (result.status === 'success') {
+      closeModal();
+      await fetchAccounts(); 
+      // 確保刷新
+      emit('refreshDashboard');
+    } else {
+      alert('儲存失敗：' + result.message);
+    }
+  } else {
+    alert('網路錯誤');
+  }
+  isSaving.value = false;
+}
+
+// --- 其餘輔助函式與圖表邏輯 (保持不變) ---
+
 async function fetchAccountHistory(name) {
     historyLoading.value = true;
     currentAccountName.value = name;
@@ -514,20 +654,6 @@ function openModalForSnapshot(snapshotItem) {
     isModalOpen.value = true;
 }
 
-// --- 圖表資料獲取 ---
-async function fetchAssetHistory(range = '1y') {
-    // 如果沒有帳戶，不抓圖表
-    if (accounts.value.length === 0) return;
-    historyRange.value = range;
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_history&range=${range}`);
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') {
-            renderAssetHistoryChart(result.data);
-        }
-    }
-}
-
 function renderAssetHistoryChart(resultData) {
     if (assetHistoryChart) assetHistoryChart.destroy();
     if (!assetHistoryChartCanvas.value) return;
@@ -550,7 +676,6 @@ function renderAssetHistoryChart(resultData) {
     });
 }
 
-// --- Modal 邏輯 ---
 function handleCurrencyChange() {
     if (currencySelectValue.value === 'CUSTOM') {
         isCustomCurrency.value = true; form.value.currency = ''; 
@@ -581,60 +706,6 @@ function openModal(account = null) {
 }
 function closeModal() { isModalOpen.value = false; }
 
-async function handleSave() {
-  isSaving.value = true;
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { method: 'POST', body: JSON.stringify(form.value) });
-  if (response && response.ok) {
-    const result = await response.json();
-    if (result.status === 'success') {
-      closeModal();
-      await fetchAccounts(); 
-      if (accounts.value.length > 0) {
-        // 等待 DOM 更新，因為 v-else 切換後 canvas 才會出現
-        await nextTick(); 
-        fetchChartData(); 
-        fetchAssetHistory();
-        fetchTrendData();
-      }
-      emit('refreshDashboard');
-    } else {
-      alert('儲存失敗：' + result.message);
-    }
-  } else {
-    alert('網路錯誤');
-  }
-  isSaving.value = false;
-}
-
-// --- API 函式 ---
-async function fetchAccounts() {
-  // 只有初始狀態時顯示全頁 loading
-  if (accounts.value.length === 0) {
-      loading.value = true;
-  }
-  try {
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_accounts`);
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') {
-            accounts.value = result.data;
-            // 如果有資料，才去抓圖表
-            if (accounts.value.length > 0) {
-                await nextTick(); // 確保 DOM 渲染完畢
-                fetchChartData();
-                fetchTrendData();
-                fetchAssetHistory();
-                runHasDataTutorial();
-            }
-        }
-    }
-  } catch (e) {
-      console.error(e);
-  } finally {
-      loading.value = false;
-  }
-}
-
 async function handleDelete(name) {
   if (!confirm(`確定要刪除 [${name}] 嗎？這會清除該帳戶所有歷史快照和資產紀錄。`)) return;
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_account`, { method: 'POST', body: JSON.stringify({ name: name }) });
@@ -643,47 +714,7 @@ async function handleDelete(name) {
   }
 }
 
-async function fetchChartData() {
-  if (accounts.value.length === 0) return;
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=asset_summary`);
-  if (response && response.ok) {
-      const result = await response.json();
-      if (result.status === 'success') {
-          chartData.value = { ...result.data.charts, stock: result.data.charts.stock || 0, bond: result.data.charts.bond || 0, tw_invest: result.data.charts.tw_invest || 0, overseas_invest: result.data.charts.overseas_invest || 0 };
-          assetBreakdown.value = result.data.breakdown || {};
-          renderAllocationChart(); renderRegionChart(); renderStockBondChart(); renderFiatCryptoChart(); renderHoldingValueChart(); renderNetWorthChart();
-      }
-  }
-}
-
-async function fetchTrendData() {
-  if (accounts.value.length === 0) return;
-  const { start, end } = trendFilter.value;
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}`);
-  if (response && response.ok) {
-      const result = await response.json();
-      if (result.status === 'success') renderTrendChart(result.data);
-  }
-}
-
-async function fetchAIAnalysis() {
-    if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
-    aiLoading.value = true;
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_portfolio`);
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') aiAnalysis.value = result.data;
-        else {
-            if (result.message && result.message.includes('免費版')) aiAnalysis.value = result.message; 
-            else aiAnalysis.value = "AI 回傳錯誤: " + result.message;
-        }
-    } else {
-        aiAnalysis.value = "連線失敗。";
-    }
-    aiLoading.value = false;
-}
-
-// --- 圖表渲染函式 (內容保持不變，略為縮減排版) ---
+// Chart renders
 function renderAllocationChart() {
     if (allocChart) allocChart.destroy();
     const total = chartData.value.cash + chartData.value.investment;
@@ -752,8 +783,14 @@ function renderTrendChart(data) {
 
 function getTypeClass(type) { return type === 'Liability' ? 'badge-debt' : 'badge-asset'; }
 
-onMounted(() => {
+// 5. 將刷新函式獨立出來並暴露給父層
+function refreshAllData() {
     fetchAccounts();
+}
+defineExpose({ refreshAllData });
+
+onMounted(() => {
+    refreshAllData();
 });
 </script>
 

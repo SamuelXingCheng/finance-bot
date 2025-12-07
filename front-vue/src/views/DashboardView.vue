@@ -207,8 +207,13 @@ import ChartDataLabels from 'chartjs-plugin-datalabels';
 import liff from '@line/liff';
 Chart.register(ChartDataLabels);
 
-// [新增] 接收 ledgerId prop
+// [新增] 1. 定義 props 接收 ledgerId
 const props = defineProps(['ledgerId']);
+
+// [新增] 2. 監聽 ledgerId 變化，自動刷新頁面數據
+watch(() => props.ledgerId, (newVal) => {
+    refreshAllData();
+});
 
 // --- 狀態管理 ---
 const isPremium = ref(false); 
@@ -315,11 +320,11 @@ function openPaymentModal(method) {
     isPaymentModalOpen.value = true;
 }
 
-// [修改] 加入 ledger_id 參數
+// [修正] 3. 獲取資產總覽時帶上 ledger_id
 async function fetchAssetSummary() {
     let url = `${window.API_BASE_URL}?action=asset_summary`;
     if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
-    
+
     const response = await fetchWithLiffToken(url);
     if (response && response.ok) {
         const result = await response.json();
@@ -329,12 +334,13 @@ async function fetchAssetSummary() {
     }
 }
 
-// [修改] 加入 ledger_id 參數
+// [修正] 4. 獲取交易列表時帶上 ledger_id
 async function fetchTransactions() {
     if (transactions.value.length === 0) {
         txLoading.value = true;
     }
     const monthToSend = currentListMonth.value.substring(0, 7); 
+    
     let url = `${window.API_BASE_URL}?action=get_transactions&month=${monthToSend}`;
     if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -386,30 +392,24 @@ function refreshAllData() {
     fetchTransactions(); 
 }
 
-// [新增] 監聽 ledgerId 變更，自動刷新數據
-watch(() => props.ledgerId, () => {
-    refreshAllData();
-});
-
 watch(currentListMonth, (newMonth) => { 
     transactions.value = [];
     fetchTransactions(); 
 });
 
-// [修改] 加入 ledger_id 參數
+// [修正] 5. 獲取圓餅圖數據時帶上 ledger_id
 async function fetchExpenseData() {
-    // 1. 【新增】在請求前先重置數據，避免視覺混淆
+    // 切換時先重置，避免混淆
     totalExpense.value = 0;
     totalIncome.value = 0;
     expenseBreakdown.value = {};
     incomeBreakdown.value = {};
     
-    // 清除舊圖表，避免殘影
     if (chartInstance) {
         chartInstance.destroy();
         chartInstance = null;
     }
-    
+
     let url = `${window.API_BASE_URL}?action=monthly_expense_breakdown`;
     if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -426,7 +426,7 @@ async function fetchExpenseData() {
     }
 }
 
-// [修改] 加入 ledger_id 參數
+// [修正] 6. 獲取趨勢圖數據時帶上 ledger_id
 async function fetchTrendData() {
   const { start, end } = trendFilter.value;
   let url = `${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}&mode=category`;
@@ -486,6 +486,7 @@ function renderTrendChart(data) {
     });
 }
 
+// [修正] 7. 新增記帳時，帶入 ledger_id
 async function handleTransactionSubmit() {
   if (!liff.isLoggedIn()) {
       liff.login({ redirectUri: window.location.href });
@@ -494,18 +495,21 @@ async function handleTransactionSubmit() {
 
   formMessage.value = '處理中...';
   messageClass.value = 'msg-processing';
-  
-  // [新增] 傳遞 ledger_id 到後端
+
+  // 準備 Payload
   const payload = { ...transactionForm.value };
-  if (props.ledgerId) payload.ledger_id = props.ledgerId;
+  // 如果有選擇帳本，就帶入 ID
+  if (props.ledgerId) {
+      payload.ledger_id = props.ledgerId;
+  }
 
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_transaction`, {
-    method: 'POST', body: JSON.stringify(payload)
+    method: 'POST', body: JSON.stringify(payload) // 改傳 payload
   });
   if (response && (await response.json()).status === 'success') {
       formMessage.value = '成功'; messageClass.value = 'msg-success';
       transactionForm.value.amount = null; transactionForm.value.description = '';
-      refreshAllData();
+      refreshAllData(); // 成功後刷新
       setTimeout(() => { formMessage.value = ''; }, 3000);
   } else {
       formMessage.value = '失敗'; messageClass.value = 'msg-error';

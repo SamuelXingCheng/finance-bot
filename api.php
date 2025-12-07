@@ -105,14 +105,19 @@ try {
     switch ($action) {
         
         case 'asset_summary':
-            $summary = $assetService->getNetWorthSummary($dbUserId); 
-            // 🟢 必備：告訴前端這個人是不是會員
+            // [修正] 接收 ledger_id
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+            
+            // 傳入 ledger_id 給 Service
+            $summary = $assetService->getNetWorthSummary($dbUserId, $targetLedgerId); 
+            
             $summary['is_premium'] = $userService->isPremium($dbUserId);
             $response = ['status' => 'success', 'data' => $summary];
             break;
 
         case 'get_accounts':
-            $accounts = $assetService->getAccounts($dbUserId);
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+            $accounts = $assetService->getAccounts($dbUserId, $targetLedgerId);
             $response = ['status' => 'success', 'data' => $accounts];
             break;
 
@@ -138,26 +143,25 @@ try {
             break;
         
         case 'save_account':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
             $input = json_decode(file_get_contents('php://input'), true);
             
             $name = trim($input['name'] ?? '');
             $type = $input['type'] ?? 'Cash';
             $balance = (float)($input['balance'] ?? 0);
             $currency = $input['currency'] ?? 'TWD';
-            
-            // 🟢 獲取快照日期，若無則預設今天
             $date = $input['date'] ?? date('Y-m-d'); 
+            
+            // [修正] 接收 ledger_id
+            $ledgerId = isset($input['ledger_id']) ? (int)$input['ledger_id'] : null;
 
             if (empty($name)) {
                 $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
                 break;
             }
 
-            // 🟢 傳入 date 參數
-            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date);
+            // [修正] 傳入 ledgerId
+            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date, $ledgerId);
 
             if ($success) {
                 $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
@@ -168,14 +172,16 @@ try {
         
         case 'asset_history':
             $range = $_GET['range'] ?? '1y';
+            // [修正] 接收 ledger_id
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
             
-            // 1. 執行查詢
-            $historyData = $assetService->getAssetHistory($dbUserId, $range);
+            // [修正] 傳入 ledgerId
+            $historyData = $assetService->getAssetHistory($dbUserId, $range, $targetLedgerId);
             
-            // 🟢 [除錯關鍵]：強制把「後端認定的 UserID」和「撈到的筆數」塞回去給前端
             $historyData['debug_info'] = [
-                'resolved_user_id' => $dbUserId,  // 後端認為你是誰
-                'data_count' => count($historyData['labels'] ?? []), // 撈到幾筆資料
+                'resolved_user_id' => $dbUserId,
+                'ledger_id' => $targetLedgerId, // Debug 用
+                'data_count' => count($historyData['labels'] ?? []),
                 'server_time' => date('Y-m-d H:i:s')
             ];
             
@@ -183,10 +189,16 @@ try {
             break;
             
         case 'monthly_expense_breakdown':
-            $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId); 
-            $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
-            $expenseBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense'); 
-            $incomeBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'income');
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+            if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
+                $response = ['status' => 'error', 'message' => '無權存取'];
+                break;
+            }
+
+            $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId, $targetLedgerId); 
+            $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId, $targetLedgerId);
+            $expenseBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense', $targetLedgerId); 
+            $incomeBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'income', $targetLedgerId);
 
             $response = [
                 'status' => 'success', 
@@ -204,12 +216,9 @@ try {
                 http_response_code(405); break;
             }
             $input = json_decode(file_get_contents('php://input'), true);
-            $amount = filter_var($input['amount'] ?? 0, FILTER_VALIDATE_FLOAT);
-            $type = $input['type'] ?? '';
             
-            if ($amount === false || $amount <= 0 || !in_array($type, ['income', 'expense'])) {
-                http_response_code(400); break;
-            }
+            // [修正] 確保 input 中包含 ledger_id (DashboardView 已經會傳送它了)
+            // TransactionService::addTransaction 已經更新為會讀取 $input['ledger_id']
 
             if ($transactionService->addTransaction($dbUserId, $input)) {
                 $response = ['status' => 'success', 'message' => '交易新增成功'];
@@ -264,14 +273,13 @@ try {
             $start = $_GET['start'] ?? $defaultStart;
             $end = $_GET['end'] ?? $defaultEnd;
             $mode = $_GET['mode'] ?? 'total';
+            
+            // [修正] 接收並傳遞 ledger_id
             $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-
             if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
                 $response = ['status' => 'error', 'message' => '無權存取'];
                 break;
             }
-
-            // (免費版日期限制邏輯保留) ...
 
             if ($mode === 'category') {
                 $trendData = $transactionService->getCategoryTrendData($dbUserId, $start, $end, $targetLedgerId);
@@ -283,6 +291,7 @@ try {
 
         case 'get_transactions':
             $month = $_GET['month'] ?? date('Y-m'); 
+            // [修正] 接收並傳遞 ledger_id
             $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
 
             if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {

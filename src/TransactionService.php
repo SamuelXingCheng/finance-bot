@@ -5,12 +5,10 @@ require_once __DIR__ . '/LedgerService.php';
 
 class TransactionService {
     private $pdo;
-
-    // 定義所有有效的類別列表
     private const VALID_CATEGORIES = [
         'Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 
         'Investment', 'Medical', 'Education', 'Allowance', 'Salary', 
-        'Miscellaneous'
+        'Bonus', 'Miscellaneous' // 補上 Bonus
     ];
 
     public function __construct() {
@@ -25,6 +23,7 @@ class TransactionService {
         return 'Miscellaneous';
     }
 
+    // [修正] 新增 ledger_id 參數
     public function addTransaction(int $userId, array $data): bool {
         if (!isset($data['amount']) || $data['amount'] <= 0 || !in_array($data['type'], ['income', 'expense'])) {
             return false;
@@ -40,6 +39,7 @@ class TransactionService {
                 return false; // 無權限
             }
         } else {
+            // 如果沒指定，預設歸到個人帳本
             $ledgerId = $ledgerService->ensurePersonalLedgerExists($userId);
         }
 
@@ -69,7 +69,7 @@ class TransactionService {
         }
     }
 
-    // [修改] 增加 ledgerId 參數
+    // [修正] 支援 ledgerId 過濾
     public function getTotalExpenseByMonth(int $userId, ?int $ledgerId = null): float {
         $startOfMonth = date('Y-m-01');
         $params = [':startOfMonth' => $startOfMonth];
@@ -80,7 +80,7 @@ class TransactionService {
             $sql .= " AND ledger_id = :ledgerId";
             $params[':ledgerId'] = $ledgerId;
         } else {
-            $sql .= " AND user_id = :userId";
+            $sql .= " AND user_id = :userId"; // 這裡可以選擇是否預設只撈個人，目前保持撈全部以相容舊版，但建議未來預設撈 ledger_id=1
             $params[':userId'] = $userId;
         }
 
@@ -91,7 +91,7 @@ class TransactionService {
         } catch (PDOException $e) { return 0.0; }
     }
 
-    // [修改] 增加 ledgerId 參數
+    // [修正] 支援 ledgerId 過濾
     public function getTotalIncomeByMonth(int $userId, ?int $ledgerId = null): float {
         $startOfMonth = date('Y-m-01');
         $params = [':startOfMonth' => $startOfMonth];
@@ -113,7 +113,7 @@ class TransactionService {
         } catch (PDOException $e) { return 0.0; }
     }
 
-    // [修改] 增加 ledgerId 參數
+    // [修正] 支援 ledgerId 過濾
     public function getMonthlyBreakdown(int $userId, string $type, ?int $ledgerId = null): array {
         $startOfMonth = date('Y-m-01');
         $params = [':type' => $type, ':startOfMonth' => $startOfMonth];
@@ -137,7 +137,7 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // [修改] 增加 ledgerId 參數
+    // [修正] 支援 ledgerId 過濾 (趨勢圖)
     public function getTrendData(int $userId, string $startDate, string $endDate, ?int $ledgerId = null): array {
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
@@ -179,7 +179,7 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // [修改] 增加 ledgerId 參數
+    // [修正] 支援 ledgerId 過濾 (分類趨勢)
     public function getCategoryTrendData(int $userId, string $startDate, string $endDate, ?int $ledgerId = null): array {
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
@@ -223,13 +223,7 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // ================================================================
-    // 🌟 新增的三個方法：取得列表、更新、刪除
-    // ================================================================
-
-    /**
-     * 取得交易列表 (預設抓本月，可指定月份)
-     */
+    // [修正] 支援 ledgerId 過濾 (明細列表)
     public function getTransactions(int $userId, string $month = null, ?int $ledgerId = null): array {
         $targetMonth = $month ?? date('Y-m');
         $params = [':month' => $targetMonth];
@@ -253,50 +247,29 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    /**
-     * 更新交易
-     */
+    // 更新與刪除的邏輯通常依賴 ID，所以如果不改也沒關係，但加上 user_id 檢查是為了安全
     public function updateTransaction(int $userId, int $id, array $data): bool {
+        // ... (保持原樣，因為 id 是唯一的) ...
         $cleanCategory = $this->sanitizeCategory($data['category'] ?? 'Miscellaneous');
-        
         $sql = "UPDATE transactions 
-                SET amount = :amount, 
-                    category = :category, 
-                    description = :description, 
-                    type = :type, 
-                    transaction_date = :transDate,
-                    currency = :currency
+                SET amount = :amount, category = :category, description = :description, type = :type, transaction_date = :transDate, currency = :currency
                 WHERE id = :id AND user_id = :userId";
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([
-                ':id' => $id,
-                ':userId' => $userId,
-                ':amount' => (float)$data['amount'],
-                ':category' => $cleanCategory,
-                ':description' => $data['description'],
-                ':type' => $data['type'],
-                ':transDate' => $data['date'],
-                ':currency' => $data['currency'] ?? 'TWD'
+                ':id' => $id, ':userId' => $userId, ':amount' => (float)$data['amount'],
+                ':category' => $cleanCategory, ':description' => $data['description'],
+                ':type' => $data['type'], ':transDate' => $data['date'], ':currency' => $data['currency'] ?? 'TWD'
             ]);
-        } catch (PDOException $e) {
-            error_log("updateTransaction failed: " . $e->getMessage());
-            return false;
-        }
+        } catch (PDOException $e) { return false; }
     }
 
-    /**
-     * 刪除交易
-     */
     public function deleteTransaction(int $userId, int $id): bool {
         $sql = "DELETE FROM transactions WHERE id = :id AND user_id = :userId";
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([':id' => $id, ':userId' => $userId]);
-        } catch (PDOException $e) {
-            error_log("deleteTransaction failed: " . $e->getMessage());
-            return false;
-        }
+        } catch (PDOException $e) { return false; }
     }
 }
 ?>
