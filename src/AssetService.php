@@ -8,8 +8,8 @@ class AssetService {
     // 擴充允許的類型
     private const VALID_TYPES = ['Cash', 'Investment', 'Liability', 'Stock', 'Bond'];
 
-    public function __construct() {
-        $this->pdo = Database::getInstance()->getConnection();
+    public function __construct($pdo = null) {
+        $this->pdo = $pdo ?? Database::getInstance()->getConnection();
     }
 
     public function sanitizeAssetType(string $input): string {
@@ -50,31 +50,56 @@ class AssetService {
         $today = date('Y-m-d');
         $shouldUpdateMainTable = ($date >= $today); 
 
+        $currentTime = date('Y-m-d H:i:s');
+
         try {
             $this->pdo->beginTransaction();
 
             if ($shouldUpdateMainTable) {
-                // [修正] SQL 加入 ledger_id
-                $sqlMain = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
-                            VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, NOW())
-                            ON DUPLICATE KEY UPDATE 
-                            balance = VALUES(balance), 
-                            type = VALUES(type), 
-                            currency_unit = VALUES(currency_unit),
-                            last_updated_at = NOW()"; 
+                // [修正 2] 改用通用寫法：先檢查是否存在，再決定 Insert 或 Update
+                // 這樣 SQLite (測試) 和 MySQL (正式) 都能運作
                 
-                $stmtMain = $this->pdo->prepare($sqlMain);
-                $stmtMain->execute([
-                    ':userId' => $userId, 
-                    ':ledgerId' => $ledgerId, // 可能為 null
-                    ':name' => $name, 
-                    ':type' => $assetType, 
-                    ':balance' => $balance, 
-                    ':unit' => strtoupper($currencyUnit)
-                ]);
+                $checkSql = "SELECT id FROM accounts WHERE user_id = :userId AND name = :name";
+                $stmtCheck = $this->pdo->prepare($checkSql);
+                $stmtCheck->execute([':userId' => $userId, ':name' => $name]);
+                $existingId = $stmtCheck->fetchColumn();
+
+                if ($existingId) {
+                    // 如果存在 -> 更新 (Update)
+                    $updateSql = "UPDATE accounts SET 
+                                  ledger_id = :ledgerId, 
+                                  type = :type, 
+                                  balance = :balance, 
+                                  currency_unit = :unit, 
+                                  last_updated_at = :time 
+                                  WHERE id = :id";
+                    $stmtUpdate = $this->pdo->prepare($updateSql);
+                    $stmtUpdate->execute([
+                        ':ledgerId' => $ledgerId,
+                        ':type' => $assetType,
+                        ':balance' => $balance,
+                        ':unit' => strtoupper($currencyUnit),
+                        ':time' => $currentTime,
+                        ':id' => $existingId
+                    ]);
+                } else {
+                    // 如果不存在 -> 新增 (Insert)
+                    $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
+                                  VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :time)";
+                    $stmtInsert = $this->pdo->prepare($insertSql);
+                    $stmtInsert->execute([
+                        ':userId' => $userId,
+                        ':ledgerId' => $ledgerId,
+                        ':name' => $name,
+                        ':type' => $assetType,
+                        ':balance' => $balance,
+                        ':unit' => strtoupper($currencyUnit),
+                        ':time' => $currentTime
+                    ]);
+                }
             }
 
-            // [修正] 歷史記錄也加入 ledger_id
+            // [修正 3] 歷史記錄部分保持不變，但記得參數要對應好
             $sqlDelHistory = "DELETE FROM account_balance_history  
                               WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date AND (ledger_id = :ledgerId OR (ledger_id IS NULL AND :ledgerId IS NULL))";
             $stmtDel = $this->pdo->prepare($sqlDelHistory);

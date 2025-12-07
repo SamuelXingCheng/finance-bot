@@ -5,14 +5,16 @@ require_once __DIR__ . '/LedgerService.php';
 
 class TransactionService {
     private $pdo;
+    private $ledgerService;
     private const VALID_CATEGORIES = [
         'Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 
         'Investment', 'Medical', 'Education', 'Allowance', 'Salary', 
-        'Bonus', 'Miscellaneous' // 補上 Bonus
+        'Bonus', 'Miscellaneous'
     ];
 
-    public function __construct() {
-        $this->pdo = Database::getInstance()->getConnection();
+    public function __construct($pdo = null, $ledgerService = null) {
+        $this->pdo = $pdo ?? Database::getInstance()->getConnection();
+        $this->ledgerService = $ledgerService ?? new LedgerService($this->pdo);
     }
 
     private function sanitizeCategory(string $category): string {
@@ -23,24 +25,29 @@ class TransactionService {
         return 'Miscellaneous';
     }
 
-    // [修正] 新增 ledger_id 參數
+    // [輔助方法] 根據資料庫類型取得日期格式化 SQL (解決 SQLite 不支援 DATE_FORMAT 的問題)
+    private function getMonthSql(string $column): string {
+        $driver = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'sqlite') {
+            return "strftime('%Y-%m', $column)"; // SQLite 語法
+        }
+        return "DATE_FORMAT($column, '%Y-%m')"; // MySQL 語法
+    }
+
     public function addTransaction(int $userId, array $data): bool {
         if (!isset($data['amount']) || $data['amount'] <= 0 || !in_array($data['type'], ['income', 'expense'])) {
             return false;
         }
 
-        $ledgerService = new LedgerService();
         $ledgerId = 0;
 
-        // 決定寫入哪個帳本
         if (isset($data['ledger_id']) && !empty($data['ledger_id'])) {
             $ledgerId = (int)$data['ledger_id'];
-            if (!$ledgerService->checkAccess($userId, $ledgerId)) {
-                return false; // 無權限
+            if (!$this->ledgerService->checkAccess($userId, $ledgerId)) { 
+                return false; 
             }
         } else {
-            // 如果沒指定，預設歸到個人帳本
-            $ledgerId = $ledgerService->ensurePersonalLedgerExists($userId);
+            $ledgerId = $this->ledgerService->ensurePersonalLedgerExists($userId);
         }
 
         $cleanCategory = $this->sanitizeCategory($data['category'] ?? 'Miscellaneous');
@@ -48,8 +55,11 @@ class TransactionService {
         $currency = $data['currency'] ?? 'TWD';
         $description = $data['description'] ?? '未分類';
         
+        // [修正 1] 使用 PHP 產生時間，替換 NOW()
+        $createdAt = date('Y-m-d H:i:s');
+
         $sql = "INSERT INTO transactions (user_id, ledger_id, amount, category, description, type, transaction_date, currency, created_at) 
-                VALUES (:userId, :ledgerId, :amount, :category, :description, :type, :transDate, :currency, NOW())";
+                VALUES (:userId, :ledgerId, :amount, :category, :description, :type, :transDate, :currency, :createdAt)";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -61,7 +71,8 @@ class TransactionService {
                 ':description' => $description,
                 ':type'        => $data['type'],
                 ':transDate'   => $transDate, 
-                ':currency'    => $currency
+                ':currency'    => $currency,
+                ':createdAt'   => $createdAt
             ]);
         } catch (PDOException $e) {
             error_log("Database INSERT failed: " . $e->getMessage());
@@ -69,7 +80,6 @@ class TransactionService {
         }
     }
 
-    // [修正] 支援 ledgerId 過濾
     public function getTotalExpenseByMonth(int $userId, ?int $ledgerId = null): float {
         $startOfMonth = date('Y-m-01');
         $params = [':startOfMonth' => $startOfMonth];
@@ -80,7 +90,7 @@ class TransactionService {
             $sql .= " AND ledger_id = :ledgerId";
             $params[':ledgerId'] = $ledgerId;
         } else {
-            $sql .= " AND user_id = :userId"; // 這裡可以選擇是否預設只撈個人，目前保持撈全部以相容舊版，但建議未來預設撈 ledger_id=1
+            $sql .= " AND user_id = :userId";
             $params[':userId'] = $userId;
         }
 
@@ -91,7 +101,6 @@ class TransactionService {
         } catch (PDOException $e) { return 0.0; }
     }
 
-    // [修正] 支援 ledgerId 過濾
     public function getTotalIncomeByMonth(int $userId, ?int $ledgerId = null): float {
         $startOfMonth = date('Y-m-01');
         $params = [':startOfMonth' => $startOfMonth];
@@ -113,7 +122,6 @@ class TransactionService {
         } catch (PDOException $e) { return 0.0; }
     }
 
-    // [修正] 支援 ledgerId 過濾
     public function getMonthlyBreakdown(int $userId, string $type, ?int $ledgerId = null): array {
         $startOfMonth = date('Y-m-01');
         $params = [':type' => $type, ':startOfMonth' => $startOfMonth];
@@ -137,7 +145,6 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // [修正] 支援 ledgerId 過濾 (趨勢圖)
     public function getTrendData(int $userId, string $startDate, string $endDate, ?int $ledgerId = null): array {
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
@@ -151,7 +158,11 @@ class TransactionService {
         }
 
         $params = [':startDate' => $startDate, ':endDate' => $endDate];
-        $sql = "SELECT DATE_FORMAT(transaction_date, '%Y-%m') as month, type, SUM(amount) as total 
+        
+        // [修正 2] 動態產生 SQL 日期格式語法
+        $monthExpr = $this->getMonthSql('transaction_date');
+
+        $sql = "SELECT $monthExpr as month, type, SUM(amount) as total 
                 FROM transactions 
                 WHERE transaction_date BETWEEN :startDate AND :endDate";
 
@@ -179,7 +190,6 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // [修正] 支援 ledgerId 過濾 (分類趨勢)
     public function getCategoryTrendData(int $userId, string $startDate, string $endDate, ?int $ledgerId = null): array {
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
@@ -193,7 +203,11 @@ class TransactionService {
         }
 
         $params = [':startDate' => $startDate, ':endDate' => $endDate];
-        $sql = "SELECT DATE_FORMAT(transaction_date, '%Y-%m') as month, category, SUM(amount) as total 
+        
+        // [修正 3] 動態產生 SQL 日期格式語法
+        $monthExpr = $this->getMonthSql('transaction_date');
+
+        $sql = "SELECT $monthExpr as month, category, SUM(amount) as total 
                 FROM transactions 
                 WHERE transaction_date BETWEEN :startDate AND :endDate";
 
@@ -223,12 +237,14 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // [修正] 支援 ledgerId 過濾 (明細列表)
     public function getTransactions(int $userId, string $month = null, ?int $ledgerId = null): array {
         $targetMonth = $month ?? date('Y-m');
         $params = [':month' => $targetMonth];
         
-        $sql = "SELECT * FROM transactions WHERE DATE_FORMAT(transaction_date, '%Y-%m') = :month";
+        // [修正 4] 動態產生 SQL 日期格式語法
+        $monthExpr = $this->getMonthSql('transaction_date');
+
+        $sql = "SELECT * FROM transactions WHERE $monthExpr = :month";
 
         if ($ledgerId) {
             $sql .= " AND ledger_id = :ledgerId";
@@ -247,9 +263,7 @@ class TransactionService {
         } catch (PDOException $e) { return []; }
     }
 
-    // 更新與刪除的邏輯通常依賴 ID，所以如果不改也沒關係，但加上 user_id 檢查是為了安全
     public function updateTransaction(int $userId, int $id, array $data): bool {
-        // ... (保持原樣，因為 id 是唯一的) ...
         $cleanCategory = $this->sanitizeCategory($data['category'] ?? 'Miscellaneous');
         $sql = "UPDATE transactions 
                 SET amount = :amount, category = :category, description = :description, type = :type, transaction_date = :transDate, currency = :currency

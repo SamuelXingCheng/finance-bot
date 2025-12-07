@@ -1,5 +1,4 @@
-// front-vue/vite.config.ts
-
+/// <reference types="vitest" />
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -30,5 +29,10 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
+  },
+  // 👇 新增這一段測試設定
+  test: {
+    environment: 'jsdom',
+    globals: true,
   }
 })

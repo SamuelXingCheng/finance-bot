@@ -5,16 +5,19 @@ require_once __DIR__ . '/Database.php';
 class LedgerService {
     private $pdo;
 
-    public function __construct() {
-        $this->pdo = Database::getInstance()->getConnection();
+    public function __construct($pdo = null) {
+        $this->pdo = $pdo ?? Database::getInstance()->getConnection();
     }
 
     public function createLedger(int $userId, string $name, string $type = 'shared'): int {
         try {
             $this->pdo->beginTransaction();
 
-            $stmt = $this->pdo->prepare("INSERT INTO ledgers (name, type, owner_id, created_at) VALUES (?, ?, ?, NOW())");
-            $stmt->execute([$name, $type, $userId]);
+            // [修正 1] 改用 PHP 產生時間，取代 SQL 的 NOW()
+            $createdAt = date('Y-m-d H:i:s');
+
+            $stmt = $this->pdo->prepare("INSERT INTO ledgers (name, type, owner_id, created_at) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$name, $type, $userId, $createdAt]);
             $ledgerId = (int)$this->pdo->lastInsertId();
 
             $stmtMember = $this->pdo->prepare("INSERT INTO ledger_members (ledger_id, user_id, role) VALUES (?, ?, 'admin')");
@@ -64,8 +67,11 @@ class LedgerService {
             return true;
         }
 
-        $stmt = $this->pdo->prepare("INSERT INTO ledger_members (ledger_id, user_id, role, joined_at) VALUES (?, ?, ?, NOW())");
-        return $stmt->execute([$ledgerId, $userId, $role]);
+        // [修正 2] 改用 PHP 產生時間
+        $joinedAt = date('Y-m-d H:i:s');
+
+        $stmt = $this->pdo->prepare("INSERT INTO ledger_members (ledger_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)");
+        return $stmt->execute([$ledgerId, $userId, $role, $joinedAt]);
     }
 
     public function checkAccess(int $userId, int $ledgerId): bool {
