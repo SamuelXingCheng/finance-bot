@@ -162,7 +162,7 @@ class AssetService {
             
             // ... (原本的資料處理邏輯，直接複製過來即可) ...
             if (empty($rows)) return ['labels' => [], 'data' => []];
-            $rateService = new ExchangeRateService();
+            $rateService = new ExchangeRateService($this->pdo);
             $usdTwdRate = $rateService->getUsdTwdRate();
             $historyByDate = [];
             $firstDateInData = null;
@@ -206,7 +206,7 @@ class AssetService {
     }
     
     public function getNetWorthSummary(int $userId, ?int $ledgerId = null): array {
-        $rateService = new ExchangeRateService(); 
+        $rateService = new ExchangeRateService($this->pdo);
         
         // [修正] SQL 加入 ledger_id 判斷
         $sql = "SELECT type, currency_unit, SUM(balance) as total 

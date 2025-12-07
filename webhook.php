@@ -33,7 +33,7 @@ try {
     $lineService = new LineService(); 
     $transactionService = new TransactionService(); 
     $assetService = new AssetService(); 
-    $rateService = new ExchangeRateService();
+    $rateService = new ExchangeRateService($dbConn);
 
     // ----------------------------------------------------
     // 4. 接收與驗證 LINE 傳送的資料 

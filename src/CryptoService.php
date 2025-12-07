@@ -9,7 +9,7 @@ class CryptoService {
 
     public function __construct() {
         $this->pdo = Database::getInstance()->getConnection();
-        $this->rateService = new ExchangeRateService();
+        $rateService = new ExchangeRateService($this->pdo);
     }
 
     /**
