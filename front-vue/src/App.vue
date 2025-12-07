@@ -136,7 +136,7 @@ onMounted(async () => {
     if (targetTab && ['Dashboard', 'Accounts', 'Crypto'].includes(targetTab)) {
         currentTab.value = targetTab;
     }
-    
+
     if (!liff) {
         liffState.error = 'LIFF SDK 未載入';
         isLoading.value = false;
@@ -178,16 +178,14 @@ onMounted(async () => {
 });
 </script>
 
-<style scoped>
+<style>
 /* =========================================
-   ★★★ 全域 Box-Sizing ★★★
-   解決「padding 把版面撐大導致右邊被切掉」的問題
+   ★★★ 全域設定 (無 Scoped) ★★★
    ========================================= */
 * {
   box-sizing: border-box;
 }
 
-/* --- 全域變數 --- */
 :root {
   --bg-nav: #ffffff;
   --text-primary: #5A483C;
@@ -196,19 +194,29 @@ onMounted(async () => {
   --bg-main: #f9f7f2;
 }
 
-/* --- 版面基礎設定 --- */
-.app-layout { 
-  display: flex; 
-  flex-direction: column; 
-  min-height: 100vh; 
-  min-height: 100dvh; /* 解決 Chrome 網址列跳動 */
-  width: 100%; 
-  overflow-x: hidden; 
+/* 🌟 強制解除父層 overflow 限制，讓 sticky 生效 */
+.app-layout, 
+.main-content {
+  overflow: visible !important;
+  height: auto !important;
+}
+
+body {
+  overflow-y: auto;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: var(--bg-main);
 }
+</style>
+
+<style scoped>
+/* =========================================
+   ★★★ 組件樣式 (有 Scoped) ★★★
+   ========================================= */
 
 .onboarding-container, .loading-container {
   min-height: 100vh;
+  /* 支援手機瀏覽器動態高度 */
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -223,7 +231,7 @@ onMounted(async () => {
   box-shadow: 0 2px 10px rgba(0,0,0,0.03); 
   position: sticky; 
   top: 0; 
-  z-index: 100; 
+  z-index: 100; /* 層級設定正確 */
   height: 60px; 
   display: flex; 
   align-items: center; 
@@ -246,7 +254,7 @@ onMounted(async () => {
   gap: 6px; 
   font-size: 1.2rem; 
   font-weight: 700; 
-  color: #5A483C;
+  color: var(--text-primary);
   flex-shrink: 0; 
 }
 
@@ -265,7 +273,7 @@ onMounted(async () => {
   border: none; 
   padding: 6px 12px; 
   border-radius: 20px; 
-  color: #999; 
+  color: var(--text-secondary); 
   font-size: 0.85rem; 
   font-weight: 500; 
   cursor: pointer; 
@@ -274,7 +282,7 @@ onMounted(async () => {
 
 .nav-item.active { 
   background-color: #ffffff; 
-  color: #d4a373; 
+  color: var(--text-accent); 
   box-shadow: 0 2px 8px rgba(0,0,0,0.05); 
   font-weight: 600; 
 }
@@ -303,37 +311,27 @@ onMounted(async () => {
   padding: 20px 16px; 
 }
 
-/* --- 其他元件 --- */
+/* --- 其他元件 (聊天按鈕、錯誤訊息、Loading) --- */
 .fab-chat { position: fixed; bottom: 24px; right: 20px; background-color: #1DB446; color: white; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 20px; border-radius: 50px; box-shadow: 0 4px 12px rgba(29, 180, 70, 0.4); text-decoration: none; z-index: 999; transition: transform 0.2s, box-shadow 0.2s; }
 .fab-chat:active { transform: scale(0.95); }
+
 .error-banner { background-color: #ffeaea; color: #d67a7a; padding: 12px; text-align: center; font-size: 0.9rem; }
-.spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #d4a373; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
+
+.spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: var(--text-accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-container p { color: #5A483C; font-weight: 500; font-size: 0.95rem; }
+
+.loading-container p { color: var(--text-primary); font-weight: 500; font-size: 0.95rem; }
+
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
-/* =========================================
-   ★★★ 手機版優化區 ★★★ 
-   解決：1. Navbar 擠壓 2. 內容邊距
-   ========================================= */
+/* 手機版優化 */
 @media (max-width: 480px) {
-  /* 縮小 Navbar 邊距 */
   .nav-container { padding: 0 8px; }
-  
-  /* 縮小 Logo 字體，防止佔用太多空間 */
   .nav-brand { font-size: 1rem; gap: 4px; }
-  
-  /* 縮小按鈕內距，讓 3 個按鈕能排進中間 */
   .nav-item { padding: 5px 8px; font-size: 0.8rem; }
-  
-  /* 縮小按鈕群組間距 */
   .nav-links { gap: 2px; }
-  
-  /* 微調頭像大小 */
   .user-avatar { width: 32px; height: 32px; }
-  
-  /* 縮小內容區塊的左右 Padding，讓卡片更寬 */
   .main-content { padding: 16px 12px; }
 }
 </style>

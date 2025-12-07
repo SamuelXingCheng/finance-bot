@@ -759,73 +759,53 @@ onMounted(() => {
 
 <style scoped>
 /* 共用樣式 */
-.accounts-container { max-width: 100%; padding-bottom: 40px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.accounts-container { 
+  max-width: 100%; 
+  padding-bottom: 40px;
+  overflow: visible; /* 配合 sticky */
+}
+
+/* 🌟 標題列 Sticky 設定 */
+.page-header {
+  position: sticky;
+  top: 60px; /* 緊貼在 Navbar (60px) 下方 */
+  z-index: 10;
+  background-color: #f9f7f2;
+  
+  /* 修正左右邊距與陰影 */
+  margin: -20px -16px 20px -16px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+  border-bottom: 1px solid rgba(0,0,0,0.03);
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .title-group h2 { font-size: 1.2rem; color: var(--text-primary); margin: 0; }
 .subtitle { font-size: 0.85rem; color: var(--text-secondary); margin: 4px 0 0 0; }
-.add-btn { background-color: var(--color-primary); color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; transition: transform 0.1s; }
+
+.add-btn { 
+  background-color: var(--color-primary); 
+  color: white; 
+  border: none; 
+  padding: 8px 16px; 
+  border-radius: 20px; 
+  font-size: 0.9rem; 
+  cursor: pointer; 
+  transition: transform 0.1s; 
+}
 .add-btn:active { transform: scale(0.95); }
 
-/* 🌟 空白狀態樣式 (新增) */
-.empty-state-container {
-  display: flex;
-  justify-content: center;
-  padding: 20px;
-  margin-top: 20px;
-  animation: fadeIn 0.5s ease;
-}
-
-.empty-content {
-  background: #fff;
-  border-radius: 20px;
-  padding: 40px 24px;
-  text-align: center;
-  box-shadow: var(--shadow-soft, 0 4px 12px rgba(0,0,0,0.05));
-  max-width: 340px;
-  width: 100%;
-  border: 1px solid #f0ebe5;
-}
-
-.illustration {
-  font-size: 4rem;
-  margin-bottom: 16px;
-  animation: float 3s ease-in-out infinite;
-}
-
-.description {
-  color: #666;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  margin-bottom: 24px;
-}
-
-.benefit-list {
-  text-align: left;
-  list-style: none;
-  padding: 0;
-  margin: 0 0 30px 20px;
-  font-size: 0.9rem;
-  color: #555;
-}
+/* 空白狀態 */
+.empty-state-container { display: flex; justify-content: center; padding: 20px; margin-top: 20px; animation: fadeIn 0.5s ease; }
+.empty-content { background: #fff; border-radius: 20px; padding: 40px 24px; text-align: center; box-shadow: var(--shadow-soft, 0 4px 12px rgba(0,0,0,0.05)); max-width: 340px; width: 100%; border: 1px solid #f0ebe5; }
+.illustration { font-size: 4rem; margin-bottom: 16px; animation: float 3s ease-in-out infinite; }
+.description { color: #666; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px; }
+.benefit-list { text-align: left; list-style: none; padding: 0; margin: 0 0 30px 20px; font-size: 0.9rem; color: #555; }
 .benefit-list li { margin-bottom: 8px; }
-
-.btn-primary-large {
-  background: linear-gradient(135deg, #d4a373 0%, #b08d65 100%);
-  color: white;
-  border: none;
-  padding: 14px 28px;
-  border-radius: 50px;
-  font-size: 1rem;
-  font-weight: bold;
-  box-shadow: 0 4px 15px rgba(212, 163, 115, 0.4);
-  cursor: pointer;
-  width: 100%;
-  transition: transform 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
+.btn-primary-large { background: linear-gradient(135deg, #d4a373 0%, #b08d65 100%); color: white; border: none; padding: 14px 28px; border-radius: 50px; font-size: 1rem; font-weight: bold; box-shadow: 0 4px 15px rgba(212, 163, 115, 0.4); cursor: pointer; width: 100%; transition: transform 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-primary-large:active { transform: scale(0.96); }
 
 /* AI 區塊 */
@@ -836,7 +816,7 @@ onMounted(() => {
 .ai-btn { width: 100%; padding: 8px; border: 1px solid #d4a373; color: #d4a373; background: white; border-radius: 8px; cursor: pointer; font-weight: bold; }
 .ai-loading { text-align: center; color: #999; font-size: 0.85rem; }
 
-/* 圖表容器 */
+/* 圖表 */
 .charts-wrapper { display: grid; grid-template-columns: 1fr; gap: 16px; }
 @media (min-width: 600px) { .charts-wrapper { grid-template-columns: 1fr 1fr; } }
 .chart-card { background: white; padding: 16px; border-radius: 16px; border: 1px solid #f0ebe5; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; align-items: center; min-width: 0;}
@@ -847,11 +827,9 @@ onMounted(() => {
 .dot.cash { background: #A8DADC; } .dot.invest { background: #457B9D; }
 .dot.tw-stock { background: #E9C46A; } .dot.us-stock { background: #264653; }
 .dot.stock { background: #F4A261; } .dot.bond { background: #2A9D8F; }
-
 .chart-hint-sm { font-size: 0.75rem; color: #aaa; text-align: center; margin-top: 8px; }
 .filter-btn-sm { background: transparent; border: 1px solid #d4a373; color: #d4a373; border-radius: 12px; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; margin-left: 4px; transition: all 0.2s; }
 .filter-btn-sm:hover, .filter-btn-sm.active { background: #d4a373; color: white; }
-
 .ml-2 { margin-left: 8px; }
 .wide-card { grid-column: 1 / -1; display: block; }
 .chart-header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
@@ -889,7 +867,7 @@ onMounted(() => {
 .text-btn.view-history { color: var(--text-secondary); text-decoration: underline; background: none; border: none; padding: 2px 4px; cursor: pointer; font-size: 0.85rem; }
 .text-btn.view-history:hover { color: var(--color-primary); opacity: 1; }
 
-/* Modal 與其餘樣式保持不變 */
+/* Modal 與其餘樣式 */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; justify-content: center; align-items: center; padding: 20px; }
 .modal-content { background: white; width: 100%; max-width: 400px; border-radius: 16px; padding: 24px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); animation: slideUp 0.3s ease-out; box-sizing: border-box; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -927,5 +905,18 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
 @media (max-width: 480px) {
     .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
     .date-controls { width: 100%; justify-content: space-between; }
+}
+</style>
+
+<style>
+/* 強制解除父層的 overflow 限制，讓 sticky 生效 */
+.app-layout, 
+.main-content {
+  overflow: visible !important;
+  height: auto !important;
+}
+
+body {
+  overflow-y: auto;
 }
 </style>
