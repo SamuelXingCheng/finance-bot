@@ -37,6 +37,12 @@
                 <span v-if="currentLedger?.id === ledger.id" class="check">✓</span>
               </div>
               <div class="dropdown-divider"></div>
+              
+              <div class="dropdown-item invite-action" @click="handleInviteMember">
+                <span class="item-icon">🔗</span>
+                <span class="item-name">邀請成員</span>
+              </div>
+
               <div class="dropdown-item create-action" @click="createNewLedger">
                 <span class="item-icon">+</span>
                 <span class="item-name">建立新帳本</span>
@@ -95,7 +101,7 @@ const currentViewRef = ref(null);
 const isLoading = ref(true); 
 const isOnboarded = ref(false); 
 
-// [新增] 帳本相關狀態
+// 帳本相關狀態
 const ledgers = ref([]);
 const currentLedger = ref(null);
 const showLedgerMenu = ref(false);
@@ -113,7 +119,7 @@ const handleRefreshDashboard = () => {
     }
 };
 
-// --- [新增] 帳本操作邏輯 ---
+// --- 帳本操作邏輯 ---
 
 function toggleLedgerMenu() {
   showLedgerMenu.value = !showLedgerMenu.value;
@@ -137,12 +143,10 @@ async function fetchLedgers() {
 function switchLedger(ledger) {
   currentLedger.value = ledger;
   showLedgerMenu.value = false;
-  // 切換後自動刷新當前頁面數據
   handleRefreshDashboard();
 }
 
 async function createNewLedger() {
-  // 使用 prompt 簡單輸入，避免過度修改 UI
   const name = prompt("請輸入新帳本名稱 (例如：甜蜜的家、公司報帳)：");
   if (!name) return;
   
@@ -155,8 +159,7 @@ async function createNewLedger() {
     const result = await response.json();
     if (result.status === 'success') {
       alert("建立成功！");
-      await fetchLedgers(); // 重新撈取列表
-      // 自動切換到新帳本
+      await fetchLedgers(); 
       const newLedger = ledgers.value.find(l => l.id == result.data.id);
       if (newLedger) switchLedger(newLedger);
     } else {
@@ -168,13 +171,98 @@ async function createNewLedger() {
   }
 }
 
-async function joinLedger(inviteCode) {
-    // 這裡實作加入帳本的 API 呼叫 (目前後端尚未實作 join_ledger action，這是一個預留位置)
-    // 暫時先提示用戶
-    alert(`收到邀請碼：${inviteCode} (加入功能即將上線)`);
-    // 未來實作：
-    // await fetchWithLiffToken(`${API_URL}?action=join_ledger`, ...);
-    // await fetchLedgers();
+// [新增] 邀請成員加入
+async function handleInviteMember() {
+  if (!currentLedger.value) return;
+  
+  if (currentLedger.value.type === 'personal') {
+      alert("個人帳本無法邀請成員，請先建立或切換至家庭/共用帳本。");
+      return;
+  }
+
+  showLedgerMenu.value = false;
+
+  try {
+    // 呼叫後端產生連結
+    const response = await fetchWithLiffToken(`${API_URL}?action=generate_invite_link&ledger_id=${currentLedger.value.id}`, {
+        method: 'POST'
+    });
+    
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+        const inviteUrl = result.data.invite_url;
+        
+        // 準備 Flex Message
+        const flexMessage = {
+            type: "flex",
+            altText: "邀請您加入共用帳本",
+            contents: {
+                type: "bubble",
+                body: {
+                    type: "box", layout: "vertical", spacing: "md",
+                    contents: [
+                        { type: "text", text: "共用帳本邀請", weight: "bold", size: "xl", color: "#d4a373" },
+                        { type: "text", text: `邀請您加入「${currentLedger.value.name}」一起記帳。`, wrap: true, color: "#666666" },
+                        { type: "separator" },
+                        { type: "text", text: "連結有效期限：24小時", size: "xs", color: "#aaaaaa" }
+                    ]
+                },
+                footer: {
+                    type: "box", layout: "vertical",
+                    contents: [
+                        {
+                            type: "button", style: "primary", color: "#d4a373",
+                            action: { type: "uri", label: "立即加入", uri: inviteUrl }
+                        }
+                    ]
+                }
+            }
+        };
+
+        // 使用 LIFF ShareTargetPicker 發送
+        if (liff.isApiAvailable('shareTargetPicker')) {
+            const res = await liff.shareTargetPicker([flexMessage]);
+            if (res) {
+                alert("邀請已發送！");
+            }
+        } else {
+            // 如果不支援 (例如電腦版)，改用複製連結
+            prompt("請複製以下連結傳給好友：", inviteUrl);
+        }
+    } else {
+        alert("產生邀請失敗：" + result.message);
+    }
+  } catch (e) {
+    console.error(e);
+    alert("連線錯誤");
+  }
+}
+
+// [新增] 加入帳本
+async function joinLedger(token) {
+    isLoading.value = true;
+    try {
+        const response = await fetchWithLiffToken(`${API_URL}?action=join_ledger`, {
+            method: 'POST',
+            body: JSON.stringify({ token: token })
+        });
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            alert(`🎉 成功加入帳本：${result.data.ledger_name}`);
+            await fetchLedgers();
+            // 重整頁面以確保資料同步
+            window.location.href = window.location.pathname; 
+        } else {
+            alert(`加入失敗：${result.message}`);
+        }
+    } catch (e) {
+        console.error(e);
+        alert("加入過程發生錯誤");
+    } finally {
+        isLoading.value = false;
+    }
 }
 
 // --- 引導與登入邏輯 ---
@@ -201,16 +289,16 @@ async function processPendingOnboarding() {
       if (response && response.ok) {
         isOnboarded.value = true; 
         
-        // 檢查是否有暫存的邀請碼並執行加入
-        const savedInviteCode = localStorage.getItem('pending_invite_code');
-        if (savedInviteCode) {
-            await joinLedger(savedInviteCode);
-            localStorage.removeItem('pending_invite_code');
+        // 檢查是否有暫存的加入 Token (原 inviteCode 邏輯保留向下相容，但這裡主要處理 token)
+        const pendingToken = localStorage.getItem('pending_join_token');
+        if (pendingToken) {
+            localStorage.removeItem('pending_join_token');
+            await joinLedger(pendingToken);
         } else {
             alert('歡迎加入！已成功開通。');
         }
 
-        await fetchLedgers(); // 載入帳本
+        await fetchLedgers(); 
         handleRefreshDashboard();
       }
     } catch (e) {
@@ -222,18 +310,22 @@ async function processPendingOnboarding() {
 }
 
 onMounted(async () => {
-    // 1. 檢查網址參數 (分頁 & 邀請碼)
+    // 1. 檢查網址參數
     const urlParams = new URLSearchParams(window.location.search);
     const targetTab = urlParams.get('tab');
     if (targetTab && ['Dashboard', 'Accounts', 'Crypto'].includes(targetTab)) {
         currentTab.value = targetTab;
     }
 
+    // [新增] 偵測邀請連結參數
     const inviteAction = urlParams.get('action');
-    const inviteCode = urlParams.get('code');
-    if (inviteAction === 'join_ledger' && inviteCode) {
-        localStorage.setItem('pending_invite_code', inviteCode);
-        console.log("已暫存邀請碼");
+    const inviteToken = urlParams.get('token'); 
+    
+    if (inviteAction === 'join_ledger' && inviteToken) {
+        // 先暫存，因為接下來可能會跳轉去 LINE Login
+        localStorage.setItem('pending_join_token', inviteToken);
+        // 清除網址參數，避免重新整理重複觸發
+        window.history.replaceState({}, document.title, window.location.pathname);
     }
 
     if (!liff) {
@@ -259,6 +351,13 @@ onMounted(async () => {
                     }
                 }
                 
+                // 處理暫存的加入請求
+                const pendingToken = localStorage.getItem('pending_join_token');
+                if (pendingToken) {
+                    localStorage.removeItem('pending_join_token');
+                    await joinLedger(pendingToken);
+                }
+
                 // 獲取帳本列表
                 if (isOnboarded.value) {
                     await fetchLedgers();
@@ -285,23 +384,20 @@ onMounted(async () => {
 .navbar { background-color: var(--bg-nav); box-shadow: 0 2px 10px rgba(0,0,0,0.03); position: sticky; top: 0; z-index: 100; height: 60px; display: flex; align-items: center; width: 100%; }
 .nav-container { width: 100%; max-width: 800px; margin: 0 auto; padding: 0 16px; display: flex; justify-content: space-between; align-items: center; }
 
-/* [修改] 品牌區塊 flex 排版 */
 .nav-brand-wrapper { 
   position: relative; 
   display: flex; 
   align-items: center; 
-  gap: 6px; /* 元素間距 */
+  gap: 6px; 
 }
 
-/* [新增] FinBot Logo 樣式 */
 .brand-logo {
   font-weight: 800;
   font-size: 1.1rem;
-  color: #d4a373; /* 品牌主色 */
+  color: #d4a373; 
   letter-spacing: 0.5px;
 }
 
-/* [新增] 分隔線樣式 */
 .brand-divider {
   color: #e0e0e0;
   font-size: 1rem;
@@ -313,12 +409,11 @@ onMounted(async () => {
   background: none; border: none; padding: 0;
   display: flex; align-items: center; gap: 4px;
   cursor: pointer; color: var(--text-primary);
-  font-size: 1rem; font-weight: 600; /* 稍微縮小一點帳本字體，凸顯階層 */
+  font-size: 1rem; font-weight: 600; 
 }
 .ledger-name { max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .arrow { font-size: 0.7rem; color: #aaa; margin-top: 2px; }
 
-/* [新增] 下拉選單樣式 */
 .ledger-dropdown {
   position: absolute; top: 100%; left: 0;
   background: white; border: 1px solid #eee;
@@ -339,6 +434,11 @@ onMounted(async () => {
 .dropdown-item.active .ledger-type-tag { background: #d4a373; color: white; }
 .dropdown-divider { height: 1px; background: #eee; margin: 4px 0; }
 .create-action { color: #d4a373; font-weight: 600; }
+
+/* [新增] 邀請動作樣式 */
+.invite-action { color: #2A9D8F; font-weight: 600; }
+.invite-action:hover { background-color: #e6fcf5; }
+
 .check { margin-left: auto; color: #d4a373; }
 .dropdown-backdrop {
   position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -366,6 +466,6 @@ onMounted(async () => {
   .nav-links { gap: 2px; }
   .user-avatar { width: 32px; height: 32px; }
   .main-content { padding: 16px 12px; }
-  .brand-logo { font-size: 1rem; } /* 手機版字體微調 */
+  .brand-logo { font-size: 1rem; } 
 }
 </style>

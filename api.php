@@ -302,7 +302,55 @@ try {
             $list = $transactionService->getTransactions($dbUserId, $month, $targetLedgerId);
             $response = ['status' => 'success', 'data' => $list];
             break;
-
+        
+        case 'generate_invite_link':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            // 前端需在 URL 帶上 ?ledger_id=XXX
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+            
+            if (!$targetLedgerId) {
+                $response = ['status' => 'error', 'message' => '未指定帳本'];
+                break;
+            }
+    
+            try {
+                $token = $ledgerService->createInvitation($dbUserId, $targetLedgerId);
+                
+                // 組合 LIFF 連結，這裡假設你的 LIFF URL 是透過 .env 設定的
+                // 格式：https://liff.line.me/{LIFF_ID}?action=join_ledger&token={TOKEN}
+                $liffBase = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://liff.line.me/YOUR_LIFF_ID';
+                // 確保 LIFF URL 乾淨
+                $liffBase = strtok($liffBase, '?'); 
+                
+                $inviteUrl = "{$liffBase}?action=join_ledger&token={$token}";
+                
+                $response = ['status' => 'success', 'data' => ['invite_url' => $inviteUrl]];
+            } catch (Exception $e) {
+                $response = ['status' => 'error', 'message' => $e->getMessage()];
+            }
+            break;
+    
+        case 'join_ledger':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $token = $input['token'] ?? '';
+    
+            if (empty($token)) {
+                $response = ['status' => 'error', 'message' => '缺少邀請碼'];
+                break;
+            }
+    
+            try {
+                $ledgerName = $ledgerService->processInvitation($dbUserId, $token);
+                $response = [
+                    'status' => 'success', 
+                    'message' => "成功加入帳本", 
+                    'data' => ['ledger_name' => $ledgerName]
+                ];
+            } catch (Exception $e) {
+                $response = ['status' => 'error', 'message' => $e->getMessage()];
+            }
+            break;
         case 'delete_transaction':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
                 http_response_code(405); break;

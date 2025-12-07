@@ -79,5 +79,70 @@ class LedgerService {
         $stmt->execute([$userId, $ledgerId]);
         return (bool)$stmt->fetchColumn();
     }
+    /**
+     * 產生邀請 Token
+     */
+    public function createInvitation(int $inviterId, int $ledgerId): string {
+        // 1. 確認邀請人是否有權限 (必須是該帳本成員)
+        if (!$this->checkAccess($inviterId, $ledgerId)) {
+            throw new Exception("您沒有權限邀請成員加入此帳本");
+        }
+
+        // 2. 產生亂數 Token
+        $token = bin2hex(random_bytes(16)); // 32 chars
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+24 hours')); // 24小時後過期
+
+        // 3. 寫入資料庫
+        $sql = "INSERT INTO ledger_invitations (ledger_id, inviter_id, token, expires_at) VALUES (?, ?, ?, ?)";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$ledgerId, $inviterId, $token, $expiresAt]);
+
+        return $token;
+    }
+
+    /**
+     * 處理邀請：驗證 Token 並將使用者加入帳本
+     * 回傳：加入的帳本名稱
+     */
+    public function processInvitation(int $userId, string $token): string {
+        // 1. 查詢 Token 是否有效
+        $sql = "SELECT i.*, l.name as ledger_name 
+                FROM ledger_invitations i
+                JOIN ledgers l ON i.ledger_id = l.id
+                WHERE i.token = ? AND i.status = 'pending' AND i.expires_at > NOW()";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$token]);
+        $invite = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$invite) {
+            throw new Exception("邀請連結無效或已過期");
+        }
+
+        $ledgerId = $invite['ledger_id'];
+
+        // 2. 檢查使用者是否已經在帳本內
+        if ($this->checkAccess($userId, $ledgerId)) {
+            return $invite['ledger_name']; // 已經在裡面了，直接回傳成功
+        }
+
+        try {
+            $this->pdo->beginTransaction();
+
+            // 3. 加入成員
+            $this->joinLedger($userId, $ledgerId, 'editor');
+
+            // 4. (可選) 標記 Token 為已使用 
+            // 如果你希望一個連結可以多人使用，這行註解掉；如果是一次性連結，請保留。
+            // $upd = $this->pdo->prepare("UPDATE ledger_invitations SET status = 'used' WHERE id = ?");
+            // $upd->execute([$invite['id']]);
+
+            $this->pdo->commit();
+            return $invite['ledger_name'];
+
+        } catch (Exception $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
 }
 ?>
