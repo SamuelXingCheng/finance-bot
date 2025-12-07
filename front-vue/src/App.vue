@@ -17,9 +17,13 @@
     <div v-else class="authenticated-view">
       <nav class="navbar">
         <div class="nav-container">
+          
           <div class="nav-brand-wrapper">
+            <div class="brand-logo">FinBot</div>
+            <div class="brand-divider">/</div>
+            
             <button class="ledger-switch-btn" @click="toggleLedgerMenu">
-              <span class="ledger-name">{{ currentLedger?.name || 'FinBot' }}</span>
+              <span class="ledger-name">{{ currentLedger?.name || '我的帳本' }}</span>
               <span class="arrow">▼</span>
             </button>
 
@@ -44,7 +48,7 @@
           <div class="nav-links">
             <button @click="currentTab = 'Dashboard'" :class="['nav-item', currentTab === 'Dashboard' ? 'active' : '']">收支</button>
             <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
-            <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto(開發中)</button>
+            <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto</button>
           </div>
           <div class="nav-user">
             <img v-if="liffState.profile?.pictureUrl" :src="liffState.profile.pictureUrl" class="user-avatar" />
@@ -281,15 +285,37 @@ onMounted(async () => {
 .navbar { background-color: var(--bg-nav); box-shadow: 0 2px 10px rgba(0,0,0,0.03); position: sticky; top: 0; z-index: 100; height: 60px; display: flex; align-items: center; width: 100%; }
 .nav-container { width: 100%; max-width: 800px; margin: 0 auto; padding: 0 16px; display: flex; justify-content: space-between; align-items: center; }
 
-/* [新增] 帳本切換按鈕樣式 */
-.nav-brand-wrapper { position: relative; }
+/* [修改] 品牌區塊 flex 排版 */
+.nav-brand-wrapper { 
+  position: relative; 
+  display: flex; 
+  align-items: center; 
+  gap: 6px; /* 元素間距 */
+}
+
+/* [新增] FinBot Logo 樣式 */
+.brand-logo {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: #d4a373; /* 品牌主色 */
+  letter-spacing: 0.5px;
+}
+
+/* [新增] 分隔線樣式 */
+.brand-divider {
+  color: #e0e0e0;
+  font-size: 1rem;
+  font-weight: 300;
+  margin-top: -2px;
+}
+
 .ledger-switch-btn {
   background: none; border: none; padding: 0;
   display: flex; align-items: center; gap: 4px;
   cursor: pointer; color: var(--text-primary);
-  font-size: 1.1rem; font-weight: 700;
+  font-size: 1rem; font-weight: 600; /* 稍微縮小一點帳本字體，凸顯階層 */
 }
-.ledger-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ledger-name { max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .arrow { font-size: 0.7rem; color: #aaa; margin-top: 2px; }
 
 /* [新增] 下拉選單樣式 */
@@ -335,10 +361,11 @@ onMounted(async () => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 @media (max-width: 480px) {
   .nav-container { padding: 0 8px; }
-  .ledger-switch-btn { font-size: 1rem; }
+  .ledger-switch-btn { font-size: 0.9rem; }
   .nav-item { padding: 5px 8px; font-size: 0.8rem; }
   .nav-links { gap: 2px; }
   .user-avatar { width: 32px; height: 32px; }
   .main-content { padding: 16px 12px; }
+  .brand-logo { font-size: 1rem; } /* 手機版字體微調 */
 }
 </style>
