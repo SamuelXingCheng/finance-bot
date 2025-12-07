@@ -649,6 +649,36 @@ try {
                 ]
             ];
             break;
+        
+        case 'save_account':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            $name = trim($input['name'] ?? '');
+            $type = $input['type'] ?? 'Cash';
+            $balance = (float)($input['balance'] ?? 0);
+            $currency = $input['currency'] ?? 'TWD';
+            $date = $input['date'] ?? date('Y-m-d'); 
+            $ledgerId = isset($input['ledger_id']) ? (int)$input['ledger_id'] : null;
+            
+            // 🟢 [新增] 接收 custom_rate
+            $customRate = isset($input['custom_rate']) && $input['custom_rate'] !== '' ? (float)$input['custom_rate'] : null;
+
+            if (empty($name)) {
+                $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
+                break;
+            }
+
+            // 🟢 [修改] 傳入 customRate
+            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date, $ledgerId, $customRate);
+
+            if ($success) {
+                $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
+            } else {
+                $response = ['status' => 'error', 'message' => '儲存失敗'];
+            }
+            break;
+
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
             break;

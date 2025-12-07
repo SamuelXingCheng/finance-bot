@@ -259,6 +259,26 @@
             </div>
           </div>
 
+          <div class="form-group">
+            <label class="flex justify-between">
+              <span>{{ isCrypto(form.currency) ? '單價 (USD)' : '對美金匯率 (Rate to USD)' }}</span>
+              <span class="text-xs text-gray-400 font-normal">選填</span>
+            </label>
+            <input 
+              type="number" 
+              step="any" 
+              v-model.number="form.custom_rate" 
+              class="input-std" 
+              :placeholder="ratePlaceholder"
+            >
+            <p v-if="isPastDate" class="hint-warn">
+              ⚠️ 您選擇了過去的日期。若留空，系統將使用「今日」匯率，可能導致歷史價值失真。
+            </p>
+            <p v-else class="hint">
+              留空則自動抓取 CoinGecko/市場 當下參考匯率。
+            </p>
+          </div>
+
           <button type="submit" class="save-btn" :disabled="isSaving">
             {{ isSaving ? '儲存中...' : '儲存快照並更新' }}
           </button>
@@ -354,7 +374,8 @@ const form = ref({
     type: 'Cash', 
     balance: 0, 
     currency: 'TWD',
-    date: new Date().toISOString().substring(0, 10)
+    date: new Date().toISOString().substring(0, 10),
+    custom_rate: null // 🟢 新增
 });
 
 const currencySelectValue = ref('TWD');
@@ -393,6 +414,26 @@ const groupedAccounts = computed(() => {
         }
     });
     return result;
+});
+
+// 🟢 新增：輔助判斷函數
+function isCrypto(code) {
+    const commonCrypto = ['BTC', 'ETH', 'USDT', 'ADA', 'SOL', 'BNB', 'XRP', 'DOGE'];
+    return commonCrypto.includes(code?.toUpperCase());
+}
+
+// 🟢 新增：智慧提示 Computed Properties
+const isPastDate = computed(() => {
+    if (!form.value.date) return false;
+    const today = new Date().toISOString().substring(0, 10);
+    return form.value.date < today;
+});
+
+const ratePlaceholder = computed(() => {
+    if (isPastDate.value) {
+        return "建議手動輸入當時匯率";
+    }
+    return "Auto (依目前市價)";
 });
 
 // 導覽邏輯
@@ -551,11 +592,15 @@ async function fetchAIAnalysis() {
 }
 
 // 4. 修正儲存邏輯，確保寫入正確帳本
+// 🟢 修改：handleSave 傳送 custom_rate
 async function handleSave() {
   isSaving.value = true;
   
   // 準備 Payload
-  const payload = { ...form.value };
+  const payload = { 
+      ...form.value,
+      custom_rate: form.value.custom_rate // 🟢 確保傳送此欄位
+  };
   // [修正] 注入當前帳本 ID
   if (props.ledgerId) {
       payload.ledger_id = props.ledgerId;
@@ -630,18 +675,22 @@ function closeHistoryModal() {
     accountHistory.value = [];
 }
 
+// 🟢 修改：openModalForSnapshot (歷史紀錄編輯)
 function openModalForSnapshot(snapshotItem) {
     closeHistoryModal();
     const sourceAccount = accounts.value.find(acc => acc.name === snapshotItem.account_name);
     const accountType = sourceAccount ? sourceAccount.type : 'Cash';
+    
     isEditMode.value = true;
     form.value = { 
         name: snapshotItem.account_name, 
         type: accountType, 
         balance: parseFloat(snapshotItem.balance), 
         currency: snapshotItem.currency_unit,
-        date: snapshotItem.snapshot_date
+        date: snapshotItem.snapshot_date,
+        custom_rate: parseFloat(snapshotItem.exchange_rate) || null // 🟢 若歷史紀錄有匯率，帶入顯示
     };
+    
     const currencyToSet = snapshotItem.currency_unit;
     const knownCurrency = currencyList.find(c => c.code === currencyToSet);
     if (knownCurrency) {
@@ -686,6 +735,7 @@ function handleCurrencyChange() {
 function resetCurrency() { isCustomCurrency.value = false; currencySelectValue.value = 'TWD'; form.value.currency = 'TWD'; }
 function forceUppercase() { form.value.currency = form.value.currency.toUpperCase(); }
 
+// 🟢 修改：openModal 初始化 form
 function openModal(account = null) {
   if (!liff.isLoggedIn()) {
       liff.login({ redirectUri: window.location.href });
@@ -694,12 +744,26 @@ function openModal(account = null) {
   const today = new Date().toISOString().substring(0, 10);
   if (account) {
     isEditMode.value = true;
-    form.value = { name: account.name, type: account.type, balance: parseFloat(account.balance), currency: account.currency_unit, date: today };
+    form.value = { 
+        name: account.name, 
+        type: account.type, 
+        balance: parseFloat(account.balance), 
+        currency: account.currency_unit, 
+        date: today,
+        custom_rate: null // 🟢 編輯現有帳戶時，預設不填匯率
+    };
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
     if (knownCurrency) { currencySelectValue.value = account.currency_unit; isCustomCurrency.value = false; } else { currencySelectValue.value = 'CUSTOM'; isCustomCurrency.value = true; }
   } else {
     isEditMode.value = false;
-    form.value = { name: '', type: 'Cash', balance: 0, currency: 'TWD', date: today };
+    form.value = { 
+        name: '', 
+        type: 'Cash', 
+        balance: 0, 
+        currency: 'TWD', 
+        date: today,
+        custom_rate: null // 🟢 初始化
+    };
     resetCurrency(); 
   }
   isModalOpen.value = true;
@@ -922,6 +986,23 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
 .save-btn { width: 100%; padding: 12px; background: #d4a373; color: white; border: none; border-radius: 10px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 10px; }
 .save-btn:disabled { background: #e0d0c0; cursor: wait; }
 .hint { font-size: 0.75rem; color: #d67a7a; margin-top: 4px; }
+/* 🟢 新增樣式 */
+.hint-warn {
+    font-size: 0.75rem;
+    color: #e67e22; /* 橘色警告 */
+    margin-top: 4px;
+    background-color: #fff8f0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border-left: 3px solid #e67e22;
+}
+
+.flex { display: flex; }
+.justify-between { justify-content: space-between; }
+.text-xs { font-size: 0.75rem; }
+.text-gray-400 { color: #9ca3af; }
+.font-normal { font-weight: normal; }
+
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
