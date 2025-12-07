@@ -904,21 +904,20 @@ try {
 
                 // --- 2. 寫入資料庫佇列 ---
                 try {
-                    try {
-                        // 1. 查詢用戶當前鎖定的帳本 (Active Ledger)
-                        // 如果沒鎖定 (NULL)，之後 Service 會自動歸到個人預設帳本
-                        $currentLedgerId = $userService->getActiveLedgerId($dbUserId);
-    
-                        // 2. 寫入任務，多帶一個 ledger_id
-                        $stmt = $dbConn->prepare(
-                            "INSERT INTO gemini_tasks (line_user_id, ledger_id, user_text, status, created_at) 
-                             VALUES (:lineUserId, :ledgerId, :content, 'PENDING', NOW())"
-                        );
-                        $stmt->execute([
-                            ':lineUserId' => $lineUserId, 
-                            ':ledgerId'   => $currentLedgerId, // 傳入帳本 ID
-                            ':content'    => $taskContent
-                        ]);
+                    // 1. 查詢用戶當前鎖定的帳本 (Active Ledger)
+                    // 如果沒鎖定 (NULL)，之後 Service 會自動歸到個人預設帳本
+                    $currentLedgerId = $userService->getActiveLedgerId($dbUserId);
+
+                    // 2. 寫入任務，多帶一個 ledger_id
+                    $stmt = $dbConn->prepare(
+                        "INSERT INTO gemini_tasks (line_user_id, ledger_id, user_text, status, created_at) 
+                            VALUES (:lineUserId, :ledgerId, :content, 'PENDING', NOW())"
+                    );
+                    $stmt->execute([
+                        ':lineUserId' => $lineUserId, 
+                        ':ledgerId'   => $currentLedgerId, // 傳入帳本 ID
+                        ':content'    => $taskContent
+                    ]);
 
                     // --- 3. 根據類型給予回饋 ---
                     if ($taskType === 'audio') {
