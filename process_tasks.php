@@ -50,6 +50,7 @@ try {
     $lineUserId = $task['line_user_id'];
     $userText = $task['user_text'];
     $taskId = $task['id'];
+    $targetLedgerId = $task['ledger_id'] ?? null;
     
     // 標記為 PROCESSING
     $dbConn->prepare("UPDATE gemini_tasks SET status = 'PROCESSING', processed_at = NOW() WHERE id = :id")
@@ -85,14 +86,18 @@ try {
         $successCount = 0;
         
         foreach ($resultData as $transaction) {
-            
-            // 嚴格檢查：確保是陣列且包含關鍵欄位 (Amount, Category)
             if (is_array($transaction) && isset($transaction['amount']) && isset($transaction['category'])) {
                 
+                // [新增] 將 ledger_id 注入到交易資料中
+                if ($targetLedgerId) {
+                    $transaction['ledger_id'] = $targetLedgerId;
+                }
+
+                // 呼叫 addTransaction (它現在會讀取 $transaction['ledger_id'])
                 if ($transactionService->addTransaction($dbUserId, $transaction)) {
                     $successCount++;
                 } else {
-                    error_log("Failed to add transaction for user {$dbUserId}. Data: " . json_encode($transaction, JSON_UNESCAPED_UNICODE));
+                    error_log("Failed to add transaction...");
                 }
             }
         }

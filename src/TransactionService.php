@@ -1,6 +1,7 @@
 <?php
 // src/TransactionService.php
 require_once __DIR__ . '/Database.php';
+require_once __DIR__ . '/LedgerService.php';
 
 class TransactionService {
     private $pdo;
@@ -29,18 +30,32 @@ class TransactionService {
             return false;
         }
 
+        $ledgerService = new LedgerService();
+        $ledgerId = 0;
+
+        // 決定寫入哪個帳本
+        if (isset($data['ledger_id']) && !empty($data['ledger_id'])) {
+            $ledgerId = (int)$data['ledger_id'];
+            if (!$ledgerService->checkAccess($userId, $ledgerId)) {
+                return false; // 無權限
+            }
+        } else {
+            $ledgerId = $ledgerService->ensurePersonalLedgerExists($userId);
+        }
+
         $cleanCategory = $this->sanitizeCategory($data['category'] ?? 'Miscellaneous');
         $transDate = $data['date'] ?? date('Y-m-d'); 
         $currency = $data['currency'] ?? 'TWD';
         $description = $data['description'] ?? '未分類';
         
-        $sql = "INSERT INTO transactions (user_id, amount, category, description, type, transaction_date, currency, created_at) 
-                VALUES (:userId, :amount, :category, :description, :type, :transDate, :currency, NOW())";
+        $sql = "INSERT INTO transactions (user_id, ledger_id, amount, category, description, type, transaction_date, currency, created_at) 
+                VALUES (:userId, :ledgerId, :amount, :category, :description, :type, :transDate, :currency, NOW())";
 
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([
                 ':userId'      => $userId,
+                ':ledgerId'    => $ledgerId,
                 ':amount'      => (float)$data['amount'],
                 ':category'    => $cleanCategory,
                 ':description' => $description,
@@ -54,44 +69,76 @@ class TransactionService {
         }
     }
 
-    public function getTotalExpenseByMonth(int $userId): float {
+    // [修改] 增加 ledgerId 參數
+    public function getTotalExpenseByMonth(int $userId, ?int $ledgerId = null): float {
         $startOfMonth = date('Y-m-01');
-        $sql = "SELECT SUM(amount) FROM transactions WHERE user_id = :userId AND type = 'expense' AND transaction_date >= :startOfMonth";
+        $params = [':startOfMonth' => $startOfMonth];
+        
+        $sql = "SELECT SUM(amount) FROM transactions WHERE type = 'expense' AND transaction_date >= :startOfMonth";
+        
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            $sql .= " AND user_id = :userId";
+            $params[':userId'] = $userId;
+        }
+
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':startOfMonth' => $startOfMonth]);
+            $stmt->execute($params);
             return (float) ($stmt->fetchColumn() ?? 0);
-        } catch (PDOException $e) {
-            return 0.0;
-        }
+        } catch (PDOException $e) { return 0.0; }
     }
 
-    public function getTotalIncomeByMonth(int $userId): float {
+    // [修改] 增加 ledgerId 參數
+    public function getTotalIncomeByMonth(int $userId, ?int $ledgerId = null): float {
         $startOfMonth = date('Y-m-01');
-        $sql = "SELECT SUM(amount) FROM transactions WHERE user_id = :userId AND type = 'income' AND transaction_date >= :startOfMonth";
+        $params = [':startOfMonth' => $startOfMonth];
+
+        $sql = "SELECT SUM(amount) FROM transactions WHERE type = 'income' AND transaction_date >= :startOfMonth";
+        
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            $sql .= " AND user_id = :userId";
+            $params[':userId'] = $userId;
+        }
+
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':startOfMonth' => $startOfMonth]);
+            $stmt->execute($params);
             return (float) ($stmt->fetchColumn() ?? 0);
-        } catch (PDOException $e) {
-            return 0.0;
-        }
+        } catch (PDOException $e) { return 0.0; }
     }
 
-    public function getMonthlyBreakdown(int $userId, string $type): array {
+    // [修改] 增加 ledgerId 參數
+    public function getMonthlyBreakdown(int $userId, string $type, ?int $ledgerId = null): array {
         $startOfMonth = date('Y-m-01');
-        $sql = "SELECT category, SUM(amount) as total FROM transactions WHERE user_id = :userId AND type = :type AND transaction_date >= :startOfMonth GROUP BY category ORDER BY total DESC";
+        $params = [':type' => $type, ':startOfMonth' => $startOfMonth];
+
+        $sql = "SELECT category, SUM(amount) as total FROM transactions WHERE type = :type AND transaction_date >= :startOfMonth";
+        
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            $sql .= " AND user_id = :userId";
+            $params[':userId'] = $userId;
+        }
+        
+        $sql .= " GROUP BY category ORDER BY total DESC";
+
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':type' => $type, ':startOfMonth' => $startOfMonth]);
+            $stmt->execute($params);
             return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
         } catch (PDOException $e) { return []; }
     }
 
-    /**
-     * 🟢 舊方法：給「帳戶管理頁面」使用 (只分收入/支出)
-     */
-    public function getTrendData(int $userId, string $startDate, string $endDate): array {
+    // [修改] 增加 ledgerId 參數
+    public function getTrendData(int $userId, string $startDate, string $endDate, ?int $ledgerId = null): array {
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
         $end->modify('last day of this month'); 
@@ -103,14 +150,24 @@ class TransactionService {
             $data[$dt->format("Y-m")] = ['income' => 0, 'expense' => 0];
         }
 
+        $params = [':startDate' => $startDate, ':endDate' => $endDate];
         $sql = "SELECT DATE_FORMAT(transaction_date, '%Y-%m') as month, type, SUM(amount) as total 
                 FROM transactions 
-                WHERE user_id = :userId AND transaction_date BETWEEN :startDate AND :endDate
-                GROUP BY month, type ORDER BY month ASC";
+                WHERE transaction_date BETWEEN :startDate AND :endDate";
+
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            $sql .= " AND user_id = :userId";
+            $params[':userId'] = $userId;
+        }
+
+        $sql .= " GROUP BY month, type ORDER BY month ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':startDate' => $startDate, ':endDate' => $endDate]);
+            $stmt->execute($params);
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($results as $row) {
@@ -119,15 +176,11 @@ class TransactionService {
                 }
             }
             return $data; 
-        } catch (PDOException $e) {
-            return [];
-        }
+        } catch (PDOException $e) { return []; }
     }
 
-    /**
-     * 🌟 新方法：給「總覽頁面」使用 (依分類統計)
-     */
-    public function getCategoryTrendData(int $userId, string $startDate, string $endDate): array {
+    // [修改] 增加 ledgerId 參數
+    public function getCategoryTrendData(int $userId, string $startDate, string $endDate, ?int $ledgerId = null): array {
         $start = new DateTime($startDate);
         $end = new DateTime($endDate);
         $end->modify('last day of this month'); 
@@ -139,15 +192,24 @@ class TransactionService {
             $data[$dt->format("Y-m")] = [];
         }
 
+        $params = [':startDate' => $startDate, ':endDate' => $endDate];
         $sql = "SELECT DATE_FORMAT(transaction_date, '%Y-%m') as month, category, SUM(amount) as total 
                 FROM transactions 
-                WHERE user_id = :userId AND transaction_date BETWEEN :startDate AND :endDate
-                GROUP BY DATE_FORMAT(transaction_date, '%Y-%m'), category 
-                ORDER BY month ASC";
+                WHERE transaction_date BETWEEN :startDate AND :endDate";
+
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            $sql .= " AND user_id = :userId";
+            $params[':userId'] = $userId;
+        }
+
+        $sql .= " GROUP BY month, category ORDER BY month ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':startDate' => $startDate, ':endDate' => $endDate]);
+            $stmt->execute($params);
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($results as $row) {
@@ -158,10 +220,7 @@ class TransactionService {
                 }
             }
             return $data; 
-        } catch (PDOException $e) {
-            error_log("getCategoryTrendData Error: " . $e->getMessage());
-            return [];
-        }
+        } catch (PDOException $e) { return []; }
     }
 
     // ================================================================
@@ -171,20 +230,27 @@ class TransactionService {
     /**
      * 取得交易列表 (預設抓本月，可指定月份)
      */
-    public function getTransactions(int $userId, string $month = null): array {
+    public function getTransactions(int $userId, string $month = null, ?int $ledgerId = null): array {
         $targetMonth = $month ?? date('Y-m');
-        $sql = "SELECT * FROM transactions 
-                WHERE user_id = :userId 
-                  AND DATE_FORMAT(transaction_date, '%Y-%m') = :month
-                ORDER BY transaction_date DESC, created_at DESC";
+        $params = [':month' => $targetMonth];
+        
+        $sql = "SELECT * FROM transactions WHERE DATE_FORMAT(transaction_date, '%Y-%m') = :month";
+
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :ledgerId";
+            $params[':ledgerId'] = $ledgerId;
+        } else {
+            $sql .= " AND user_id = :userId";
+            $params[':userId'] = $userId;
+        }
+
+        $sql .= " ORDER BY transaction_date DESC, created_at DESC";
+
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([':userId' => $userId, ':month' => $targetMonth]);
+            $stmt->execute($params);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            error_log("getTransactions failed: " . $e->getMessage());
-            return [];
-        }
+        } catch (PDOException $e) { return []; }
     }
 
     /**

@@ -139,5 +139,20 @@ class UserService {
         $stmt = $this->pdo->prepare("UPDATE users SET is_premium = 1, premium_expire_date = ? WHERE id = ?");
         return $stmt->execute([$newExpire, $userId]);
     }
+
+    // [新增] 獲取用戶當前鎖定的帳本 ID
+    public function getActiveLedgerId(int $userId): ?int {
+        $stmt = $this->pdo->prepare("SELECT active_ledger_id FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $result = $stmt->fetchColumn();
+        return $result ? (int)$result : null;
+    }
+
+    // [新增] 設定用戶當前鎖定的帳本
+    public function setActiveLedgerId(int $userId, int $ledgerId): bool {
+        $stmt = $this->pdo->prepare("UPDATE users SET active_ledger_id = ? WHERE id = ?");
+        return $stmt->execute([$ledgerId, $userId]);
+    }
+    
 }
 ?>
