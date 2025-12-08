@@ -497,8 +497,8 @@ watch(() => props.ledgerId, (newVal) => {
 
 async function fetchAccounts() {
   // 切換時先顯示 Loading，避免混淆
-  loading.value = true;
-  accounts.value = []; // 清空舊資料
+//   loading.value = true;
+//   accounts.value = []; // 清空舊資料
 
   try {
     // 修正：帶上 ledger_id

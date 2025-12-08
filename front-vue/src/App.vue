@@ -63,7 +63,7 @@
       </nav>
 
       <main class="main-content">
-        <transition name="fade" mode="out-in">
+        <transition name="fade">
           <component 
             :is="currentView" 
             ref="currentViewRef" 

@@ -42,24 +42,30 @@ class AssetService {
         error_log("🔍 Debug AssetService: Name={$name}, RateInput=" . var_export($customRate, true));
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d');
-        $today = date('Y-m-d');
         
-        // 判斷是否為「今天或未來」的數據
-        $isCurrentOrFuture = ($date >= $today); 
-    
         $currentTime = date('Y-m-d H:i:s');
     
         try {
             $this->pdo->beginTransaction();
     
-            // 1. 先檢查帳戶是否存在 (accounts 表維持原樣，只記錄最新餘額)
+            // 🟢 1. [新增] 查詢該帳戶目前歷史紀錄中「最新的日期」
+            // 用途：判斷是否需要更新主列表的餘額 (只有當 日期 >= 最新歷史紀錄 時才更新)
+            $maxDateSql = "SELECT MAX(snapshot_date) FROM account_balance_history WHERE user_id = :userId AND account_name = :name";
+            $stmtMax = $this->pdo->prepare($maxDateSql);
+            $stmtMax->execute([':userId' => $userId, ':name' => $name]);
+            // 如果沒有歷史紀錄，預設為 '0000-00-00'
+            $latestHistoryDate = $stmtMax->fetchColumn() ?: '0000-00-00';
+    
+            $shouldUpdateMainAccount = ($date >= $latestHistoryDate);
+    
+            // 🟢 2. [補回遺失的段落] 檢查帳戶是否存在
             $checkSql = "SELECT id FROM accounts WHERE user_id = :userId AND name = :name";
-            $stmtCheck = $this->pdo->prepare($checkSql);
-            $stmtCheck->execute([':userId' => $userId, ':name' => $name]);
+            $stmtCheck = $this->pdo->prepare($checkSql); // <--- 這行之前可能漏了
+            $stmtCheck->execute([':userId' => $userId, ':name' => $name]); // <--- 這行之前可能漏了
             $existingId = $stmtCheck->fetchColumn();
     
             if (!$existingId) {
-                // 新帳戶
+                // 新帳戶：直接新增 (Insert)
                 $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
                               VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :time)";
                 $stmtInsert = $this->pdo->prepare($insertSql);
@@ -73,8 +79,8 @@ class AssetService {
                     ':time' => $currentTime
                 ]);
             } else {
-                // 更新舊帳戶
-                if ($isCurrentOrFuture) {
+                // 舊帳戶：只有當這筆資料是「最新」的時候，才更新主表 (Update)
+                if ($shouldUpdateMainAccount) {
                     $updateSql = "UPDATE accounts SET 
                                   ledger_id = :ledgerId, 
                                   type = :type, 
@@ -94,9 +100,9 @@ class AssetService {
                 }
             }
     
-            // 2. 寫入歷史紀錄 (這裡是關鍵修改處！)
+            // 3. 寫入歷史紀錄 (這部分保持原本的邏輯)
             
-            // 先刪除當天舊紀錄
+            // 先刪除當天舊紀錄，避免重複
             $sqlDelHistory = "DELETE FROM account_balance_history  
                               WHERE user_id = :userId 
                               AND account_name = :name 
@@ -112,7 +118,7 @@ class AssetService {
                 ':ledgerId2' => $ledgerId
             ]);
     
-            // 🟢 [修正] 插入新紀錄時，寫入 exchange_rate
+            // 插入新紀錄
             $sqlHistory = "INSERT INTO account_balance_history (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, snapshot_date)
                            VALUES (:userId, :ledgerId, :name, :balance, :unit, :rate, :date)";
             $stmtHist = $this->pdo->prepare($sqlHistory);
@@ -122,7 +128,7 @@ class AssetService {
                 ':name' => $name,
                 ':balance' => $balance,
                 ':unit' => strtoupper($currencyUnit),
-                ':rate' => $customRate, // 這裡將 API 傳來的匯率寫入資料庫
+                ':rate' => $customRate,
                 ':date' => $date
             ]);
     
