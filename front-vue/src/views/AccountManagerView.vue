@@ -154,7 +154,7 @@
               
               <div class="card-right">
                 <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
-                  {{ numberFormat(account.balance, 2) }}
+                  {{ numberFormat(account.balance, getPrecision(account.currency_unit)) }}
                 </div>
                 <div class="action-buttons">
                   <button class="pill-btn update" @click="openModal(account)">
@@ -194,7 +194,7 @@
               <div class="list-left">
                 <span class="date">{{ item.snapshot_date }}</span>
                 <span class="balance">
-                  {{ numberFormat(item.balance, 2) }} {{ item.currency_unit }}
+                  {{ numberFormat(item.balance, getPrecision(item.currency_unit)) }} {{ item.currency_unit }}
                 </span>
               </div>
               <div class="list-actions-sm">
@@ -241,7 +241,7 @@
           <div class="form-row">
             <div class="form-group half">
               <label>快照餘額</label>
-              <input type="number" v-model.number="form.balance" step="0.01" required class="input-std">
+              <input type="number" v-model.number="form.balance" step="any" required class="input-std">
             </div>
             
             <div class="form-group half">
@@ -420,6 +420,10 @@ const groupedAccounts = computed(() => {
 function isCrypto(code) {
     const commonCrypto = ['BTC', 'ETH', 'USDT', 'ADA', 'SOL', 'BNB', 'XRP', 'DOGE'];
     return commonCrypto.includes(code?.toUpperCase());
+}
+
+function getPrecision(currency) {
+    return isCrypto(currency) ? 8 : 2;
 }
 
 // 🟢 新增：智慧提示 Computed Properties

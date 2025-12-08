@@ -145,7 +145,15 @@ class AssetService {
         $intervalStr = ($range === '1m') ? '-1 month' : (($range === '6m') ? '-6 months' : '-1 year');
         $startDate = (new DateTime())->modify($intervalStr)->format('Y-m-d');
 
-        // 🟢 1. 修改 SQL：增加選取 exchange_rate
+        // 🟢 1. 先取得所有帳戶的類型 (這是關鍵！)
+        // 我們需要知道哪些帳戶是負債 (Liability)
+        $typeSql = "SELECT name, type FROM accounts WHERE user_id = :userId";
+        $stmtType = $this->pdo->prepare($typeSql);
+        $stmtType->execute([':userId' => $userId]);
+        // 產生一個對照表: ['房貸' => 'Liability', '錢包' => 'Cash']
+        $accountTypes = $stmtType->fetchAll(PDO::FETCH_KEY_PAIR);
+
+        // 2. 撈取歷史紀錄
         $sql = "SELECT snapshot_date, account_name, balance, currency_unit, exchange_rate 
                 FROM account_balance_history 
                 WHERE user_id = :userId ";
@@ -194,12 +202,10 @@ class AssetService {
                 $currentDate = $dt->format('Y-m-d');
                 $dayOfMonth = $dt->format('d');
 
-                // 如果當天有新的快照紀錄，更新目前的餘額表
+                // 更新當日餘額表
                 if (isset($historyByDate[$currentDate])) {
                     foreach ($historyByDate[$currentDate] as $record) {
                         $acc = $record['account_name'];
-                        
-                        // 🟢 2. 暫存邏輯：將 exchange_rate 也存入狀態中
                         $currentBalances[$acc] = [
                             'balance' => (float)$record['balance'], 
                             'unit' => strtoupper($record['currency_unit']),
@@ -208,7 +214,7 @@ class AssetService {
                     }
                 }
 
-                // 只有在範圍內的日期才產生圖表數據
+                // 產生圖表數據
                 if ($currentDate >= $startDate) {
                     $shouldRecord = true;
                     if ($range !== '1m') {
@@ -217,27 +223,39 @@ class AssetService {
 
                     if ($shouldRecord) {
                         $dailyTotalTwd = 0.0;
-                        foreach ($currentBalances as $accData) {
+                        
+                        foreach ($currentBalances as $name => $accData) {
                             $bal = $accData['balance']; 
                             $curr = $accData['unit'];
                             $customRate = $accData['custom_rate'];
+                            
+                            // 🟢 判斷帳戶類型
+                            // 如果帳戶已被刪除(查不到類型)，預設為資產(Cash)，避免報錯
+                            $type = $accountTypes[$name] ?? 'Cash';
 
-                            // 🟢 3. 計算邏輯：優先使用自訂匯率
+                            // 計算該帳戶的 TWD 價值
+                            $val = 0.0;
                             if ($customRate && $customRate > 0) {
-                                // 如果有自訂匯率，直接乘 (假設 custom_rate 是 "該幣別對台幣" 的匯率)
-                                $dailyTotalTwd += $bal * $customRate;
+                                $val = $bal * $customRate;
                             } else {
-                                // 如果沒有自訂匯率，才使用系統 API 匯率
                                 if ($curr === 'TWD') {
-                                    $dailyTotalTwd += $bal;
+                                    $val = $bal;
                                 } else {
                                     try {
                                         $rateToUSD = $rateService->getRateToUSD($curr);
-                                        $dailyTotalTwd += $bal * $rateToUSD * $usdTwdRate;
+                                        $val = $bal * $rateToUSD * $usdTwdRate;
                                     } catch (Exception $e) {}
                                 }
                             }
+
+                            // 🟢 關鍵邏輯：負債要用扣的，資產用加的
+                            if ($type === 'Liability') {
+                                $dailyTotalTwd -= $val;
+                            } else {
+                                $dailyTotalTwd += $val;
+                            }
                         }
+                        
                         $chartLabels[] = $currentDate;
                         $chartData[] = round($dailyTotalTwd, 0);
                     }
