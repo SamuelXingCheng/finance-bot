@@ -142,34 +142,6 @@ try {
             }
             break;
         
-        case 'save_account':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            $input = json_decode(file_get_contents('php://input'), true);
-            
-            $name = trim($input['name'] ?? '');
-            $type = $input['type'] ?? 'Cash';
-            $balance = (float)($input['balance'] ?? 0);
-            $currency = $input['currency'] ?? 'TWD';
-            $date = $input['date'] ?? date('Y-m-d'); 
-            
-            // [修正] 接收 ledger_id
-            $ledgerId = isset($input['ledger_id']) ? (int)$input['ledger_id'] : null;
-
-            if (empty($name)) {
-                $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
-                break;
-            }
-
-            // [修正] 傳入 ledgerId
-            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date, $ledgerId);
-
-            if ($success) {
-                $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
-            } else {
-                $response = ['status' => 'error', 'message' => '儲存失敗'];
-            }
-            break;
-        
         case 'asset_history':
             $range = $_GET['range'] ?? '1y';
             // [修正] 接收 ledger_id
@@ -652,6 +624,10 @@ try {
         
         case 'save_account':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            // 🔍 [新增這行] 印出前端傳來的完整 JSON，看看有沒有 custom_rate
+            $rawInput = file_get_contents('php://input');
+            error_log("🔍 API Debug Raw Input: " . $rawInput);
+
             $input = json_decode(file_get_contents('php://input'), true);
             
             $name = trim($input['name'] ?? '');

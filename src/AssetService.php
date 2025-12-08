@@ -38,28 +38,28 @@ class AssetService {
      * 修正重點 1: 解決 SQL 參數重複錯誤 (ledgerId1, ledgerId2)
      * 修正重點 2: 確保新帳戶即使是補登過去日期的資料，也會被建立
      */
-    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null, ?int $ledgerId = null): bool {
+    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null, ?int $ledgerId = null, ?float $customRate = null): bool {
+        error_log("🔍 Debug AssetService: Name={$name}, RateInput=" . var_export($customRate, true));
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d');
         $today = date('Y-m-d');
         
         // 判斷是否為「今天或未來」的數據
         $isCurrentOrFuture = ($date >= $today); 
-
+    
         $currentTime = date('Y-m-d H:i:s');
-
+    
         try {
             $this->pdo->beginTransaction();
-
-            // 1. 先檢查帳戶是否存在 (無論日期為何，都要先確認)
+    
+            // 1. 先檢查帳戶是否存在 (accounts 表維持原樣，只記錄最新餘額)
             $checkSql = "SELECT id FROM accounts WHERE user_id = :userId AND name = :name";
             $stmtCheck = $this->pdo->prepare($checkSql);
             $stmtCheck->execute([':userId' => $userId, ':name' => $name]);
             $existingId = $stmtCheck->fetchColumn();
-
+    
             if (!$existingId) {
-                // [情境 A] 帳戶不存在 -> 這是新帳戶 -> 強制新增 (Insert)
-                // 即使是補登過去日期的資料，也必須先建立帳戶，否則使用者會看不到它
+                // 新帳戶
                 $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
                               VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :time)";
                 $stmtInsert = $this->pdo->prepare($insertSql);
@@ -73,8 +73,7 @@ class AssetService {
                     ':time' => $currentTime
                 ]);
             } else {
-                // [情境 B] 帳戶已存在 -> 只有當日期是「今天或未來」才更新餘額 (Update)
-                // 這樣可以避免「補登昨天的紀錄」意外覆蓋掉「今天的最新餘額」
+                // 更新舊帳戶
                 if ($isCurrentOrFuture) {
                     $updateSql = "UPDATE accounts SET 
                                   ledger_id = :ledgerId, 
@@ -94,9 +93,10 @@ class AssetService {
                     ]);
                 }
             }
-
-            // 2. 寫入歷史紀錄 (先刪除當天舊紀錄，再寫入新紀錄，避免同一天多筆)
-            // 🟢 [修正]：使用 :ledgerId1 和 :ledgerId2 避免參數重複錯誤
+    
+            // 2. 寫入歷史紀錄 (這裡是關鍵修改處！)
+            
+            // 先刪除當天舊紀錄
             $sqlDelHistory = "DELETE FROM account_balance_history  
                               WHERE user_id = :userId 
                               AND account_name = :name 
@@ -109,11 +109,12 @@ class AssetService {
                 ':name' => $name, 
                 ':date' => $date, 
                 ':ledgerId1' => $ledgerId,
-                ':ledgerId2' => $ledgerId // 綁定兩次以符合 SQL 佔位符數量
+                ':ledgerId2' => $ledgerId
             ]);
-
-            $sqlHistory = "INSERT INTO account_balance_history (user_id, ledger_id, account_name, balance, currency_unit, snapshot_date)
-                           VALUES (:userId, :ledgerId, :name, :balance, :unit, :date)";
+    
+            // 🟢 [修正] 插入新紀錄時，寫入 exchange_rate
+            $sqlHistory = "INSERT INTO account_balance_history (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, snapshot_date)
+                           VALUES (:userId, :ledgerId, :name, :balance, :unit, :rate, :date)";
             $stmtHist = $this->pdo->prepare($sqlHistory);
             $stmtHist->execute([
                 ':userId' => $userId,
@@ -121,12 +122,13 @@ class AssetService {
                 ':name' => $name,
                 ':balance' => $balance,
                 ':unit' => strtoupper($currencyUnit),
+                ':rate' => $customRate, // 這裡將 API 傳來的匯率寫入資料庫
                 ':date' => $date
             ]);
-
+    
             $this->pdo->commit();
             return true;
-
+    
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             error_log("AssetService UPSERT failed: " . $e->getMessage());
@@ -143,8 +145,8 @@ class AssetService {
         $intervalStr = ($range === '1m') ? '-1 month' : (($range === '6m') ? '-6 months' : '-1 year');
         $startDate = (new DateTime())->modify($intervalStr)->format('Y-m-d');
 
-        // 撈取歷史紀錄
-        $sql = "SELECT snapshot_date, account_name, balance, currency_unit 
+        // 🟢 1. 修改 SQL：增加選取 exchange_rate
+        $sql = "SELECT snapshot_date, account_name, balance, currency_unit, exchange_rate 
                 FROM account_balance_history 
                 WHERE user_id = :userId ";
         
@@ -196,18 +198,18 @@ class AssetService {
                 if (isset($historyByDate[$currentDate])) {
                     foreach ($historyByDate[$currentDate] as $record) {
                         $acc = $record['account_name'];
-                        // 注意：如果該帳戶已被刪除，這裡雖然會讀到歷史紀錄，
-                        // 但因為 deleteAccount 已經清除了歷史資料表，所以理論上不會再讀到已刪除帳戶的資料。
+                        
+                        // 🟢 2. 暫存邏輯：將 exchange_rate 也存入狀態中
                         $currentBalances[$acc] = [
                             'balance' => (float)$record['balance'], 
-                            'unit' => strtoupper($record['currency_unit'])
+                            'unit' => strtoupper($record['currency_unit']),
+                            'custom_rate' => !empty($record['exchange_rate']) ? (float)$record['exchange_rate'] : null
                         ];
                     }
                 }
 
                 // 只有在範圍內的日期才產生圖表數據
                 if ($currentDate >= $startDate) {
-                    // 為了效能，長週期只取每月 1 號、15 號和今天
                     $shouldRecord = true;
                     if ($range !== '1m') {
                         $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
@@ -218,10 +220,23 @@ class AssetService {
                         foreach ($currentBalances as $accData) {
                             $bal = $accData['balance']; 
                             $curr = $accData['unit'];
-                            try {
-                                $rateToUSD = $rateService->getRateToUSD($curr);
-                                $dailyTotalTwd += $bal * $rateToUSD * $usdTwdRate;
-                            } catch (Exception $e) {}
+                            $customRate = $accData['custom_rate'];
+
+                            // 🟢 3. 計算邏輯：優先使用自訂匯率
+                            if ($customRate && $customRate > 0) {
+                                // 如果有自訂匯率，直接乘 (假設 custom_rate 是 "該幣別對台幣" 的匯率)
+                                $dailyTotalTwd += $bal * $customRate;
+                            } else {
+                                // 如果沒有自訂匯率，才使用系統 API 匯率
+                                if ($curr === 'TWD') {
+                                    $dailyTotalTwd += $bal;
+                                } else {
+                                    try {
+                                        $rateToUSD = $rateService->getRateToUSD($curr);
+                                        $dailyTotalTwd += $bal * $rateToUSD * $usdTwdRate;
+                                    } catch (Exception $e) {}
+                                }
+                            }
                         }
                         $chartLabels[] = $currentDate;
                         $chartData[] = round($dailyTotalTwd, 0);
