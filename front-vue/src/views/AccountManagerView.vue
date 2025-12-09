@@ -66,6 +66,112 @@
           <p class="chart-hint-sm">* 顯示依據您手動記錄的「快照」加總，建議定期更新所有帳戶以維持準確性。</p>
         </div>
 
+        <div class="chart-card wide-card simulation-card">
+          <div class="chart-header-row">
+            <h3>資產購買力保衛戰 (20年預測)</h3>
+            <span class="badge-beta">Beta</span>
+          </div>
+
+          <div class="simulation-container-vertical">
+            
+            <div class="sim-chart-wrapper full-width">
+              <div class="chart-box-lg">
+                <canvas ref="simulationChartCanvas"></canvas>
+              </div>
+            </div>
+
+            <div class="controls-info-grid">
+              
+              <div class="sim-controls-panel">
+                <div class="control-group">
+                  <div class="control-header">
+                    <label class="label-professional">預期年通膨率 (Inflation)</label>
+                    <span class="control-value text-danger">{{ inflationRate }}%</span>
+                  </div>
+                  <input type="range" v-model.number="inflationRate" min="1" max="8" step="0.1" class="slider slider-danger" @input="updateSimulationChart">
+                  <div class="control-desc">若通膨高於投資報酬，資產將實質縮水。</div>
+                </div>
+
+                <div class="control-group">
+                  <div class="control-header">
+                    <label class="label-professional">現金持有比例 (Cash Ratio)</label>
+                    <span class="control-value text-primary">{{ simulatedCashRatio }}%</span>
+                  </div>
+                  <input type="range" v-model.number="simulatedCashRatio" min="0" max="100" step="5" class="slider slider-primary" @input="updateSimulationChart">
+                  <div class="control-desc">
+                    目前實際現金比例：<strong>{{ currentRealCashRatio }}%</strong>
+                    <span v-if="simulatedCashRatio < currentRealCashRatio" class="diff-tag good">模擬減少</span>
+                    <span v-if="simulatedCashRatio > currentRealCashRatio" class="diff-tag bad">模擬增加</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="simulation-info-card professional-card">
+                <h4 class="card-title-sm">
+                  <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 20V10M12 20V4M6 20v-6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  模擬參數基準
+                </h4>
+                <div class="info-row">
+                  <span class="label">起始總資產</span>
+                  <span class="value number-font">NT$ {{ numberFormat(simulatedStartAmount, 0) }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">
+                    現金活存回報
+                    <div class="tooltip-icon" title="假設放在銀行活存或定存的低風險利率">
+                      <svg class="icon-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
+                    </div>
+                  </span>
+                  <span class="value number-font">{{ (RATE_CASH * 100).toFixed(1) }}%</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">
+                    投資平均回報
+                    <div class="tooltip-icon" title="假設股債配置的長期平均年化報酬">
+                       <svg class="icon-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
+                    </div>
+                  </span>
+                  <span class="value number-font">{{ (RATE_INVEST * 100).toFixed(1) }}%</span>
+                </div>
+                <p class="info-note">* 系統依據您的資產總額與設定比例，以此回報率進行 20 年複利推演。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="sim-result-box" :class="isBeatingInflation ? 'border-success' : 'border-danger'">
+            <div class="result-icon-wrapper">
+              <svg v-if="isBeatingInflation" class="icon-svg-lg text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="22 4 12 14.01 9 11.01" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <svg v-else class="icon-svg-lg text-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            
+            <div class="result-text">
+              <h4 :class="isBeatingInflation ? 'text-success-dark' : 'text-danger-dark'">
+                {{ isBeatingInflation ? '資產成功增值' : '購買力將縮水' }}
+              </h4>
+              <p>
+                在 <strong>{{ inflationRate }}%</strong> 通膨下，20 年後您需要累積到 <span class="highlight-target">NT$ {{ numberFormat(finalHurdle, 0) }}</span> 才能維持現在生活水準。
+                <br>
+                依此配置，您的資產預估將來到 <span :class="isBeatingInflation ? 'text-success' : 'text-danger'" class="fw-bold">NT$ {{ numberFormat(finalWealth, 0) }}</span>。
+                <span v-if="isBeatingInflation" class="trend-indicator good">
+                  (跑贏通膨 +{{ numberFormat(finalWealth - finalHurdle, 0) }})
+                </span>
+                <span v-else class="trend-indicator bad">
+                  (落後通膨 -{{ numberFormat(finalHurdle - finalWealth, 0) }})
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div class="chart-card">
           <h3>現金流配置 (現金 vs 投資)</h3>
           <div class="chart-box">
@@ -290,7 +396,6 @@
 </template>
 
 <script setup>
-// 1. 引入 watch
 import { ref, onMounted, computed, nextTick, watch } from 'vue'; 
 import { fetchWithLiffToken, numberFormat } from '@/utils/api'; 
 import { defineEmits } from 'vue';
@@ -304,7 +409,7 @@ Chart.register(ChartDataLabels);
 
 const emit = defineEmits(['refreshDashboard']);
 
-// 2. 定義 Props 接收 ledgerId
+// 定義 Props 接收 ledgerId
 const props = defineProps(['ledgerId']);
 
 // 狀態變數
@@ -365,6 +470,22 @@ let holdingValueChart = null;
 let nwChart = null; 
 let trendChart = null;
 
+// ★★★ 通膨模擬器狀態變數 ★★★
+const inflationRate = ref(3.0); // 預設通膨 3%
+const simulatedCashRatio = ref(50);
+const simulatedStartAmount = ref(0); // 綁定到 UI 顯示起始金額
+const currentRealCashRatio = ref(0);
+const simulationChartCanvas = ref(null);
+let simulationChart = null;
+
+const finalHurdle = ref(0);
+const finalWealth = ref(0);
+const isBeatingInflation = ref(false);
+
+// 假設回報率參數
+const RATE_CASH = 0.005;   // 現金活存 0.5%
+const RATE_INVEST = 0.06;  // 投資平均 6%
+
 // Modal 與表單狀態
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
@@ -375,7 +496,7 @@ const form = ref({
     balance: 0, 
     currency: 'TWD',
     date: new Date().toISOString().substring(0, 10),
-    custom_rate: null // 🟢 新增
+    custom_rate: null
 });
 
 const currencySelectValue = ref('TWD');
@@ -416,7 +537,7 @@ const groupedAccounts = computed(() => {
     return result;
 });
 
-// 🟢 新增：輔助判斷函數
+// 輔助判斷函數
 function isCrypto(code) {
     const commonCrypto = ['BTC', 'ETH', 'USDT', 'ADA', 'SOL', 'BNB', 'XRP', 'DOGE'];
     return commonCrypto.includes(code?.toUpperCase());
@@ -426,7 +547,7 @@ function getPrecision(currency) {
     return isCrypto(currency) ? 8 : 2;
 }
 
-// 🟢 新增：智慧提示 Computed Properties
+// 智慧提示 Computed Properties
 const isPastDate = computed(() => {
     if (!form.value.date) return false;
     const today = new Date().toISOString().substring(0, 10);
@@ -488,20 +609,15 @@ function runHasDataTutorial() {
   }, 800);
 }
 
-// 3. 監聽 Ledger 切換
+// 監聽 Ledger 切換
 watch(() => props.ledgerId, (newVal) => {
     refreshAllData();
 });
 
-// --- API 函式 (已修正 ledger_id 傳遞) ---
+// --- API 函式 ---
 
 async function fetchAccounts() {
-  // 切換時先顯示 Loading，避免混淆
-//   loading.value = true;
-//   accounts.value = []; // 清空舊資料
-
   try {
-    // 修正：帶上 ledger_id
     let url = `${window.API_BASE_URL}?action=get_accounts`;
     if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -528,7 +644,7 @@ async function fetchAccounts() {
 
 async function fetchChartData() {
   if (accounts.value.length === 0) return;
-  // 修正：帶上 ledger_id
+  
   let url = `${window.API_BASE_URL}?action=asset_summary`;
   if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -539,14 +655,157 @@ async function fetchChartData() {
           chartData.value = { ...result.data.charts, stock: result.data.charts.stock || 0, bond: result.data.charts.bond || 0, tw_invest: result.data.charts.tw_invest || 0, overseas_invest: result.data.charts.overseas_invest || 0 };
           assetBreakdown.value = result.data.breakdown || {};
           renderAllocationChart(); renderRegionChart(); renderStockBondChart(); renderFiatCryptoChart(); renderHoldingValueChart(); renderNetWorthChart();
+          
+          // ★ 初始化模擬器
+          initSimulation(result.data.charts);
       }
   }
+}
+
+// ★★★ 初始化模擬器 ★★★
+function initSimulation(charts) {
+    const totalAssets = charts.total_assets || 0;
+    const cash = charts.cash || 0;
+    
+    // 更新起始資產變數，供 UI 顯示
+    simulatedStartAmount.value = totalAssets > 0 ? totalAssets : 1000000;
+    
+    if (totalAssets > 0) {
+        const realRatio = Math.round((cash / totalAssets) * 100);
+        currentRealCashRatio.value = realRatio;
+        simulatedCashRatio.value = realRatio; // 預設使用真實比例
+    } else {
+        currentRealCashRatio.value = 100;
+        simulatedCashRatio.value = 100;
+    }
+
+    nextTick(() => {
+        updateSimulationChart();
+    });
+}
+
+// ★★★ 更新模擬圖表 ★★★
+function updateSimulationChart() {
+    if (simulationChart) simulationChart.destroy();
+    if (!simulationChartCanvas.value) return;
+
+    // 1. 準備參數
+    const years = 20; 
+    const startAmount = simulatedStartAmount.value;
+    
+    const infRate = inflationRate.value / 100;
+    const cashRatio = simulatedCashRatio.value / 100;
+    const investRatio = 1 - cashRatio;
+    
+    // 綜合資產成長率 = (現金比例 * 0.5%) + (投資比例 * 6%)
+    const blendedRate = (cashRatio * RATE_CASH) + (investRatio * RATE_INVEST);
+
+    const labels = [];
+    const hurdleData = []; // 紅線 (通膨門檻)
+    const wealthData = []; // 綠線 (預期成長)
+
+    for (let i = 0; i <= years; i++) {
+        // X軸標籤
+        if (i === 0) labels.push('現在');
+        else if (i % 4 === 0) labels.push(`${i}年後`);
+        else labels.push('');
+
+        // 通膨門檻
+        const hurdle = startAmount * Math.pow(1 + infRate, i);
+        hurdleData.push(hurdle);
+
+        // 資產成長
+        const wealth = startAmount * Math.pow(1 + blendedRate, i);
+        wealthData.push(wealth);
+    }
+
+    // 計算 20 年後的結果供文字顯示
+    finalHurdle.value = hurdleData[years];
+    finalWealth.value = wealthData[years];
+    isBeatingInflation.value = finalWealth.value >= finalHurdle.value;
+
+    // 2. 繪製圖表 (使用專業版樣式)
+    const ctx = simulationChartCanvas.value.getContext('2d');
+    
+    simulationChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '您的資產預測',
+                    data: wealthData,
+                    borderColor: '#20c997', // 專業 Teal 色
+                    backgroundColor: 'rgba(32, 201, 151, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 0
+                },
+                {
+                    label: '通膨門檻 (維持購買力)',
+                    data: hurdleData,
+                    borderColor: '#dc3545', // 專業紅色
+                    borderWidth: 2,
+                    borderDash: [5, 5], // 虛線
+                    tension: 0.4,
+                    fill: false,
+                    pointRadius: 0
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20,
+                        font: { family: "'Helvetica Neue', 'Helvetica', 'Arial', sans-serif" }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += 'NT$ ' + numberFormat(context.parsed.y, 0);
+                            }
+                            return label;
+                        }
+                    }
+                },
+                datalabels: { display: false }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: (value) => {
+                            return 'NT$ ' + (value / 10000).toFixed(0) + '萬';
+                        },
+                        color: '#6c757d'
+                    },
+                    grid: { color: '#f1f3f5' }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#6c757d', maxRotation: 0, autoSkip: false }
+                }
+            }
+        }
+    });
 }
 
 async function fetchTrendData() {
   if (accounts.value.length === 0) return;
   const { start, end } = trendFilter.value;
-  // 修正：帶上 ledger_id
   let url = `${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}`;
   if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -560,7 +819,6 @@ async function fetchTrendData() {
 async function fetchAssetHistory(range = '1y') {
     if (accounts.value.length === 0) return;
     historyRange.value = range;
-    // 修正：帶上 ledger_id
     let url = `${window.API_BASE_URL}?action=asset_history&range=${range}`;
     if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -577,7 +835,6 @@ async function fetchAIAnalysis() {
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
     aiLoading.value = true;
     
-    // 修正：AI 分析也應該帶上 ledger_id
     let url = `${window.API_BASE_URL}?action=analyze_portfolio`;
     if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
@@ -595,24 +852,20 @@ async function fetchAIAnalysis() {
     aiLoading.value = false;
 }
 
-// 4. 修正儲存邏輯，確保寫入正確帳本
-// 🟢 修改：handleSave 傳送 custom_rate
 async function handleSave() {
   isSaving.value = true;
   
-  // 準備 Payload
   const payload = { 
       ...form.value,
-      custom_rate: form.value.custom_rate // 🟢 確保傳送此欄位
+      custom_rate: form.value.custom_rate 
   };
-  // [修正] 注入當前帳本 ID
   if (props.ledgerId) {
       payload.ledger_id = props.ledgerId;
   }
 
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { 
       method: 'POST', 
-      body: JSON.stringify(payload) // 改傳 payload
+      body: JSON.stringify(payload) 
   });
 
   if (response && response.ok) {
@@ -620,7 +873,6 @@ async function handleSave() {
     if (result.status === 'success') {
       closeModal();
       await fetchAccounts(); 
-      // 確保刷新
       emit('refreshDashboard');
     } else {
       alert('儲存失敗：' + result.message);
@@ -631,7 +883,7 @@ async function handleSave() {
   isSaving.value = false;
 }
 
-// --- 其餘輔助函式與圖表邏輯 (保持不變) ---
+// --- 其餘輔助函式與圖表邏輯 ---
 
 async function fetchAccountHistory(name) {
     historyLoading.value = true;
@@ -679,7 +931,6 @@ function closeHistoryModal() {
     accountHistory.value = [];
 }
 
-// 🟢 修改：openModalForSnapshot (歷史紀錄編輯)
 function openModalForSnapshot(snapshotItem) {
     closeHistoryModal();
     const sourceAccount = accounts.value.find(acc => acc.name === snapshotItem.account_name);
@@ -692,7 +943,7 @@ function openModalForSnapshot(snapshotItem) {
         balance: parseFloat(snapshotItem.balance), 
         currency: snapshotItem.currency_unit,
         date: snapshotItem.snapshot_date,
-        custom_rate: parseFloat(snapshotItem.exchange_rate) || null // 🟢 若歷史紀錄有匯率，帶入顯示
+        custom_rate: parseFloat(snapshotItem.exchange_rate) || null
     };
     
     const currencyToSet = snapshotItem.currency_unit;
@@ -739,7 +990,6 @@ function handleCurrencyChange() {
 function resetCurrency() { isCustomCurrency.value = false; currencySelectValue.value = 'TWD'; form.value.currency = 'TWD'; }
 function forceUppercase() { form.value.currency = form.value.currency.toUpperCase(); }
 
-// 🟢 修改：openModal 初始化 form
 function openModal(account = null) {
   if (!liff.isLoggedIn()) {
       liff.login({ redirectUri: window.location.href });
@@ -754,7 +1004,7 @@ function openModal(account = null) {
         balance: parseFloat(account.balance), 
         currency: account.currency_unit, 
         date: today,
-        custom_rate: null // 🟢 編輯現有帳戶時，預設不填匯率
+        custom_rate: null
     };
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
     if (knownCurrency) { currencySelectValue.value = account.currency_unit; isCustomCurrency.value = false; } else { currencySelectValue.value = 'CUSTOM'; isCustomCurrency.value = true; }
@@ -766,7 +1016,7 @@ function openModal(account = null) {
         balance: 0, 
         currency: 'TWD', 
         date: today,
-        custom_rate: null // 🟢 初始化
+        custom_rate: null
     };
     resetCurrency(); 
   }
@@ -851,7 +1101,6 @@ function renderTrendChart(data) {
 
 function getTypeClass(type) { return type === 'Liability' ? 'badge-debt' : 'badge-asset'; }
 
-// 5. 將刷新函式獨立出來並暴露給父層
 function refreshAllData() {
     fetchAccounts();
 }
@@ -945,6 +1194,76 @@ onMounted(() => {
 .filter-btn { background-color: #d4a373; color: white; border: none; padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; transition: background 0.2s; }
 .filter-btn:hover { background-color: #c19263; }
 .chart-box-lg { width: 100%; height: 250px; position: relative; }
+
+/* ★★★ 新增：模擬器專業樣式 (Grid佈局+SVG Icon支援) ★★★ */
+.badge-beta { margin-left: 12px; background: #e9ecef; color: #495057; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+
+.simulation-card { padding-bottom: 24px; }
+
+/* 垂直容器 */
+.simulation-container-vertical { display: flex; flex-direction: column; gap: 24px; padding: 10px 0; }
+
+/* 線圖全寬 */
+.sim-chart-wrapper.full-width { width: 100%; min-height: 250px; background: #fff; }
+
+/* 下方網格佈局 */
+.controls-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+
+/* 控制面板 */
+.sim-controls-panel { display: flex; flex-direction: column; gap: 20px; }
+.control-group { margin-bottom: 8px; }
+
+.control-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.label-professional { font-weight: 600; color: #343a40; font-size: 0.95rem; }
+.control-value { font-weight: 700; font-size: 1.1rem; }
+.text-danger { color: #dc3545; }
+.text-primary { color: #0d6efd; }
+.text-success { color: #198754; }
+
+.slider { width: 100%; -webkit-appearance: none; height: 6px; border-radius: 5px; background: #dee2e6; outline: none; cursor: pointer; }
+.slider-danger::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #dc3545; cursor: pointer; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.slider-primary::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #0d6efd; cursor: pointer; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+
+.control-desc { font-size: 0.85rem; color: #6c757d; margin-top: 6px; line-height: 1.4; }
+.diff-tag { font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; }
+.diff-tag.good { background: #d1e7dd; color: #0f5132; }
+.diff-tag.bad { background: #f8d7da; color: #842029; }
+
+/* 專業風格資訊卡 */
+.professional-card { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; }
+.card-title-sm { font-size: 0.95rem; color: #495057; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; margin-top: 0; font-weight: 600; }
+.info-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 0.9rem; }
+.info-row .label { color: #6c757d; display: flex; align-items: center; gap: 4px; }
+.info-row .value { font-weight: 600; color: #212529; }
+.number-font { font-family: 'Roboto Mono', monospace; letter-spacing: -0.5px; }
+.info-note { font-size: 0.75rem; color: #adb5bd; margin: 16px 0 0 0; line-height: 1.4; }
+
+/* SVG Icons */
+.icon-svg { width: 18px; height: 18px; }
+.icon-svg-sm { width: 14px; height: 14px; vertical-align: middle; opacity: 0.6; cursor: help; }
+.icon-svg-lg { width: 32px; height: 32px; }
+.tooltip-icon { display: inline-block; cursor: help; }
+
+/* 結果框 */
+.sim-result-box { display: flex; align-items: flex-start; gap: 16px; padding: 16px; border-radius: 8px; background: #fff; border-left: 5px solid; margin-top: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+.sim-result-box.border-success { border-left-color: #28a745; background: #f0fff4; }
+.sim-result-box.border-danger { border-left-color: #dc3545; background: #fff5f5; }
+.result-icon-wrapper { flex-shrink: 0; padding-top: 2px; }
+.result-text h4 { margin: 0 0 8px 0; font-size: 1.1rem; font-weight: 700; }
+.text-success-dark { color: #0f5132; }
+.text-danger-dark { color: #842029; }
+.result-text p { margin: 0; font-size: 0.95rem; line-height: 1.6; color: #495057; }
+.highlight-target { font-weight: 700; color: #212529; background: #e9ecef; padding: 0 4px; border-radius: 2px; }
+.fw-bold { font-weight: 700; }
+.trend-indicator { font-weight: 600; margin-left: 4px; }
+.trend-indicator.good { color: #198754; }
+.trend-indicator.bad { color: #dc3545; }
+
+/* RWD */
+@media (max-width: 768px) {
+  .controls-info-grid { grid-template-columns: 1fr; gap: 20px; }
+  .sim-chart-wrapper.full-width { height: 220px; }
+}
 
 /* 列表區 */
 .list-header { font-size: 0.9rem; font-weight: bold; color: #8c7b75; margin-bottom: 10px; margin-top: 10px; } 
