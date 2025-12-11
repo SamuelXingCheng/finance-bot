@@ -1,100 +1,203 @@
 <template>
   <div class="crypto-container">
     
-    <div class="dashboard-header">
-      <div class="header-content">
-        <div class="subtitle">Total Balance (Est.)</div>
-        <div class="main-balance">
-          <span class="currency-symbol">$</span>
-          {{ numberFormat(dashboard.totalUsd, 2) }}
-          <span class="currency-code">USD</span>
-        </div>
-        
-        <div class="stats-row">
-          <div class="stat-item">
-            <span class="label">本金 (TWD)</span>
-            <span class="value">NT$ {{ numberFormat(dashboard.totalInvestedTwd, 0) }}</span>
-          </div>
-          <div class="vertical-line"></div>
-          <div class="stat-item">
-            <span class="label">未實現損益</span>
-            <span class="value" :class="dashboard.pnl >= 0 ? 'text-profit' : 'text-loss'">
-              {{ dashboard.pnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.pnl, 2) }} 
-              <small>({{ numberFormat(dashboard.pnlPercent, 2) }}%)</small>
-            </span>
-          </div>
-        </div>
-      </div>
+    <div class="crypto-tabs">
+      <button :class="{active: view === 'portfolio'}" @click="switchView('portfolio')">現貨資產</button>
+      <button :class="{active: view === 'rebalance'}" @click="switchView('rebalance')">再平衡</button>
+      <button :class="{active: view === 'futures'}" @click="switchView('futures')">合約戰績</button>
     </div>
 
-    <div class="card-section chart-card wide-card">
-        <div class="chart-header-row">
-            <h3>資產成長趨勢 (USD)</h3>
-            <div class="date-controls">
-                <button @click="fetchHistory('1m')" class="filter-btn-sm" :class="{active: historyRange==='1m'}">1月</button>
-                <button @click="fetchHistory('6m')" class="filter-btn-sm" :class="{active: historyRange==='6m'}">6月</button>
-                <button @click="fetchHistory('1y')" class="filter-btn-sm" :class="{active: historyRange==='1y'}">1年</button>
-            </div>
-        </div>
-        <div class="chart-box-lg">
-            <canvas ref="historyChartCanvas"></canvas>
-        </div>
-        <p class="chart-hint-sm">* 趨勢圖依據您的交易與快照紀錄繪製。</p>
-    </div>
-
-    <div class="list-section">
-      <div class="section-header">
-        <h3>持倉資產</h3>
-        <button class="add-btn" @click="openTransactionModal()">
-          <span>+</span> 記一筆
-        </button>
-      </div>
-
-      <div v-if="holdings.length === 0" class="empty-state">
-        <p>尚未有交易紀錄</p>
-        <p class="sub-text">點擊上方按鈕開始記錄您的第一筆交易。</p>
-      </div>
-
-      <div v-else class="coin-list">
-        <div v-for="coin in holdings" :key="coin.symbol" class="account-card-style">
+    <div v-if="view === 'portfolio'" class="fade-in">
+      <div class="dashboard-header">
+        <div class="header-content">
+          <div class="subtitle">Total Balance (Est.)</div>
+          <div class="main-balance">
+            <span class="currency-symbol">$</span>
+            {{ numberFormat(dashboard.totalUsd, 2) }}
+            <span class="currency-code">USD</span>
+          </div>
           
-          <div class="card-left">
-            <div class="acc-name">{{ coin.symbol }}</div>
-            <div class="acc-meta">
-              <span class="badge" :class="coin.symbol === 'USDT' ? 'badge-stable' : 'badge-crypto'">
-                {{ coin.symbol === 'USDT' ? '穩定幣' : '投資' }}
+          <div class="stats-row">
+            <div class="stat-item">
+              <span class="label">本金 (TWD)</span>
+              <span class="value">NT$ {{ numberFormat(dashboard.totalInvestedTwd, 0) }}</span>
+            </div>
+            <div class="vertical-line"></div>
+            <div class="stat-item">
+              <span class="label">未實現損益</span>
+              <span class="value" :class="dashboard.pnl >= 0 ? 'text-profit' : 'text-loss'">
+                {{ dashboard.pnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.pnl, 2) }} 
+                <small>({{ numberFormat(dashboard.pnlPercent, 2) }}%)</small>
               </span>
-              <span class="currency">均價: ${{ numberFormat(coin.avgPrice, 2) }}</span>
             </div>
           </div>
-          
-          <div class="card-right">
-            <div class="acc-balance" :class="coin.valueUsd >= 0 ? 'text-asset' : 'text-debt'">
-              $ {{ numberFormat(coin.valueUsd, 2) }}
+        </div>
+      </div>
+
+      <div class="card-section chart-card wide-card">
+          <div class="chart-header-row">
+              <h3>資產成長趨勢 (USD)</h3>
+              <div class="date-controls">
+                  <button @click="fetchHistory('1m')" class="filter-btn-sm" :class="{active: historyRange==='1m'}">1月</button>
+                  <button @click="fetchHistory('6m')" class="filter-btn-sm" :class="{active: historyRange==='6m'}">6月</button>
+                  <button @click="fetchHistory('1y')" class="filter-btn-sm" :class="{active: historyRange==='1y'}">1年</button>
+              </div>
+          </div>
+          <div class="chart-box-lg">
+              <canvas ref="historyChartCanvas"></canvas>
+          </div>
+      </div>
+
+      <div class="list-section">
+        <div class="section-header">
+          <h3>持倉資產</h3>
+          <button class="add-btn" @click="openTransactionModal()">
+            <span>+</span> 記一筆
+          </button>
+        </div>
+
+        <div v-if="holdings.length === 0" class="empty-state">
+          <p>尚未有交易紀錄</p>
+        </div>
+
+        <div v-else class="coin-list">
+          <div v-for="coin in holdings" :key="coin.symbol" class="account-card-style">
+            <div class="card-left">
+              <div class="acc-name">{{ coin.symbol }}</div>
+              <div class="acc-meta">
+                <span class="badge" :class="coin.symbol === 'USDT' ? 'badge-stable' : 'badge-crypto'">
+                  {{ coin.symbol === 'USDT' ? '穩定幣' : '投資' }}
+                </span>
+                <span class="currency">均價: ${{ numberFormat(coin.avgPrice, 2) }}</span>
+              </div>
             </div>
             
-            <div class="action-buttons">
-              <button class="pill-btn update-crypto" @click.stop="openEditBalanceModal(coin)">
-                  更新快照
-              </button>
-              
-              <button class="text-btn view-history" @click="alert('歷史功能開發中...')">
-                  歷史
-              </button>
-              
-              <button class="text-btn delete" @click="alert('請透過「賣出」或「出金」將餘額歸零以移除此資產。')">
-                  刪除
-              </button>
+            <div class="card-right">
+              <div class="acc-balance" :class="coin.valueUsd >= 0 ? 'text-asset' : 'text-debt'">
+                $ {{ numberFormat(coin.valueUsd, 2) }}
+              </div>
+              <div class="action-buttons">
+                <button class="pill-btn update-crypto" @click.stop="openEditBalanceModal(coin)">
+                    更新快照
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="view === 'rebalance'" class="rebalance-panel fade-in">
+      <div class="card-section">
+        <div class="section-header"><h3>現金水位監控</h3></div>
+        
+        <div class="data-box rebalance-card">
+          <div class="progress-bar-container">
+             <div class="bar-fill" :style="{width: Math.min(rebalanceData.currentUsdtRatio, 100) + '%'}"></div>
+             <div class="target-line" :style="{left: rebalanceData.targetRatio + '%'}">
+                <span class="target-label">目標 {{ rebalanceData.targetRatio }}%</span>
+             </div>
+          </div>
+          
+          <div class="ratio-text">
+             目前現金比例: <span class="highlight">{{ numberFormat(rebalanceData.currentUsdtRatio, 1) }}%</span> 
+          </div>
+          
+          <div class="advice-box" :class="rebalanceData.action">
+             <div class="advice-icon">
+                {{ rebalanceData.action === 'BUY' ? '🟢' : (rebalanceData.action === 'SELL' ? '🔴' : '⚪') }}
+             </div>
+             <div class="advice-content">
+                <h4>{{ rebalanceData.action === 'BUY' ? '建議買入' : (rebalanceData.action === 'SELL' ? '建議賣出' : '持有觀望') }}</h4>
+                <p>{{ rebalanceData.message }}</p>
+             </div>
+          </div>
+
+          <button class="setting-btn" @click="openTargetModal">⚙️ 設定目標比例</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="view === 'futures'" class="futures-panel fade-in">
+       <div class="stats-grid">
+          <div class="stat-box">
+             <span class="label">勝率 (Win Rate)</span>
+             <span class="val win-rate">{{ futuresStats.win_rate }}%</span>
+          </div>
+          <div class="stat-box">
+             <span class="label">總損益 (PnL)</span>
+             <span class="val" :class="futuresStats.total_pnl > 0 ? 'text-profit' : 'text-loss'">
+                ${{ numberFormat(futuresStats.total_pnl, 2) }}
+             </span>
+          </div>
+          <div class="stat-box">
+             <span class="label">平均 ROI</span>
+             <span class="val" :class="futuresStats.avg_roi > 0 ? 'text-profit' : 'text-loss'">
+                {{ numberFormat(futuresStats.avg_roi, 2) }}%
+             </span>
+          </div>
+          <div class="stat-box">
+             <span class="label">總交易次數</span>
+             <span class="val">{{ futuresStats.total_trades }}</span>
+          </div>
+       </div>
+
+       <div class="list-section">
+          <div class="section-header">
+            <h3>近期交易</h3>
+            <button class="add-btn" @click="alert('功能開發中，請期待下個版本！')"><span>+</span> 記一筆</button>
+          </div>
+          <div v-if="!futuresStats.history || futuresStats.history.length === 0" class="empty-state">
+             <p>尚無合約交易紀錄</p>
+          </div>
+          <div v-else class="coin-list">
+             <div v-for="trade in futuresStats.history" :key="trade.id" class="account-card-style">
+                <div class="card-left">
+                   <div class="acc-name">{{ trade.symbol }} <span class="leverage">x{{ trade.leverage }}</span></div>
+                   <div class="acc-meta">
+                      <span class="badge" :class="trade.side === 'LONG' ? 'badge-long' : 'badge-short'">{{ trade.side }}</span>
+                      <span class="currency">{{ trade.close_date ? trade.close_date.substring(5,10) : 'Open' }}</span>
+                   </div>
+                </div>
+                <div class="card-right">
+                   <div class="acc-balance" :class="trade.pnl > 0 ? 'text-profit' : 'text-loss'">
+                      {{ trade.pnl > 0 ? '+' : '' }}{{ numberFormat(trade.pnl, 2) }}
+                   </div>
+                   <div class="pnl-text-sm" :class="trade.roi_percent > 0 ? 'text-profit-sm' : 'text-loss-sm'">
+                      {{ trade.roi_percent }}%
+                   </div>
+                </div>
+             </div>
+          </div>
+       </div>
+    </div>
+
+    <div v-if="isTargetModalOpen" class="modal-overlay" @click.self="isTargetModalOpen = false">
+        <div class="modal-content small-modal">
+            <div class="modal-header">
+                <h3>設定現金目標比例</h3>
+                <button class="close-btn" @click="isTargetModalOpen = false">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="hint-text">請設定您希望保留的 USDT 現金比例 (0% - 100%)。</p>
+                <div class="input-with-suffix">
+                    <input type="number" v-model.number="tempTargetRatio" class="input-std" min="0" max="100">
+                    <span class="suffix">%</span>
+                </div>
+                <div class="slider-wrapper">
+                    <input type="range" v-model.number="tempTargetRatio" min="0" max="100" class="range-slider">
+                </div>
+                <button class="save-btn main-action" @click="saveTargetRatio" :disabled="saving">
+                    {{ saving ? '儲存中...' : '儲存設定' }}
+                </button>
+            </div>
+        </div>
     </div>
 
     <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>新增紀錄</h3>
+          <h3>新增現貨紀錄</h3>
           <button class="close-btn" @click="closeModal">×</button>
         </div>
 
@@ -130,7 +233,6 @@
                 <button class="close-btn" @click="closeEditModal">×</button>
             </div>
             <p class="hint-text">請輸入該資產在指定日期的實際餘額，系統將自動補齊差額記錄。</p>
-            
             <form @submit.prevent="submitBalanceAdjustment">
                 <div class="form-group mt-4">
                     <label>快照日期</label>
@@ -155,8 +257,12 @@ import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto';
 import liff from '@line/liff';
 
+// 狀態管理
+const view = ref('portfolio');
 const dashboard = ref({ totalUsd: 0, totalInvestedTwd: 0, pnl: 0, pnlPercent: 0 });
 const holdings = ref([]);
+const rebalanceData = ref({ currentUsdtRatio: 0, targetRatio: 10, action: 'HOLD', message: '載入中...' });
+const futuresStats = ref({ win_rate: 0, total_pnl: 0, avg_roi: 0, total_trades: 0, history: [] });
 const usdTwdRate = ref(32);
 const loading = ref(false);
 
@@ -166,17 +272,44 @@ const historyRange = ref('1y');
 
 const isModalOpen = ref(false);
 const isEditBalanceOpen = ref(false);
+const isTargetModalOpen = ref(false);
 const currentTab = ref('trade');
 const tabs = [{ id: 'fiat', name: '出入金' }, { id: 'trade', name: '交易' }, { id: 'earn', name: '理財' }];
 
 const form = reactive({ type: 'buy', baseCurrency: '', quoteCurrency: 'USDT', price: null, quantity: null, total: null, fee: null, date: new Date().toISOString().substring(0, 10), note: '' });
 const editBalanceForm = reactive({ symbol: '', current: 0, newBalance: 0, date: new Date().toISOString().substring(0, 10) });
+const tempTargetRatio = ref(10);
+const saving = ref(false);
 
 const submitButtonText = computed(() => {
   if (currentTab.value === 'fiat') return form.type === 'deposit' ? '確認入金' : '確認出金';
   if (currentTab.value === 'trade') return form.type === 'buy' ? '確認買入' : '確認賣出';
   return '新增紀錄';
 });
+const recentTransactions = ref([]);
+
+// 新增函式
+async function fetchRecentTransactions() {
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_transactions`);
+    if (response && response.ok) {
+        const res = await response.json();
+        if (res.status === 'success') {
+            recentTransactions.value = res.data;
+        }
+    }
+}
+
+function switchView(target) {
+    view.value = target;
+    if (target === 'portfolio') {
+        fetchCryptoData();
+        setTimeout(() => fetchHistory(historyRange.value), 100);
+    } else if (target === 'rebalance') {
+        fetchRebalance();
+    } else if (target === 'futures') {
+        fetchFutures();
+    }
+}
 
 async function fetchCryptoData() {
   loading.value = true;
@@ -194,6 +327,8 @@ async function fetchCryptoData() {
 
 async function fetchHistory(range = '1y') {
     historyRange.value = range;
+    if (!historyChartCanvas.value) return; 
+    
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_history&range=${range}`);
     if (response && response.ok) {
         const result = await response.json();
@@ -224,9 +359,9 @@ function renderChart(chartData) {
                 backgroundColor: gradient,
                 borderWidth: 2,
                 fill: true,
-                pointRadius: 0, // 🌟 隱藏數據點
+                pointRadius: 0,
                 pointHoverRadius: 6,
-                tension: 0.4 // 🌟 平滑曲線
+                tension: 0.4
             }]
         },
         options: {
@@ -244,6 +379,84 @@ function renderChart(chartData) {
     });
 }
 
+async function fetchRebalance() {
+    // 這一行會去後端拿最新的建議與目標比例
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_rebalancing_advice`);
+    
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            // 🟢 關鍵：這裡必須重新賦值，Vue 才會更新畫面
+            rebalanceData.value = {
+                currentUsdtRatio: parseFloat(result.data.current_usdt_ratio || 0),
+                targetRatio: parseFloat(result.data.target_ratio || 10), // 這裡應該要拿到新的值
+                action: result.data.action,
+                message: result.data.message
+            };
+            
+            // Debug: 印出來看看有沒有變
+            console.log("Updated Rebalance Data:", rebalanceData.value);
+        }
+    }
+}
+
+async function fetchFutures() {
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_futures_stats`);
+    if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            futuresStats.value = result.data;
+        }
+    }
+}
+
+function openTargetModal() {
+    tempTargetRatio.value = rebalanceData.value.targetRatio;
+    isTargetModalOpen.value = true;
+}
+
+async function saveTargetRatio() {
+    if (tempTargetRatio.value < 0 || tempTargetRatio.value > 100) {
+        alert("比例必須在 0 ~ 100 之間");
+        return;
+    }
+    saving.value = true;
+    
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=update_crypto_target`, {
+        method: 'POST',
+        body: JSON.stringify({ ratio: tempTargetRatio.value })
+    });
+
+    if (response && response.ok) {
+        const res = await response.json();
+        if (res.status === 'success') {
+            isTargetModalOpen.value = false;
+            fetchRebalance();
+            alert("設定已更新");
+        } else {
+            alert(res.message);
+        }
+    }
+    saving.value = false;
+}
+
+function openTransactionModal() {
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
+    resetForm(); 
+    isModalOpen.value = true; 
+}
+function closeModal() { isModalOpen.value = false; }
+function switchTab(tabId) { 
+    currentTab.value = tabId; resetForm(); 
+    if (tabId === 'fiat') { form.type = 'deposit'; form.baseCurrency = 'USDT'; form.quoteCurrency = 'TWD'; }
+    else if (tabId === 'trade') { form.type = 'buy'; form.baseCurrency = ''; form.quoteCurrency = 'USDT'; }
+    else { form.type = 'earn'; }
+}
+function resetForm() { form.price = null; form.quantity = null; form.total = null; form.fee = null; form.note = ''; form.date = new Date().toISOString().substring(0, 10); }
+function calcTotal() { if (form.price && form.quantity) form.total = parseFloat((form.price * form.quantity).toFixed(4)); }
+function calcQuantity() { if (form.total && form.price > 0) form.quantity = parseFloat((form.total / form.price).toFixed(6)); }
+function alert(msg) { window.alert(msg); } 
+
 function openEditBalanceModal(coin) {
     editBalanceForm.symbol = coin.symbol;
     editBalanceForm.current = coin.balance;
@@ -255,16 +468,14 @@ function closeEditModal() { isEditBalanceOpen.value = false; }
 
 async function submitBalanceAdjustment() {
     if (!confirm(`確定要更新 ${editBalanceForm.symbol} 的快照嗎？`)) return;
-    
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=adjust_crypto_balance`, {
         method: 'POST',
         body: JSON.stringify({ 
             symbol: editBalanceForm.symbol, 
             new_balance: parseFloat(editBalanceForm.newBalance),
-            date: editBalanceForm.date // 傳送日期
+            date: editBalanceForm.date
         })
     });
-
     if (response && response.ok) {
         const res = await response.json();
         if (res.status === 'success') {
@@ -272,9 +483,7 @@ async function submitBalanceAdjustment() {
             fetchCryptoData(); 
             fetchHistory(historyRange.value); 
             alert('快照已更新！');
-        } else {
-            alert('失敗：' + res.message);
-        }
+        } else { alert('失敗：' + res.message); }
     }
 }
 
@@ -296,121 +505,192 @@ async function submitTransaction() {
   } else { alert('網路錯誤'); }
 }
 
-function openTransactionModal() {
-    // 🟢 新增：檢查登入
-    if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: window.location.href });
-        return;
-    }
-    
-    resetForm(); 
-    isModalOpen.value = true; 
-}
-function closeModal() { isModalOpen.value = false; }
-function switchTab(tabId) { 
-    currentTab.value = tabId; resetForm(); 
-    if (tabId === 'fiat') { form.type = 'deposit'; form.baseCurrency = 'USDT'; form.quoteCurrency = 'TWD'; }
-    else if (tabId === 'trade') { form.type = 'buy'; form.baseCurrency = ''; form.quoteCurrency = 'USDT'; }
-    else { form.type = 'earn'; }
-}
-function resetForm() { form.price = null; form.quantity = null; form.total = null; form.fee = null; form.note = ''; form.date = new Date().toISOString().substring(0, 10); }
-function calcTotal() { if (form.price && form.quantity) form.total = parseFloat((form.price * form.quantity).toFixed(4)); }
-function calcQuantity() { if (form.total && form.price > 0) form.quantity = parseFloat((form.total / form.price).toFixed(6)); }
-function alert(msg) { window.alert(msg); } 
-
-onMounted(() => { fetchCryptoData(); fetchHistory(); });
+onMounted(() => { 
+    fetchCryptoData();
+    setTimeout(() => fetchHistory(), 100);
+    fetchRecentTransactions();
+});
 </script>
 
 <style scoped>
-/* 🎨 風格統一 CSS */
-:root {
-    --text-primary: #5d5d5d;  
-    --text-secondary: #8c8c8c;
-    --text-accent: #a98467;
-    --color-primary: #d4a373; 
-    --color-teal: #2A9D8F;    
-    --color-danger: #e5989b; 
-    --bg-card: #ffffff;
-    --shadow-soft: 0 4px 20px rgba(212, 163, 115, 0.15);
+/* =========================================
+   ★★★ 核心 CSS 優化：解決太寬與質感問題 ★★★
+   ========================================= */
+
+:root { --text-primary: #5d5d5d; --color-primary: #d4a373; --color-teal: #2A9D8F; --color-danger: #e5989b; }
+
+/* 1. 限制容器最大寬度，讓在大螢幕上不會無限延伸 */
+.crypto-container {
+    max-width: 600px; /* 🟢 限制內容最大寬度，類似手機 App 感覺 */
+    margin: 0 auto;   /* 置中 */
+    padding-bottom: 80px;
+    color: var(--text-primary);
 }
 
-.crypto-container { padding-bottom: 40px; color: var(--text-primary); font-family: inherit; letter-spacing: 0.03em; }
+.fade-in { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* 儀表板 */
-.dashboard-header { background: white; margin: 0 0 20px 0; padding: 24px 20px; border-bottom: 1px solid #f0ebe5; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
-.subtitle { font-size: 0.85rem; color: #8c7b75; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
-.main-balance { font-size: 2.2rem; font-weight: 700; color: #333; margin-bottom: 20px; }
-.currency-symbol { font-size: 1.2rem; vertical-align: top; color: #888; margin-right: 2px; }
-.currency-code { font-size: 0.9rem; color: #aaa; font-weight: 400; margin-left: 4px; }
-.stats-row { display: flex; justify-content: space-between; background: #fdfcfb; padding: 12px; border-radius: 12px; border: 1px solid #f0f0f0; }
-.vertical-line { width: 1px; background: #eee; margin: 0 10px; }
-.stat-item { flex: 1; display: flex; flex-direction: column; align-items: center; }
-.stat-item .label { font-size: 0.75rem; color: #999; margin-bottom: 4px; }
+/* 2. Modal 優化：置中、限制寬度、圓角、陰影、隱藏卷軸 */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6); /* 加深背景遮罩 */
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: center; /* 垂直置中 */
+    padding: 20px;
+    backdrop-filter: blur(2px); /* 背景模糊特效 (質感提升) */
+}
+
+.modal-content {
+    background: white;
+    width: 100%;
+    max-width: 400px; /* 🟢 限制 Modal 最大寬度 */
+    border-radius: 20px; /* 更圓潤的邊角 */
+    padding: 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2); /* 質感陰影 */
+    max-height: 85vh;
+    overflow-y: auto;
+    animation: popIn 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28); /* 彈出動畫 */
+    
+    /* 🟢 隱藏卷軸 (核心修正) */
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+/* 隱藏 Chrome/Safari/Webkit 卷軸 */
+.modal-content::-webkit-scrollbar {
+    display: none;
+}
+
+/* 小一點的 Modal (給設定用) */
+.modal-content.small-modal {
+    max-width: 320px;
+}
+
+/* 3. 輸入框與滑桿美化 */
+.input-with-suffix {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.input-with-suffix .input-std {
+    padding-right: 40px;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #2A9D8F;
+    width: 100%;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 12px;
+}
+.suffix {
+    position: absolute;
+    right: 20px;
+    color: #888;
+    font-weight: bold;
+}
+.range-slider {
+    width: 100%;
+    margin-bottom: 20px;
+    accent-color: #2A9D8F; /* 滑桿顏色 */
+    height: 6px;
+    cursor: pointer;
+}
+
+/* 4. 其他 UI 微調 */
+.hint-text { font-size: 0.9rem; color: #666; margin-bottom: 20px; text-align: center; line-height: 1.5; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header h3 { margin: 0; font-size: 1.2rem; color: #333; }
+.close-btn { background: none; border: none; font-size: 1.8rem; color: #aaa; cursor: pointer; line-height: 1; }
+
+/* 5. 彈出動畫 Keyframes */
+@keyframes popIn {
+    0% { opacity: 0; transform: scale(0.9); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* 分頁導航 */
+.crypto-tabs { display: flex; gap: 8px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #f0f0f0; margin-bottom: 10px; overflow-x: auto; white-space: nowrap; }
+.crypto-tabs button { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid #eee; background: #f9f9f9; color: #888; font-weight: 500; font-size: 0.9rem; transition: all 0.2s; cursor: pointer; }
+.crypto-tabs button.active { background: #2A9D8F; color: white; border-color: #2A9D8F; box-shadow: 0 2px 6px rgba(42, 157, 143, 0.3); }
+
+/* 現貨視圖樣式 */
+.dashboard-header { background: white; margin-bottom: 16px; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+.subtitle { font-size: 0.8rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.main-balance { font-size: 2rem; font-weight: 800; color: #333; margin-bottom: 16px; }
+.currency-symbol { font-size: 1.1rem; color: #888; margin-right: 2px; }
+.currency-code { font-size: 0.8rem; color: #aaa; font-weight: 400; margin-left: 4px; }
+.stats-row { display: flex; background: #f8f9fa; padding: 12px; border-radius: 12px; }
+.stat-item { flex: 1; text-align: center; }
+.stat-item .label { font-size: 0.75rem; color: #999; display: block; margin-bottom: 2px; }
 .stat-item .value { font-size: 0.95rem; font-weight: 600; color: #555; }
+.vertical-line { width: 1px; background: #eee; margin: 0 10px; }
 .text-profit { color: #2A9D8F; } .text-loss { color: #e5989b; }
 
-/* 圖表 */
-.card-section { margin-bottom: 20px; padding: 0 16px; }
-.chart-card { background: white; padding: 16px; border-radius: 16px; border: 1px solid #f0ebe5; box-shadow: var(--shadow-soft); }
-.chart-header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
-.chart-header-row h3 { font-size: 1.1rem; font-weight: 600; color: #8c7b75; margin: 0; white-space: nowrap; }
-.chart-box-lg { width: 100%; height: 250px; position: relative; }
-.date-controls { display: flex; align-items: center; gap: 8px; background: #f7f5f0; padding: 4px 8px; border-radius: 20px; }
-.filter-btn-sm { background: none; border: none; padding: 4px 8px; border-radius: 16px; font-size: 0.8rem; color: #a98467; cursor: pointer; transition: all 0.2s; }
-.filter-btn-sm.active { background: #2A9D8F; color: white; font-weight: bold; }
-.chart-hint-sm { font-size: 0.75rem; color: #aaa; text-align: center; margin-top: 8px; }
+.chart-card { background: white; padding: 16px; margin: 0 16px 16px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+.chart-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.chart-header-row h3 { font-size: 1rem; margin: 0; color: #666; }
+.chart-box-lg { width: 100%; height: 220px; position: relative; }
+.date-controls button { margin-left: 4px; border: none; background: none; font-size: 0.8rem; color: #999; cursor: pointer; }
+.date-controls button.active { color: #2A9D8F; font-weight: bold; }
 
-/* 列表區塊 */
 .list-section { padding: 0 16px; }
-.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.section-header h3 { font-size: 1.1rem; font-weight: 600; color: #8c7b75; margin: 0; }
-.add-btn { background-color: #d4a373; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 10px rgba(212, 163, 115, 0.3); }
-.empty-state { text-align: center; padding: 40px 20px; background: white; border-radius: 16px; border: 1px dashed #ddd; color: #aaa; }
+.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.section-header h3 { font-size: 1.1rem; color: #555; margin: 0; }
+.add-btn { background: #d4a373; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; box-shadow: 0 2px 6px rgba(212, 163, 115, 0.3); cursor: pointer; }
 
-/* 🌟 持倉列表 (復刻帳戶卡片樣式) */
-.coin-list { display: flex; flex-direction: column; gap: 12px; }
-.account-card-style { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); display: flex; justify-content: space-between; align-items: center; border: 1px solid #f0ebe5; }
-.card-left { flex: 1; padding-right: 10px; }
-.acc-name { font-weight: 600; font-size: 1rem; color: #5d5d5d; }
-.acc-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.currency { font-size: 0.75rem; color: #8c8c8c; }
-.badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
-.badge-crypto { background: #E6F5F5; color: #2A9D8F; }
+.coin-list { display: flex; flex-direction: column; gap: 10px; }
+.account-card-style { background: white; padding: 14px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+.acc-name { font-weight: 600; color: #333; font-size: 1rem; }
+.acc-meta { display: flex; gap: 6px; margin-top: 4px; align-items: center; }
+.badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+.badge-crypto { background: #e6fcf5; color: #2A9D8F; }
 .badge-stable { background: #f0f0f0; color: #666; }
-.card-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.acc-balance { font-size: 1rem; font-weight: 700; letter-spacing: 0.5px; }
-.text-asset { color: #5d5d5d; } .text-debt { color: #e5989b; } 
+.badge-long { background: #e6fcf5; color: #2A9D8F; }
+.badge-short { background: #fff5f5; color: #e5989b; }
+.currency { font-size: 0.7rem; color: #aaa; }
+.acc-balance { font-weight: 700; font-size: 1rem; text-align: right; }
+.pill-btn { font-size: 0.75rem; padding: 4px 10px; border-radius: 10px; border: none; cursor: pointer; margin-top: 4px; }
+.pill-btn.update-crypto { background: #f0f0f0; color: #666; }
 
-/* 按鈕群組 */
-.action-buttons { display: flex; gap: 8px; margin-top: 6px; align-items: center;}
-.pill-btn { padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; white-space: nowrap; border: none; cursor: pointer; }
-.pill-btn.update-crypto { background-color: #2A9D8F; color: white; box-shadow: 0 2px 5px rgba(42, 157, 143, 0.3); }
-.pill-btn.update-crypto:hover { background-color: #258a7d; }
+/* 再平衡視圖樣式 */
+.rebalance-card { background: white; padding: 20px; border-radius: 16px; margin: 0 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center; }
+.progress-bar-container { position: relative; height: 16px; background: #eee; border-radius: 10px; margin: 20px 0; overflow: visible; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); border-radius: 10px; transition: width 0.5s ease; }
+.target-line { position: absolute; top: -5px; bottom: -5px; width: 2px; background: #333; z-index: 2; }
+.target-label { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 0.7rem; color: #333; white-space: nowrap; font-weight: bold; }
+.ratio-text { font-size: 1rem; color: #555; margin-bottom: 20px; }
+.highlight { font-weight: bold; color: #0077b6; font-size: 1.2rem; }
+.advice-box { display: flex; align-items: flex-start; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 12px; border-left: 4px solid #ccc; margin-bottom: 20px; }
+.advice-box.BUY { border-left-color: #2A9D8F; background: #f0fdf9; }
+.advice-box.SELL { border-left-color: #e5989b; background: #fff5f5; }
+.advice-icon { font-size: 1.5rem; margin-right: 12px; }
+.advice-content h4 { margin: 0 0 4px 0; font-size: 1rem; color: #333; }
+.advice-content p { margin: 0; font-size: 0.9rem; color: #666; line-height: 1.4; }
+.setting-btn { background: #f0f0f0; border: none; padding: 10px 20px; border-radius: 30px; color: #555; font-size: 0.9rem; cursor: pointer; transition: background 0.2s; margin-top: 10px; width: 100%; font-weight: 500;}
+.setting-btn:hover { background: #e0e0e0; }
 
-/* 歷史/刪除按鈕 */
-.text-btn { background: transparent; border: none; cursor: pointer; font-size: 0.85rem; padding: 2px 4px; transition: opacity 0.2s; text-decoration: underline; }
-.text-btn:hover { opacity: 0.7; }
-.text-btn.view-history { color: #8c8c8c; }
-.text-btn.delete { color: #e5989b; }
-
-.pnl-text-sm { font-size: 0.75rem; font-weight: 500; white-space: nowrap; }
+/* 合約戰績視圖樣式 */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 16px; margin-bottom: 20px; }
+.stat-box { background: white; padding: 15px; border-radius: 12px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
+.stat-box .label { display: block; font-size: 0.75rem; color: #999; margin-bottom: 4px; }
+.stat-box .val { font-size: 1.1rem; font-weight: 700; color: #555; }
+.stat-box .win-rate { color: #d4a373; font-size: 1.3rem; }
+.pnl-text-sm { font-size: 0.75rem; font-weight: 500; margin-top: 2px; }
 .text-profit-sm { color: #2A9D8F; } .text-loss-sm { color: #e5989b; }
+.leverage { font-size: 0.7rem; background: #eee; padding: 1px 4px; border-radius: 4px; color: #666; margin-left: 4px; }
 
-/* Modal */
-.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: flex-end; }
-@media (min-width: 600px) { .modal-overlay { align-items: center; } .modal-content { border-radius: 16px; width: 420px; } }
-.modal-content { background: white; width: 100%; max-width: 500px; border-radius: 20px 20px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
-.modal-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-.modal-header h3 { margin: 0; font-size: 1.1rem; color: #555; }
-.close-btn { background: none; border: none; font-size: 1.5rem; color: #999; cursor: pointer; }
-
-/* Form & Inputs */
+/* 表單 */
 .tabs { display: flex; background: #f2f2f2; padding: 4px; border-radius: 12px; margin-bottom: 20px; }
-.tab-btn { flex: 1; border: none; background: transparent; padding: 8px; font-size: 0.9rem; color: #777; cursor: pointer; border-radius: 10px; transition: all 0.2s;}
+.tab-btn { flex: 1; border: none; background: transparent; padding: 8px; font-size: 0.9rem; color: #777; cursor: pointer; border-radius: 10px; }
 .tab-btn.active { background: white; color: #333; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 0.85rem; color: #888; margin-bottom: 6px; }
-.input-std { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 1rem; background: #f9f9f9; box-sizing: border-box; transition: border 0.2s; }
+.input-std { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 1rem; background: #f9f9f9; box-sizing: border-box; }
 .input-std:focus { border-color: #2A9D8F; background: white; outline: none; }
 .input-group { display: flex; align-items: center; gap: 8px; }
 .separator { color: #aaa; font-weight: bold; }
@@ -422,11 +702,8 @@ onMounted(() => { fetchCryptoData(); fetchHistory(); });
 .radio-label.sell.active { border-color: #e5989b; color: #c44536; background: #fff5f5; }
 .save-btn { width: 100%; padding: 14px; color: white; border: none; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
 .save-btn.main-action { background-color: #d4a373; } 
-.save-btn.main-action:hover { background-color: #c19263; }
 .save-btn.update-crypto { background-color: #2A9D8F; } 
-.save-btn.update-crypto:hover { background-color: #258a7d; }
+.save-btn:disabled { opacity: 0.6; }
 .form-row { display: flex; gap: 12px; } .half { flex: 1; }
 .mt-2 { margin-top: 8px; } .mt-4 { margin-top: 16px; }
-.hint-text { font-size: 0.85rem; color: #666; margin-bottom: 15px; line-height: 1.5; background: #f9f9f9; padding: 10px; border-radius: 8px; }
-.hint { font-size: 0.8rem; color: #999; margin-top: -10px; margin-bottom: 16px; }
 </style>

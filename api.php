@@ -708,7 +708,37 @@ try {
             $count = $transactionService->processRecurring($dbUserId);
             $response = ['status' => 'success', 'processed_count' => $count];
             break;
-            
+
+            // 🟢 [新增] 更新加密貨幣目標現金比例
+        // 🟢 [修正] 更新加密貨幣目標現金比例
+        case 'update_crypto_target':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $ratio = isset($input['ratio']) ? (float)$input['ratio'] : null;
+
+            if ($ratio === null || $ratio < 0 || $ratio > 100) {
+                $response = ['status' => 'error', 'message' => '比例必須在 0 ~ 100 之間'];
+                break;
+            }
+
+            try {
+                // 修正點：使用 $db->getConnection() 獲取連線
+                $conn = $db->getConnection(); 
+                $stmt = $conn->prepare("UPDATE users SET target_usdt_ratio = ? WHERE id = ?");
+                $stmt->execute([$ratio, $dbUserId]);
+                $response = ['status' => 'success', 'message' => '目標比例已更新'];
+            } catch (Exception $e) {
+                error_log("Update Target Error: " . $e->getMessage());
+                $response = ['status' => 'error', 'message' => '更新失敗'];
+            }
+            break;
+        case 'get_crypto_transactions':
+            // 簡單撈取最近 20 筆
+            $sql = "SELECT * FROM crypto_transactions WHERE user_id = :uid ORDER BY transaction_date DESC LIMIT 20";
+            $stmt = $dbConn->prepare($sql);
+            $stmt->execute([':uid' => $dbUserId]);
+            $response = ['status' => 'success', 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)];
+            break;
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
             break;

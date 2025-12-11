@@ -334,5 +334,104 @@ class CryptoService {
             ]
         ];
     }
+    /**
+     * [新增] 需求二：機械式再平衡建議
+     */
+    public function getRebalancingAdvice(int $userId): array {
+        // 1. 取得用戶設定的目標比例
+        $stmt = $this->pdo->prepare("SELECT target_usdt_ratio FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $targetRatio = (float)$stmt->fetchColumn(); // 例如 10.0
+
+        // 2. 取得當前資產分佈 (呼叫既有的 getDashboardData)
+        $dashboard = $this->getDashboardData($userId);
+        $totalAssetsUsd = $dashboard['dashboard']['totalUsd']; // 總資產 (含 USDT + Crypto)
+        
+        // 找出目前的 USDT 餘額
+        $currentUsdt = 0;
+        foreach ($dashboard['holdings'] as $h) {
+            if ($h['symbol'] === 'USDT') {
+                $currentUsdt = $h['balance'];
+                break;
+            }
+        }
+
+        // 3. 計算目標與差額
+        $targetUsdt = $totalAssetsUsd * ($targetRatio / 100);
+        $diff = $currentUsdt - $targetUsdt; // 正數代表現金太多(該買)，負數代表現金太少(該賣)
+
+        // 4. 生成建議
+        $advice = [];
+        $action = '';
+        
+        // 設定一個容忍區間 (例如偏差 < 1% 不動作，避免過度頻繁交易)
+        $threshold = $totalAssetsUsd * 0.01; 
+
+        if (abs($diff) < $threshold) {
+            $action = 'HOLD';
+            $message = "目前配置平衡，無需操作。";
+        } elseif ($diff > 0) {
+            // 現金太多 -> 買入其他幣種
+            $action = 'BUY';
+            $amountToInvest = abs($diff);
+            $message = "現金比例過高 ({$targetRatio}%)。建議投入 $ " . number_format($amountToInvest, 2) . " USDT 到加密資產。";
+        } else {
+            // 現金太少 -> 賣出部分幣種
+            $action = 'SELL';
+            $amountToSell = abs($diff);
+            $message = "現金水位不足。建議賣出價值 $ " . number_format($amountToSell, 2) . " 的加密資產回補 USDT。";
+        }
+
+        return [
+            'target_ratio' => $targetRatio,
+            'current_usdt' => $currentUsdt,
+            'target_usdt' => $targetUsdt,
+            'action' => $action,
+            'message' => $message
+        ];
+    }
+
+    /**
+     * [新增] 需求三：合約/短線交易統計 (勝率、ROI)
+     */
+    public function getFuturesStats(int $userId): array {
+        // 1. 撈取所有「已平倉」的交易
+        $sql = "SELECT * FROM crypto_futures WHERE user_id = :uid AND status = 'CLOSED'";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':uid' => $userId]);
+        $trades = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $totalTrades = count($trades);
+        if ($totalTrades === 0) {
+            return ['win_rate' => 0, 'total_pnl' => 0, 'avg_roi' => 0, 'trades' => []];
+        }
+
+        $wins = 0;
+        $totalPnl = 0;
+        $totalRoi = 0;
+
+        foreach ($trades as $t) {
+            if ($t['pnl'] > 0) $wins++;
+            $totalPnl += $t['pnl'];
+            $totalRoi += $t['roi_percent'];
+        }
+
+        return [
+            'win_rate' => round(($wins / $totalTrades) * 100, 1), // 勝率 %
+            'total_trades' => $totalTrades,
+            'total_pnl' => $totalPnl,
+            'avg_roi' => round($totalRoi / $totalTrades, 2), // 平均 ROI
+            'history' => array_slice($trades, 0, 10) // 只回傳最近 10 筆供顯示
+        ];
+    }
+
+    /**
+     * [新增] 開倉/平倉操作
+     */
+    public function handleFuturesTrade(int $userId, array $data): bool {
+        // ... (實作開倉 INSERT 或平倉 UPDATE 的邏輯)
+        // 平倉時需自動計算 PnL: (Exit - Entry) * Size * Leverage (視做多做空而定)
+        return true; 
+    }
 }
 ?>
