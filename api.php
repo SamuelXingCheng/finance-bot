@@ -526,9 +526,11 @@ try {
             try {
                 $cryptoService = new CryptoService();
                 
-                // 呼叫 Service 獲取歷史資料
-                // 如果您的 CryptoService 裡沒有 getHistoryData 方法，請參考步驟二
-                $chartData = $cryptoService->getHistoryData($dbUserId, $range);
+                // ❌ 原本的寫法 (依賴快照表，導致沒資料)
+                // $chartData = $cryptoService->getHistoryData($dbUserId, $range);
+                
+                // ✅ 修改後 (依照交易紀錄即時計算)
+                $chartData = $cryptoService->getHistoryChartData($dbUserId, $range);
                 
                 $response = ['status' => 'success', 'data' => $chartData];
             } catch (Exception $e) {
@@ -669,16 +671,6 @@ try {
             }
             break;
         
-        case 'check_recurring':
-            // 檢查是否有到期但尚未執行的週期性交易
-            // 簡單邏輯：查詢 recurring_rules WHERE next_run_date <= TODAY AND is_active = 1
-            // 遍歷結果，呼叫 $transactionService->addTransaction()
-            // 更新 next_run_date 到下個月
-            
-            // (這裡為了簡潔省略詳細 SQL，建議在 TransactionService 新增 processRecurring($userId) 方法)
-            $count = $transactionService->processRecurring($userId);
-            $response = ['status' => 'success', 'processed_count' => $count];
-            break;
         
         // 🟢 1. 獲取訂閱列表
         case 'get_subscriptions':
