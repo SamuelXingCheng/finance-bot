@@ -433,5 +433,48 @@ class CryptoService {
         // 平倉時需自動計算 PnL: (Exit - Entry) * Size * Leverage (視做多做空而定)
         return true; 
     }
+    /**
+     * 獲取歷史資產趨勢 (圖表用)
+     */
+    public function getHistoryData($userId, $range = '1y')
+    {
+        $db = new Database();
+        $conn = $db->getConnection();
+
+        // 設定時間範圍
+        $interval = '1 YEAR';
+        if ($range === '1m') $interval = '1 MONTH';
+        if ($range === '6m') $interval = '6 MONTH';
+        
+        // 抓取每日資產快照 (假設您有 daily_asset_snapshots 表格)
+        // 如果您是從交易紀錄即時計算，邏輯會比較複雜，這裡預設使用快照表
+        $sql = "SELECT snapshot_date, total_usd_value 
+                FROM daily_asset_snapshots 
+                WHERE user_id = :uid 
+                  AND snapshot_date >= DATE_SUB(NOW(), INTERVAL $interval)
+                ORDER BY snapshot_date ASC";
+
+        $stmt = $conn->prepare($sql);
+        $stmt->execute([':uid' => $userId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $labels = [];
+        $data = [];
+
+        foreach ($rows as $row) {
+            $labels[] = substr($row['snapshot_date'], 5, 5); // 只取 MM-DD
+            $data[] = (float)$row['total_usd_value'];
+        }
+
+        // 如果完全沒資料 (剛開始使用)，手動補一筆當下的資料以免圖表壞掉
+        if (empty($data)) {
+            $currentSummary = $this->getDashboardData($userId); // 取得當前資產
+            $labels[] = date('m-d');
+            $data[] = (float)$currentSummary['dashboard']['totalUsd'];
+        }
+
+        return ['labels' => $labels, 'data' => $data];
+    }
+    
 }
 ?>

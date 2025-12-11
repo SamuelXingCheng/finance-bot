@@ -58,6 +58,7 @@
 
         <div v-if="holdings.length === 0" class="empty-state">
           <p>尚未有交易紀錄</p>
+          <p class="sub-text">點擊上方按鈕開始記錄您的第一筆交易。</p>
         </div>
 
         <div v-else class="coin-list">
@@ -85,6 +86,40 @@
           </div>
         </div>
       </div>
+
+      <div class="list-section mt-4">
+        <div class="section-header">
+          <h3>近期交易紀錄</h3>
+        </div>
+
+        <div v-if="recentTransactions.length === 0" class="empty-state">
+          <p>尚無交易紀錄</p>
+        </div>
+
+        <div v-else class="coin-list">
+          <div v-for="tx in recentTransactions" :key="tx.id" class="account-card-style">
+             <div class="card-left">
+                <div class="acc-name">
+                   {{ tx.type === 'buy' ? '買入' : (tx.type === 'sell' ? '賣出' : (tx.type === 'deposit' ? '入金' : '出金')) }} 
+                   {{ tx.base_currency || 'USDT' }}
+                </div>
+                <div class="acc-meta">
+                   <span class="currency">{{ tx.transaction_date ? tx.transaction_date.substring(0, 16) : '' }}</span>
+                </div>
+             </div>
+             <div class="card-right">
+                <div class="acc-balance" :class="['buy','deposit','earn'].includes(tx.type) ? 'text-profit' : 'text-loss'">
+                   {{ ['buy','deposit','earn'].includes(tx.type) ? '+' : '-' }} 
+                   {{ numberFormat(tx.quantity, 4) }}
+                </div>
+                <div class="pnl-text-sm" v-if="tx.price > 0">
+                   @ ${{ numberFormat(tx.price, 2) }}
+                </div>
+             </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <div v-if="view === 'rebalance'" class="rebalance-panel fade-in">
@@ -266,6 +301,8 @@ const futuresStats = ref({ win_rate: 0, total_pnl: 0, avg_roi: 0, total_trades: 
 const usdTwdRate = ref(32);
 const loading = ref(false);
 
+const recentTransactions = ref([]); // 近期交易
+
 const historyChartCanvas = ref(null);
 let historyChart = null;
 const historyRange = ref('1y');
@@ -286,23 +323,12 @@ const submitButtonText = computed(() => {
   if (currentTab.value === 'trade') return form.type === 'buy' ? '確認買入' : '確認賣出';
   return '新增紀錄';
 });
-const recentTransactions = ref([]);
-
-// 新增函式
-async function fetchRecentTransactions() {
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_transactions`);
-    if (response && response.ok) {
-        const res = await response.json();
-        if (res.status === 'success') {
-            recentTransactions.value = res.data;
-        }
-    }
-}
 
 function switchView(target) {
     view.value = target;
     if (target === 'portfolio') {
         fetchCryptoData();
+        fetchRecentTransactions(); // 切換回來時刷新列表
         setTimeout(() => fetchHistory(historyRange.value), 100);
     } else if (target === 'rebalance') {
         fetchRebalance();
@@ -323,6 +349,17 @@ async function fetchCryptoData() {
     }
   }
   loading.value = false;
+}
+
+// 撈取最近交易
+async function fetchRecentTransactions() {
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_transactions&limit=20`);
+    if (response && response.ok) {
+        const res = await response.json();
+        if (res.status === 'success') {
+            recentTransactions.value = res.data;
+        }
+    }
 }
 
 async function fetchHistory(range = '1y') {
@@ -380,22 +417,18 @@ function renderChart(chartData) {
 }
 
 async function fetchRebalance() {
-    // 這一行會去後端拿最新的建議與目標比例
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_rebalancing_advice`);
     
     if (response && response.ok) {
         const result = await response.json();
         if (result.status === 'success') {
-            // 🟢 關鍵：這裡必須重新賦值，Vue 才會更新畫面
+            // 更新再平衡資料
             rebalanceData.value = {
                 currentUsdtRatio: parseFloat(result.data.current_usdt_ratio || 0),
-                targetRatio: parseFloat(result.data.target_ratio || 10), // 這裡應該要拿到新的值
-                action: result.data.action,
-                message: result.data.message
+                targetRatio: parseFloat(result.data.target_ratio || 10), // 注意：若後端沒回傳值，這裡會變回 10
+                action: result.data.action || 'HOLD',
+                message: result.data.message || '目前配置平衡。'
             };
-            
-            // Debug: 印出來看看有沒有變
-            console.log("Updated Rebalance Data:", rebalanceData.value);
         }
     }
 }
@@ -415,6 +448,7 @@ function openTargetModal() {
     isTargetModalOpen.value = true;
 }
 
+// 🟢 [修正] 儲存目標比例後，前端先更新變數 (Optimistic Update)
 async function saveTargetRatio() {
     if (tempTargetRatio.value < 0 || tempTargetRatio.value > 100) {
         alert("比例必須在 0 ~ 100 之間");
@@ -430,8 +464,11 @@ async function saveTargetRatio() {
     if (response && response.ok) {
         const res = await response.json();
         if (res.status === 'success') {
+            // 🟢 這裡：先直接更新前端顯示，不要等 fetchRebalance
+            rebalanceData.value.targetRatio = tempTargetRatio.value; 
+            
             isTargetModalOpen.value = false;
-            fetchRebalance();
+            fetchRebalance(); // 背景再去抓最新的 (作為雙重確認)
             alert("設定已更新");
         } else {
             alert(res.message);
@@ -482,6 +519,7 @@ async function submitBalanceAdjustment() {
             closeEditModal();
             fetchCryptoData(); 
             fetchHistory(historyRange.value); 
+            fetchRecentTransactions(); // 刷新交易列表
             alert('快照已更新！');
         } else { alert('失敗：' + res.message); }
     }
@@ -500,7 +538,9 @@ async function submitTransaction() {
   if (response && response.ok) {
     const res = await response.json();
     if (res.status === 'success') {
-        closeModal(); fetchCryptoData(); fetchHistory(); alert('紀錄成功');
+        closeModal(); fetchCryptoData(); fetchHistory(); 
+        fetchRecentTransactions(); // 刷新交易列表
+        alert('紀錄成功');
     } else { alert('失敗：' + res.message); }
   } else { alert('網路錯誤'); }
 }
@@ -513,16 +553,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* =========================================
-   ★★★ 核心 CSS 優化：解決太寬與質感問題 ★★★
-   ========================================= */
-
+/* 樣式區 (保持不變) */
 :root { --text-primary: #5d5d5d; --color-primary: #d4a373; --color-teal: #2A9D8F; --color-danger: #e5989b; }
 
-/* 1. 限制容器最大寬度，讓在大螢幕上不會無限延伸 */
 .crypto-container {
-    max-width: 600px; /* 🟢 限制內容最大寬度，類似手機 App 感覺 */
-    margin: 0 auto;   /* 置中 */
+    max-width: 600px;
+    margin: 0 auto;
     padding-bottom: 80px;
     color: var(--text-primary);
 }
@@ -530,100 +566,45 @@ onMounted(() => {
 .fade-in { animation: fadeIn 0.3s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* 2. Modal 優化：置中、限制寬度、圓角、陰影、隱藏卷軸 */
 .modal-overlay {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6); /* 加深背景遮罩 */
-    z-index: 2000;
-    display: flex;
-    justify-content: center;
-    align-items: center; /* 垂直置中 */
-    padding: 20px;
-    backdrop-filter: blur(2px); /* 背景模糊特效 (質感提升) */
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6); z-index: 2000;
+    display: flex; justify-content: center; align-items: center;
+    padding: 20px; backdrop-filter: blur(2px);
 }
 
 .modal-content {
-    background: white;
-    width: 100%;
-    max-width: 400px; /* 🟢 限制 Modal 最大寬度 */
-    border-radius: 20px; /* 更圓潤的邊角 */
-    padding: 24px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.2); /* 質感陰影 */
-    max-height: 85vh;
-    overflow-y: auto;
-    animation: popIn 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28); /* 彈出動畫 */
-    
-    /* 🟢 隱藏卷軸 (核心修正) */
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
+    background: white; width: 100%; max-width: 400px;
+    border-radius: 20px; padding: 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    max-height: 85vh; overflow-y: auto;
+    animation: popIn 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    -ms-overflow-style: none; scrollbar-width: none;
 }
-/* 隱藏 Chrome/Safari/Webkit 卷軸 */
-.modal-content::-webkit-scrollbar {
-    display: none;
-}
+.modal-content::-webkit-scrollbar { display: none; }
+.modal-content.small-modal { max-width: 320px; }
 
-/* 小一點的 Modal (給設定用) */
-.modal-content.small-modal {
-    max-width: 320px;
-}
+.input-with-suffix { position: relative; display: flex; align-items: center; margin-bottom: 20px; }
+.input-with-suffix .input-std { padding-right: 40px; text-align: center; font-size: 1.5rem; font-weight: bold; color: #2A9D8F; width: 100%; border: 1px solid #ddd; border-radius: 12px; padding: 12px; }
+.suffix { position: absolute; right: 20px; color: #888; font-weight: bold; }
+.range-slider { width: 100%; margin-bottom: 20px; accent-color: #2A9D8F; height: 6px; cursor: pointer; }
 
-/* 3. 輸入框與滑桿美化 */
-.input-with-suffix {
-    position: relative;
-    display: flex;
-    align-items: center;
-    margin-bottom: 20px;
-}
-.input-with-suffix .input-std {
-    padding-right: 40px;
-    text-align: center;
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #2A9D8F;
-    width: 100%;
-    border: 1px solid #ddd;
-    border-radius: 12px;
-    padding: 12px;
-}
-.suffix {
-    position: absolute;
-    right: 20px;
-    color: #888;
-    font-weight: bold;
-}
-.range-slider {
-    width: 100%;
-    margin-bottom: 20px;
-    accent-color: #2A9D8F; /* 滑桿顏色 */
-    height: 6px;
-    cursor: pointer;
-}
-
-/* 4. 其他 UI 微調 */
 .hint-text { font-size: 0.9rem; color: #666; margin-bottom: 20px; text-align: center; line-height: 1.5; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .modal-header h3 { margin: 0; font-size: 1.2rem; color: #333; }
 .close-btn { background: none; border: none; font-size: 1.8rem; color: #aaa; cursor: pointer; line-height: 1; }
 
-/* 5. 彈出動畫 Keyframes */
-@keyframes popIn {
-    0% { opacity: 0; transform: scale(0.9); }
-    100% { opacity: 1; transform: scale(1); }
-}
+@keyframes popIn { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
 
-/* 分頁導航 */
 .crypto-tabs { display: flex; gap: 8px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #f0f0f0; margin-bottom: 10px; overflow-x: auto; white-space: nowrap; }
 .crypto-tabs button { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid #eee; background: #f9f9f9; color: #888; font-weight: 500; font-size: 0.9rem; transition: all 0.2s; cursor: pointer; }
 .crypto-tabs button.active { background: #2A9D8F; color: white; border-color: #2A9D8F; box-shadow: 0 2px 6px rgba(42, 157, 143, 0.3); }
 
-/* 現貨視圖樣式 */
 .dashboard-header { background: white; margin-bottom: 16px; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
 .subtitle { font-size: 0.8rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
 .main-balance { font-size: 2rem; font-weight: 800; color: #333; margin-bottom: 16px; }
 .currency-symbol { font-size: 1.1rem; color: #888; margin-right: 2px; }
-.currency-code { font-size: 0.8rem; color: #aaa; font-weight: 400; margin-left: 4px; }
+.currency-code { font-size: 0.9rem; color: #aaa; font-weight: 400; margin-left: 4px; }
 .stats-row { display: flex; background: #f8f9fa; padding: 12px; border-radius: 12px; }
 .stat-item { flex: 1; text-align: center; }
 .stat-item .label { font-size: 0.75rem; color: #999; display: block; margin-bottom: 2px; }
@@ -657,7 +638,6 @@ onMounted(() => {
 .pill-btn { font-size: 0.75rem; padding: 4px 10px; border-radius: 10px; border: none; cursor: pointer; margin-top: 4px; }
 .pill-btn.update-crypto { background: #f0f0f0; color: #666; }
 
-/* 再平衡視圖樣式 */
 .rebalance-card { background: white; padding: 20px; border-radius: 16px; margin: 0 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center; }
 .progress-bar-container { position: relative; height: 16px; background: #eee; border-radius: 10px; margin: 20px 0; overflow: visible; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); border-radius: 10px; transition: width 0.5s ease; }
@@ -674,7 +654,6 @@ onMounted(() => {
 .setting-btn { background: #f0f0f0; border: none; padding: 10px 20px; border-radius: 30px; color: #555; font-size: 0.9rem; cursor: pointer; transition: background 0.2s; margin-top: 10px; width: 100%; font-weight: 500;}
 .setting-btn:hover { background: #e0e0e0; }
 
-/* 合約戰績視圖樣式 */
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 16px; margin-bottom: 20px; }
 .stat-box { background: white; padding: 15px; border-radius: 12px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
 .stat-box .label { display: block; font-size: 0.75rem; color: #999; margin-bottom: 4px; }
@@ -684,7 +663,6 @@ onMounted(() => {
 .text-profit-sm { color: #2A9D8F; } .text-loss-sm { color: #e5989b; }
 .leverage { font-size: 0.7rem; background: #eee; padding: 1px 4px; border-radius: 4px; color: #666; margin-left: 4px; }
 
-/* 表單 */
 .tabs { display: flex; background: #f2f2f2; padding: 4px; border-radius: 12px; margin-bottom: 20px; }
 .tab-btn { flex: 1; border: none; background: transparent; padding: 8px; font-size: 0.9rem; color: #777; cursor: pointer; border-radius: 10px; }
 .tab-btn.active { background: white; color: #333; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }

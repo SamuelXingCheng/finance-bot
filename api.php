@@ -521,10 +521,24 @@ try {
 
         // 🟢 4. 獲取加密貨幣歷史趨勢
         case 'get_crypto_history':
-            $range = $_GET['range'] ?? '1y';
-            $cryptoService = new CryptoService();
-            $chartData = $cryptoService->getHistoryChartData($dbUserId, $range);
-            $response = ['status' => 'success', 'data' => $chartData];
+            $range = isset($_GET['range']) ? $_GET['range'] : '1y';
+            
+            try {
+                $cryptoService = new CryptoService();
+                
+                // 呼叫 Service 獲取歷史資料
+                // 如果您的 CryptoService 裡沒有 getHistoryData 方法，請參考步驟二
+                $chartData = $cryptoService->getHistoryData($dbUserId, $range);
+                
+                $response = ['status' => 'success', 'data' => $chartData];
+            } catch (Exception $e) {
+                error_log("Get Crypto History Error: " . $e->getMessage());
+                // 發生錯誤時回傳空圖表數據，避免前端報錯
+                $response = [
+                    'status' => 'success', 
+                    'data' => ['labels' => [], 'data' => []]
+                ];
+            }
             break;
         
         // 🟢 1. 新增：獲取用戶狀態 (用於前端判斷是否顯示引導頁)
@@ -722,7 +736,7 @@ try {
             }
 
             try {
-                // 修正點：使用 $db->getConnection() 獲取連線
+                // ✅ 修正：必須透過 getConnection() 取得 PDO 物件
                 $conn = $db->getConnection(); 
                 $stmt = $conn->prepare("UPDATE users SET target_usdt_ratio = ? WHERE id = ?");
                 $stmt->execute([$ratio, $dbUserId]);
@@ -732,12 +746,40 @@ try {
                 $response = ['status' => 'error', 'message' => '更新失敗'];
             }
             break;
+
+        // 🟢 [修正] 獲取加密貨幣交易列表 (修復 $db->prepare 錯誤)
         case 'get_crypto_transactions':
-            // 簡單撈取最近 20 筆
-            $sql = "SELECT * FROM crypto_transactions WHERE user_id = :uid ORDER BY transaction_date DESC LIMIT 20";
-            $stmt = $dbConn->prepare($sql);
-            $stmt->execute([':uid' => $dbUserId]);
-            $response = ['status' => 'success', 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)];
+            $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 20;
+            
+            try {
+                // ✅ 修正：必須透過 getConnection() 取得 PDO 物件
+                $conn = $db->getConnection();
+                
+                $sql = "SELECT * FROM crypto_transactions 
+                        WHERE user_id = :uid 
+                        ORDER BY transaction_date DESC, id DESC 
+                        LIMIT :limit";
+                        
+                $stmt = $conn->prepare($sql);
+                // 綁定參數以確保安全
+                $stmt->bindValue(':uid', $dbUserId, PDO::PARAM_INT);
+                $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+                $stmt->execute();
+                
+                $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $response = ['status' => 'success', 'data' => $list];
+            } catch (Exception $e) {
+                error_log("Get Crypto Tx Error: " . $e->getMessage());
+                $response = ['status' => 'error', 'message' => '讀取失敗'];
+            }
+            break;
+            
+        // 🟢 [補上] 獲取再平衡建議 (原本檔案中似乎遺漏了這個 case)
+        case 'get_rebalancing_advice':
+            $cryptoService = new CryptoService();
+            // 呼叫 Service 計算建議
+            $advice = $cryptoService->getRebalancingAdvice($dbUserId);
+            $response = ['status' => 'success', 'data' => $advice];
             break;
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
