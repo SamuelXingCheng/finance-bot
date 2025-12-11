@@ -11,6 +11,10 @@
         <h2>歡迎使用 FinBot！</h2>
         <p class="desc">口語記帳 x 資產管理。<br>動動手、動動口，讓我們慢慢變富！</p>
         <button class="btn-primary" @click="nextStep">開始體驗</button>
+
+        <button class="btn-link mt-4" @click="emit('login-direct')">
+          我是老用戶，直接登入
+        </button>
       </div>
 
       <div v-else-if="step === 2" class="step-content">
@@ -119,6 +123,9 @@
             LINE 登入並領取獎勵
         </button>
         <p class="login-note">點擊將跳轉至 LINE 授權頁面</p>
+        <button class="btn-link mt-2" @click="emit('skip-login')">
+          先不登入，僅看看網頁 &rarr;
+        </button>
       </div>
 
     </div>
@@ -154,7 +161,7 @@
 <script setup>
 import { ref, reactive } from 'vue';
 
-const emit = defineEmits(['trigger-login']);
+const emit = defineEmits(['trigger-login', 'login-direct', 'skip-login']);
 
 const step = ref(1);
 const showTerms = ref(false);
@@ -190,6 +197,24 @@ function emitLogin() {
 </script>
 
 <style scoped>
+/* ★ 新增：連結按鈕樣式 */
+.btn-link {
+  background: none;
+  border: none;
+  color: #8c7b75;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.9rem;
+  width: 100%;
+  display: inline-block;
+  transition: opacity 0.2s;
+}
+.btn-link:hover {
+  opacity: 0.7;
+}
+.mt-4 { margin-top: 16px; }
+.mt-2 { margin-top: 8px; }
+
 /* 基礎佈局 */
 .onboarding-overlay {
   position: fixed; top: 0; left: 0; width: 100%; height: 100%;

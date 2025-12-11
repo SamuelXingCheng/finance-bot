@@ -10,8 +10,12 @@
       <p>FinBot 啟動中...</p>
     </div>
 
-    <div v-else-if="!liffState.isLoggedIn || !isOnboarded" class="onboarding-container">
-      <OnboardingView @trigger-login="handleOnboardingLogin" />
+    <div v-else-if="!isGuestMode && (!liffState.isLoggedIn || !isOnboarded)" class="onboarding-container">
+      <OnboardingView 
+        @trigger-login="handleOnboardingLogin" 
+        @login-direct="handleLoginDirect"
+        @skip-login="handleSkipLogin"
+      />
     </div>
 
     <div v-else class="authenticated-view">
@@ -100,6 +104,7 @@ const currentTab = ref('Dashboard');
 const currentViewRef = ref(null);
 const isLoading = ref(true); 
 const isOnboarded = ref(false); 
+const isGuestMode = ref(false); // ★ 新增：訪客模式狀態
 
 // 帳本相關狀態
 const ledgers = ref([]);
@@ -171,7 +176,7 @@ async function createNewLedger() {
   }
 }
 
-// [新增] 邀請成員加入
+// 邀請成員加入
 async function handleInviteMember() {
   if (!currentLedger.value) return;
   
@@ -239,7 +244,7 @@ async function handleInviteMember() {
   }
 }
 
-// [新增] 加入帳本
+// 加入帳本
 async function joinLedger(token) {
     isLoading.value = true;
     try {
@@ -267,10 +272,34 @@ async function joinLedger(token) {
 
 // --- 引導與登入邏輯 ---
 
+// ★ 新增：處理老用戶直接登入 (含 400 錯誤修復)
+function handleLoginDirect() {
+  if (!liff.isLoggedIn()) {
+    // 1. 取得最乾淨的網址 (例如 https://finbot.tw/ 或 https://finbot.tw/index.html)
+    // 這樣可以確保不會帶有 ?code=... 或 ?tab=... 等雜訊
+    const cleanRedirectUri = window.location.origin + window.location.pathname;
+
+    // 2. 使用這個乾淨網址進行登入
+    // ★ 注意：這個網址必須要在 LINE Console 設定過 (詳見下一步)
+    liff.login({ redirectUri: cleanRedirectUri });
+  } else {
+    window.location.reload();
+  }
+}
+
+// ★ 新增：處理訪客略過登入
+function handleSkipLogin() {
+  isGuestMode.value = true;
+}
+
 async function handleOnboardingLogin(data) {
   localStorage.setItem('pending_onboarding', JSON.stringify(data));
   if (!liff.isLoggedIn()) {
-    liff.login();
+    // 使用乾淨網址登入
+    const url = new URL(window.location.href);
+    url.searchParams.delete('code');
+    url.searchParams.delete('state');
+    liff.login({ redirectUri: url.toString() });
   } else {
     await processPendingOnboarding();
   }
@@ -289,7 +318,7 @@ async function processPendingOnboarding() {
       if (response && response.ok) {
         isOnboarded.value = true; 
         
-        // 檢查是否有暫存的加入 Token (原 inviteCode 邏輯保留向下相容，但這裡主要處理 token)
+        // 檢查是否有暫存的加入 Token
         const pendingToken = localStorage.getItem('pending_join_token');
         if (pendingToken) {
             localStorage.removeItem('pending_join_token');
@@ -317,14 +346,12 @@ onMounted(async () => {
         currentTab.value = targetTab;
     }
 
-    // [新增] 偵測邀請連結參數
+    // 偵測邀請連結參數
     const inviteAction = urlParams.get('action');
     const inviteToken = urlParams.get('token'); 
     
     if (inviteAction === 'join_ledger' && inviteToken) {
-        // 先暫存，因為接下來可能會跳轉去 LINE Login
         localStorage.setItem('pending_join_token', inviteToken);
-        // 清除網址參數，避免重新整理重複觸發
         window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -435,7 +462,6 @@ onMounted(async () => {
 .dropdown-divider { height: 1px; background: #eee; margin: 4px 0; }
 .create-action { color: #d4a373; font-weight: 600; }
 
-/* [新增] 邀請動作樣式 */
 .invite-action { color: #2A9D8F; font-weight: 600; }
 .invite-action:hover { background-color: #e6fcf5; }
 
