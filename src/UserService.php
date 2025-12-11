@@ -90,10 +90,13 @@ class UserService {
      * 獲取用戶目前的狀態 (用於前端判斷是否顯示引導)
      */
     public function getUserStatus(int $userId): array {
-        // 請確保資料庫 users 表已有 is_onboarded 欄位
-        $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium FROM users WHERE id = ?");
+        // 🟢 [修改] 增加查詢 monthly_budget
+        $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium, monthly_budget FROM users WHERE id = ?");
         $stmt->execute([$userId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: ['is_onboarded' => 0, 'is_premium' => 0];
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        // 設定預設值
+        return $result ?: ['is_onboarded' => 0, 'is_premium' => 0, 'monthly_budget' => 0];
     }
 
     /**

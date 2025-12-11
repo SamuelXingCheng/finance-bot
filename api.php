@@ -654,7 +654,61 @@ try {
                 $response = ['status' => 'error', 'message' => '儲存失敗'];
             }
             break;
+        
+        case 'check_recurring':
+            // 檢查是否有到期但尚未執行的週期性交易
+            // 簡單邏輯：查詢 recurring_rules WHERE next_run_date <= TODAY AND is_active = 1
+            // 遍歷結果，呼叫 $transactionService->addTransaction()
+            // 更新 next_run_date 到下個月
+            
+            // (這裡為了簡潔省略詳細 SQL，建議在 TransactionService 新增 processRecurring($userId) 方法)
+            $count = $transactionService->processRecurring($userId);
+            $response = ['status' => 'success', 'processed_count' => $count];
+            break;
+        
+        // 🟢 1. 獲取訂閱列表
+        case 'get_subscriptions':
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+            $rules = $transactionService->getRecurringRules($dbUserId, $targetLedgerId);
+            $response = ['status' => 'success', 'data' => $rules];
+            break;
 
+        // 🟢 2. 新增訂閱
+        case 'add_subscription':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            // 若前端有傳 ledger_id，記得塞進去
+            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : ($input['ledger_id'] ?? null);
+            $input['ledger_id'] = $targetLedgerId;
+
+            if ($transactionService->addRecurringRule($dbUserId, $input)) {
+                $response = ['status' => 'success', 'message' => '訂閱已設定'];
+            } else {
+                $response = ['status' => 'error', 'message' => '設定失敗'];
+            }
+            break;
+
+        // 🟢 3. 刪除訂閱
+        case 'delete_subscription':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $ruleId = (int)($input['id'] ?? 0);
+            
+            if ($transactionService->deleteRecurringRule($dbUserId, $ruleId)) {
+                $response = ['status' => 'success', 'message' => '訂閱已刪除'];
+            } else {
+                $response = ['status' => 'error', 'message' => '刪除失敗'];
+            }
+            break;
+
+        // 🟢 4. 觸發自動補帳 (前端於背景呼叫)
+        case 'check_recurring':
+            // 執行檢查與補帳
+            $count = $transactionService->processRecurring($dbUserId);
+            $response = ['status' => 'success', 'processed_count' => $count];
+            break;
+            
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
             break;

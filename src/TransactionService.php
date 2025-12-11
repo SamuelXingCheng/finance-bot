@@ -262,6 +262,118 @@ class TransactionService {
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) { return []; }
     }
+    /**
+     * [新增] 新增訂閱規則
+     */
+    public function addRecurringRule(int $userId, array $data): bool {
+        // 簡單驗證
+        if (empty($data['amount']) || empty($data['next_date'])) return false;
+
+        $sql = "INSERT INTO recurring_rules 
+                (user_id, ledger_id, type, amount, currency, category, description, frequency_type, next_run_date)
+                VALUES (:uid, :lid, :type, :amount, :curr, :cat, :desc, :freq, :next)";
+        
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute([
+                ':uid' => $userId,
+                ':lid' => $data['ledger_id'] ?? null,
+                ':type' => $data['type'] ?? 'expense',
+                ':amount' => (float)$data['amount'],
+                ':curr' => $data['currency'] ?? 'TWD',
+                ':cat' => $this->sanitizeCategory($data['category'] ?? 'Miscellaneous'),
+                ':desc' => $data['description'] ?? '訂閱服務',
+                ':freq' => $data['frequency'] ?? 'monthly',
+                ':next' => $data['next_date']
+            ]);
+        } catch (PDOException $e) {
+            error_log("Add Recurring Error: " . $e->getMessage());
+            return false; 
+        }
+    }
+
+    /**
+     * [新增] 刪除訂閱規則
+     */
+    public function deleteRecurringRule(int $userId, int $ruleId): bool {
+        $sql = "DELETE FROM recurring_rules WHERE id = :id AND user_id = :uid";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute([':id' => $ruleId, ':uid' => $userId]);
+        } catch (PDOException $e) { return false; }
+    }
+
+    /**
+     * [新增] 取得用戶的訂閱規則列表
+     */
+    public function getRecurringRules(int $userId, ?int $ledgerId = null): array {
+        $sql = "SELECT * FROM recurring_rules WHERE user_id = :uid";
+        $params = [':uid' => $userId];
+        
+        if ($ledgerId) {
+            $sql .= " AND ledger_id = :lid";
+            $params[':lid'] = $ledgerId;
+        }
+        
+        $sql .= " ORDER BY is_active DESC, next_run_date ASC";
+        
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) { return []; }
+    }
+
+    /**
+     * [新增] 核心：檢查並執行到期的訂閱
+     * (這個方法會由前端在背景呼叫，或者由系統 Cron 觸發)
+     */
+    public function processRecurring(int $userId): int {
+        $today = date('Y-m-d');
+        
+        // 1. 找出所有「啟用中」且「執行日期 <= 今天」的規則
+        $sql = "SELECT * FROM recurring_rules WHERE user_id = ? AND next_run_date <= ? AND is_active = 1";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$userId, $today]);
+        $rules = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $count = 0;
+        foreach ($rules as $rule) {
+            // A. 執行記帳 (呼叫現有的 addTransaction)
+            $success = $this->addTransaction($userId, [
+                'amount' => $rule['amount'],
+                'type' => $rule['type'],
+                'category' => $rule['category'],
+                'description' => $rule['description'] . ' (自動扣款)',
+                'date' => $rule['next_run_date'], // 補帳日期為原定扣款日
+                'currency' => $rule['currency'],
+                'ledger_id' => $rule['ledger_id']
+            ]);
+
+            if ($success) {
+                // B. 計算下一次執行日期
+                $nextDate = $rule['next_run_date'];
+                switch ($rule['frequency_type']) {
+                    case 'weekly':
+                        $nextDate = date('Y-m-d', strtotime('+1 week', strtotime($nextDate)));
+                        break;
+                    case 'yearly':
+                        $nextDate = date('Y-m-d', strtotime('+1 year', strtotime($nextDate)));
+                        break;
+                    case 'monthly':
+                    default:
+                        $nextDate = date('Y-m-d', strtotime('+1 month', strtotime($nextDate)));
+                        break;
+                }
+
+                // C. 更新規則的下一次執行時間
+                $upd = $this->pdo->prepare("UPDATE recurring_rules SET next_run_date = ? WHERE id = ?");
+                $upd->execute([$nextDate, $rule['id']]);
+                $count++;
+            }
+        }
+        return $count;
+    }
 
     public function updateTransaction(int $userId, int $id, array $data): bool {
         $cleanCategory = $this->sanitizeCategory($data['category'] ?? 'Miscellaneous');

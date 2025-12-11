@@ -18,8 +18,27 @@
       </div>
     </div>
 
-    <div class="card-section">
-      <div class="section-header"><h2>快速記帳</h2></div>
+    <div class="card-section" v-if="userBudget > 0">
+      <div class="section-header"><h2>本月預算監控</h2></div>
+      <div class="data-box budget-card">
+        <div class="budget-info">
+          <span class="budget-label">預算: NT$ {{ numberFormat(userBudget, 0) }}</span>
+          <span class="budget-percent" :class="budgetStatusColor">{{ budgetPercent }}%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill"
+               :class="budgetBarColor"
+               :style="{ width: Math.min(budgetPercent, 100) + '%' }">
+          </div>
+        </div>
+        <p class="budget-remaining">
+          剩餘可支出: <span :class="{'text-danger': (userBudget - totalExpense) < 0}">NT$ {{ numberFormat(userBudget - totalExpense, 0) }}</span>
+        </p>
+      </div>
+    </div>
+
+    <!-- <div class="card-section"> -->
+      <!-- <div class="section-header"><h2>快速記帳</h2></div>
       <div class="data-box input-card">
         <form id="add-transaction-form" @submit.prevent="handleTransactionSubmit">
           <div class="form-group type-select">
@@ -59,8 +78,8 @@
             <input type="date" v-model="transactionForm.date" required class="input-minimal">
           </div>
           <div class="form-group">
-            <label>項目說明</label>
-            <input type="text" v-model="transactionForm.description" required placeholder="例如：拿鐵、書籍" class="input-minimal">
+            <label>項目說明 <span class="text-xs text-gray-400">(可使用 #標籤)</span></label>
+            <input type="text" v-model="transactionForm.description" required placeholder="例如：拿鐵 #早餐" class="input-minimal">
           </div>
           <div class="form-group">
             <label>分類</label>
@@ -87,7 +106,7 @@
           <div v-if="formMessage" id="form-message" :class="messageClass">{{ formMessage }}</div>
         </transition>
       </div>
-    </div>
+    </div> -->
     
     <div class="card-section">
       <div class="section-header"><h2>本月收支分佈</h2></div>
@@ -124,21 +143,37 @@
     <div class="card-section">
       <div class="section-header"><h2>近期收支明細</h2></div>
       <div class="data-box tx-list-wrapper"> 
-          <div class="list-controls">
-            <h3>明細列表</h3>
-            <div class="month-selector">
-              <input type="month" v-model="currentListMonth" @change="fetchTransactions" class="month-input-styled">
+          <div class="list-controls-row">
+            <div class="search-wrapper">
+              <input type="text" v-model="searchQuery" placeholder="🔍 搜尋備註、#標籤..." class="search-input">
+            </div>
+            
+            <div class="controls-right">
+               <div class="view-toggle">
+                  <button @click="viewMode = 'list'" :class="['toggle-btn', viewMode==='list'?'active':'']">列表</button>
+                  <button @click="viewMode = 'calendar'" :class="['toggle-btn', viewMode==='calendar'?'active':'']">日曆</button>
+               </div>
+               <div class="month-selector">
+                 <input type="month" v-model="currentListMonth" @change="fetchTransactions" class="month-input-styled">
+               </div>
             </div>
           </div>
+
           <div v-if="txLoading" class="loading-box"><span class="loader"></span> 載入中...</div>
-          <div v-else-if="transactions.length === 0" class="empty-msg">本月尚無紀錄</div>
-          <div v-else class="tx-grouped-list">
-              <div v-for="dateGroup in groupedTransactions" :key="dateGroup.date" class="tx-date-group">
+          
+          <div v-else-if="filteredTransactions.length === 0" class="empty-msg">
+             {{ transactions.length === 0 ? '本月尚無紀錄' : '查無符合搜尋條件的紀錄' }}
+          </div>
+
+          <div v-else-if="viewMode === 'list'" class="tx-grouped-list">
+              <div v-for="dateGroup in groupedFilteredTransactions" :key="dateGroup.date" class="tx-date-group">
                   <div class="date-header">{{ dateGroup.displayDate }} {{ dateGroup.weekday }}</div>
                   <div v-for="catGroup in dateGroup.categories" :key="catGroup.categoryKey" class="tx-category-group">
                       <div class="category-subheader" :class="catGroup.items[0].type">{{ catGroup.categoryName }}</div>
                       <div v-for="tx in catGroup.items" :key="tx.id" class="tx-item-grouped">
-                          <div class="tx-mid-grouped"><div class="tx-desc">{{ tx.description }}</div></div>
+                          <div class="tx-mid-grouped">
+                            <div class="tx-desc" v-html="highlightTags(tx.description)"></div>
+                          </div>
                           <div class="tx-right-grouped">
                               <div class="tx-amount" :class="tx.type === 'income' ? 'text-income' : 'text-expense'">
                                   {{ tx.type === 'income' ? '+' : '-' }} {{ numberFormat(tx.amount, 0) }}
@@ -152,6 +187,26 @@
                   </div>
               </div>
           </div>
+
+          <div v-else class="calendar-grid">
+            <div class="calendar-header-row">
+              <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+            </div>
+            <div class="calendar-body">
+              <div v-for="(cell, idx) in calendarDays" :key="idx" 
+                   class="calendar-cell"
+                   :class="{'empty': cell.empty, 'has-tx': !cell.empty && (cell.expense > 0 || cell.income > 0)}"
+                   @click="!cell.empty && setSearchDate(cell.date)"
+              >
+                <span v-if="!cell.empty" class="cell-day">{{ cell.day }}</span>
+                <div v-if="!cell.empty" class="cell-dots">
+                  <span v-if="cell.expense > 0" class="dot-expense">-{{ formatCompactNumber(cell.expense) }}</span>
+                  <span v-if="cell.income > 0" class="dot-income">+{{ formatCompactNumber(cell.income) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
       </div>
     </div>
 
@@ -225,6 +280,11 @@ const currentChartType = ref('expense');
 const expenseChartCanvas = ref(null);
 let chartInstance = null;
 
+// [新增] 預算與搜尋狀態
+const userBudget = ref(0);
+const searchQuery = ref('');
+const viewMode = ref('list'); // 'list' or 'calendar'
+
 const trendFilter = ref({
     start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
     end: new Date().toISOString().substring(0, 10)
@@ -264,12 +324,47 @@ const categoryMap = {
 };
 const palette = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2'];
 
-const groupedTransactions = computed(() => {
-    if (transactions.value.length === 0) return [];
+// --- [新增] 計算屬性區 (Budget, Filter, Calendar) ---
+
+// 1. 預算計算
+const budgetPercent = computed(() => {
+  if (userBudget.value <= 0) return 0;
+  return Math.round((totalExpense.value / userBudget.value) * 100);
+});
+
+const budgetStatusColor = computed(() => {
+  if (budgetPercent.value >= 100) return 'text-danger';
+  if (budgetPercent.value >= 80) return 'text-warning';
+  return 'text-success';
+});
+
+const budgetBarColor = computed(() => {
+  if (budgetPercent.value >= 100) return 'bg-danger';
+  if (budgetPercent.value >= 80) return 'bg-warning';
+  return 'bg-success';
+});
+
+// 2. 搜尋過濾
+const filteredTransactions = computed(() => {
+  if (!searchQuery.value) return transactions.value;
+  
+  const query = searchQuery.value.toLowerCase();
+  return transactions.value.filter(tx => {
+    return (
+      tx.description.toLowerCase().includes(query) ||
+      (categoryMap[tx.category] || tx.category).toLowerCase().includes(query) ||
+      tx.amount.toString().includes(query)
+    );
+  });
+});
+
+// 3. 分組邏輯 (使用 filteredTransactions)
+const groupedFilteredTransactions = computed(() => {
+    if (filteredTransactions.value.length === 0) return [];
     const dateGroupMap = new Map();
     const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
     
-    transactions.value.forEach(tx => {
+    filteredTransactions.value.forEach(tx => {
         const date = tx.transaction_date;
         const categoryKey = tx.category;
         
@@ -302,6 +397,91 @@ const groupedTransactions = computed(() => {
     
     return result.sort((a, b) => new Date(b.date) - new Date(a.date));
 });
+
+// 4. 日曆數據生成
+const calendarDays = computed(() => {
+  const [year, month] = currentListMonth.value.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0 (Sun) - 6 (Sat)
+  
+  const days = [];
+  
+  // 填補前面的空白
+  for (let i = 0; i < firstDayOfWeek; i++) {
+    days.push({ empty: true });
+  }
+  
+  // 填入日期
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    
+    // 計算當日總額
+    let dailyExpense = 0;
+    let dailyIncome = 0;
+    
+    // 這裡使用原始 transactions 還是 filtered 看需求，通常日曆顯示全貌比較好，但如果想篩選特定項目看分佈，用 filtered
+    const targetTx = searchQuery.value ? filteredTransactions.value : transactions.value;
+
+    targetTx.forEach(tx => {
+      if (tx.transaction_date === dateStr) {
+        if (tx.type === 'expense') dailyExpense += parseFloat(tx.amount);
+        else dailyIncome += parseFloat(tx.amount);
+      }
+    });
+
+    days.push({
+      empty: false,
+      day: d,
+      date: dateStr,
+      expense: dailyExpense,
+      income: dailyIncome
+    });
+  }
+  return days;
+});
+
+// --- 方法 ---
+
+function formatCompactNumber(num) {
+  if (num >= 10000) return (num / 10000).toFixed(1) + 'w';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+  return Math.round(num);
+}
+
+// 點擊日曆日期篩選
+function setSearchDate(dateStr) {
+  // 將搜尋框設為該日期，觸發 filteredTransactions
+  // 這裡我們需要調整搜尋邏輯以支援日期，或者簡單地：
+  // 這裡為了簡單，我們不改 searchQuery，而是切換回列表並只顯示那天？
+  // 更好的做法：搜尋框如果是空的，點擊日曆不動作或跳出當日明細 Modal。
+  // 這裡實作：將日期填入搜尋框 (搜尋邏輯需支援日期字串匹配) -> filteredTransactions 已支援 text include，所以日期字串也會被匹配到
+  searchQuery.value = dateStr;
+  viewMode.value = 'list';
+}
+
+// 高亮標籤
+function highlightTags(text) {
+  if (!text) return '';
+  // 將 #tag 替換為帶顏色的 span
+  return text.replace(/(#[^\s]+)/g, '<span class="tag-highlight">$1</span>');
+}
+
+// [新增] 獲取用戶設定 (預算)
+async function fetchUserStatus() {
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_user_status`);
+    if (response && response.ok) {
+        const res = await response.json();
+        if (res.status === 'success') {
+            userBudget.value = parseFloat(res.data.monthly_budget) || 0;
+        }
+    }
+}
+
+// [新增] 檢查週期性帳單 (觸發後端處理)
+async function checkRecurring() {
+    // 默默呼叫，不阻擋 UI
+    fetchWithLiffToken(`${window.API_BASE_URL}?action=check_recurring`).catch(e => console.log('Recurring check skip'));
+}
 
 function handleCurrencyChange() {
     if (currencySelectValue.value === 'CUSTOM') {
@@ -390,6 +570,7 @@ function refreshAllData() {
     fetchExpenseData();
     fetchTrendData();
     fetchTransactions(); 
+    fetchUserStatus(); // 載入預算
 }
 
 watch(currentListMonth, (newMonth) => { 
@@ -564,6 +745,8 @@ defineExpose({ refreshAllData });
 
 onMounted(() => {
     refreshAllData();
+    // [新增] 週期性帳單檢查
+    checkRecurring();
 });
 </script>
 
@@ -675,4 +858,41 @@ onMounted(() => {
 .text-btn.edit:hover { background-color: #d4a373; color: white; }
 .text-btn.delete { border-color: #e5989b; color: #e5989b; }
 .text-btn.delete:hover { background-color: #e5989b; color: white; }
+
+/* 🌟 [新增] 預算進度條與日曆樣式 */
+.budget-card { padding: 16px; margin-bottom: 20px; background: #fff; }
+.budget-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.budget-label { font-size: 0.9rem; color: #666; font-weight: 500; }
+.budget-percent { font-size: 0.9rem; font-weight: 800; }
+.progress-track { width: 100%; height: 10px; background: #f0f0f0; border-radius: 10px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
+.bg-success { background-color: #1DB446; }
+.bg-warning { background-color: #f59e0b; }
+.bg-danger { background-color: #ef4444; }
+.text-success { color: #1DB446; }
+.text-warning { color: #f59e0b; }
+.text-danger { color: #ef4444; }
+.budget-remaining { text-align: right; font-size: 0.8rem; color: #888; margin-top: 8px; font-weight: 500; }
+
+.list-controls-row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.search-wrapper { width: 100%; }
+.search-input { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; font-size: 0.9rem; outline: none; background: #f9f9f9; }
+.search-input:focus { border-color: #d4a373; background: #fff; }
+.controls-right { display: flex; justify-content: space-between; align-items: center; }
+.view-toggle { background: #f0f0f0; border-radius: 20px; padding: 2px; display: flex; }
+.toggle-btn { background: transparent; border: none; padding: 4px 12px; border-radius: 18px; font-size: 0.8rem; cursor: pointer; color: #888; font-weight: 500; transition: all 0.2s; }
+.toggle-btn.active { background: #fff; color: #d4a373; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-weight: bold; }
+
+.calendar-grid { margin-top: 10px; }
+.calendar-header-row { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 0.8rem; color: #888; font-weight: bold; padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px; }
+.calendar-body { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calendar-cell { min-height: 60px; border: 1px solid #f5f5f5; border-radius: 8px; padding: 4px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; position: relative; cursor: pointer; transition: background 0.2s; }
+.calendar-cell.empty { background: transparent; border: none; cursor: default; }
+.calendar-cell:not(.empty):hover { background: #fff8f0; border-color: #d4a373; }
+.calendar-cell.has-tx { background: #fffdf9; border-color: #eee; }
+.cell-day { font-size: 0.85rem; font-weight: 600; color: #555; }
+.cell-dots { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; align-items: center; width: 100%; }
+.dot-expense { font-size: 0.6rem; color: #d67a7a; background: #fff0f0; padding: 1px 3px; border-radius: 4px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.dot-income { font-size: 0.6rem; color: #8fbc8f; background: #f0f7f0; padding: 1px 3px; border-radius: 4px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+:deep(.tag-highlight) { color: #2A9D8F; font-weight: bold; background: #e6fcf5; padding: 0 2px; border-radius: 4px; }
 </style>

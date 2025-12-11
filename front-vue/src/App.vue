@@ -57,6 +57,7 @@
 
           <div class="nav-links">
             <button @click="currentTab = 'Dashboard'" :class="['nav-item', currentTab === 'Dashboard' ? 'active' : '']">收支</button>
+            <button @click="currentTab = 'Subscription'" :class="['nav-item', currentTab === 'Subscription' ? 'active' : '']">訂閱</button>
             <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
             <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto(開發中)</button>
           </div>
@@ -90,6 +91,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import liff from '@line/liff';
 import { liffState } from './liffState';
 import { fetchWithLiffToken } from '@/utils/api';
+import SubscriptionView from './views/SubscriptionView.vue';
 
 // 引入元件
 import OnboardingView from './views/OnboardingView.vue';
@@ -115,6 +117,7 @@ const currentView = computed(() => {
   if (currentTab.value === 'Dashboard') return DashboardView;
   if (currentTab.value === 'Accounts') return AccountManagerView;
   if (currentTab.value === 'Crypto') return CryptoView;
+  if (currentTab.value === 'Subscription') return SubscriptionView;
   return null;
 });
 
