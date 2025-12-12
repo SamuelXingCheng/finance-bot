@@ -543,6 +543,38 @@ try {
             }
             break;
         
+        // 🟢 [新增] 刪除 Crypto 交易
+        case 'delete_crypto_transaction':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $id = (int)($input['id'] ?? 0);
+            
+            $cryptoService = new CryptoService();
+            if ($cryptoService->deleteTransaction($dbUserId, $id)) {
+                $response = ['status' => 'success', 'message' => '刪除成功'];
+            } else {
+                $response = ['status' => 'error', 'message' => '刪除失敗'];
+            }
+            break;
+
+        // 🟢 [新增] 更新 Crypto 交易
+        case 'update_crypto_transaction':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405); break;
+            }
+            $input = json_decode(file_get_contents('php://input'), true);
+            $id = (int)($input['id'] ?? 0);
+            
+            $cryptoService = new CryptoService();
+            if ($cryptoService->updateTransaction($dbUserId, $id, $input)) {
+                $response = ['status' => 'success', 'message' => '更新成功'];
+            } else {
+                $response = ['status' => 'error', 'message' => '更新失敗'];
+            }
+            break;
+            
         // 🟢 1. 新增：獲取用戶狀態 (用於前端判斷是否顯示引導頁)
         case 'get_user_status':
             // 注意：請確保 UserService.php 已新增 getUserStatus 方法

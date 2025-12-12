@@ -17,17 +17,25 @@
             <span class="currency-code">USD</span>
           </div>
           
-          <div class="stats-row">
+          <div class="stats-row three-col">
             <div class="stat-item">
-              <span class="label">本金 (TWD)</span>
-              <span class="value">NT$ {{ numberFormat(dashboard.totalInvestedTwd, 0) }}</span>
+              <span class="label">未實現損益 (Unrealized)</span>
+              <span class="value" :class="dashboard.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'">
+                {{ dashboard.unrealizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.unrealizedPnl, 2) }}
+              </span>
             </div>
             <div class="vertical-line"></div>
             <div class="stat-item">
-              <span class="label">未實現損益</span>
-              <span class="value" :class="dashboard.pnl >= 0 ? 'text-profit' : 'text-loss'">
-                {{ dashboard.pnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.pnl, 2) }} 
-                <small>({{ numberFormat(dashboard.pnlPercent, 2) }}%)</small>
+              <span class="label">已實現損益 (Realized)</span>
+              <span class="value" :class="dashboard.realizedPnl >= 0 ? 'text-profit' : 'text-loss'">
+                {{ dashboard.realizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.realizedPnl, 2) }}
+              </span>
+            </div>
+            <div class="vertical-line"></div>
+            <div class="stat-item">
+              <span class="label">未實現 ROI</span>
+              <span class="value" :class="dashboard.pnlPercent >= 0 ? 'text-profit' : 'text-loss'">
+                {{ numberFormat(dashboard.pnlPercent, 2) }}%
               </span>
             </div>
           </div>
@@ -95,35 +103,77 @@
       </div>
 
       <div class="list-section mt-4">
-        <div class="section-header">
-          <h3>近期交易紀錄</h3>
-        </div>
+      <div class="section-header">
+        <h3>近期交易紀錄</h3>
+      </div>
 
-        <div v-if="recentTransactions.length === 0" class="empty-state">
-          <p>尚無交易紀錄</p>
-        </div>
+      <div v-if="recentTransactions.length === 0" class="empty-state">
+        <p>尚無交易紀錄</p>
+      </div>
 
-        <div v-else class="coin-list">
-          <div v-for="tx in recentTransactions" :key="tx.id" class="account-card-style">
-             <div class="card-left">
-                <div class="acc-name">
-                   {{ tx.type === 'buy' ? '買入' : (tx.type === 'sell' ? '賣出' : (tx.type === 'deposit' ? '入金' : '出金')) }} 
-                   {{ tx.base_currency || 'USDT' }}
-                </div>
-                <div class="acc-meta">
-                   <span class="currency">{{ tx.transaction_date ? tx.transaction_date.substring(0, 16) : '' }}</span>
-                </div>
-             </div>
-             <div class="card-right">
-                <div class="acc-balance" :class="['buy','deposit','earn'].includes(tx.type) ? 'text-profit' : 'text-loss'">
-                   {{ ['buy','deposit','earn'].includes(tx.type) ? '+' : '-' }} 
-                   {{ numberFormat(tx.quantity, 4) }}
-                </div>
-                <div class="pnl-text-sm" v-if="tx.price > 0">
-                   @ ${{ numberFormat(tx.price, 2) }}
-                </div>
-             </div>
+      <div v-else class="coin-list">
+        <div v-for="tx in recentTransactions" :key="tx.id" class="account-card-style tx-card">
+            <div class="card-left">
+              <div class="acc-name">
+                  {{ tx.base_currency || 'USDT' }}
+              </div>
+              
+              <div class="acc-meta">
+                  <span class="badge" :class="getTxBadgeClass(tx.type)">
+                    {{ getTxTypeName(tx.type) }}
+                  </span>
+                  <span class="currency date-text">{{ tx.transaction_date ? tx.transaction_date.substring(0, 10) : '' }}</span>
+              </div>
+            </div>
+
+            <div class="card-right">
+              <div class="acc-balance large-balance" :class="['buy','deposit','earn','adjustment'].includes(tx.type) ? 'text-profit' : 'text-loss'">
+                  {{ ['buy','deposit','earn','adjustment'].includes(tx.type) ? '+' : '-' }} 
+                  {{ numberFormat(tx.quantity, 4) }}
+              </div>
+              
+              <div class="action-buttons-text">
+                  <button class="text-link edit" @click="openEditTxModal(tx)">編輯</button>
+                  <button class="text-link delete" @click="deleteTx(tx.id)">刪除</button>
+              </div>
+            </div>
+        </div>
+      </div>
+    </div>
+
+      <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3>
+            <button class="close-btn" @click="closeModal">×</button>
           </div>
+
+          <div class="tabs" v-if="!isEditingTransaction">
+            <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
+          </div>
+
+          <form @submit.prevent="submitTransaction" class="tx-form">
+            <div v-if="['deposit', 'withdraw'].includes(form.type)">
+              <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
+              <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
+            </div>
+
+            <div v-if="['buy', 'sell'].includes(form.type)">
+              <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
+              <div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div>
+              <div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div>
+              <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
+            </div>
+
+            <div v-if="['earn', 'adjustment'].includes(form.type)">
+              <div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div>
+              <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
+            </div>
+
+            <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
+            
+            <button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button>
+          </form>
         </div>
       </div>
 
@@ -301,7 +351,7 @@ import liff from '@line/liff';
 
 // 狀態管理
 const view = ref('portfolio');
-const dashboard = ref({ totalUsd: 0, totalInvestedTwd: 0, pnl: 0, pnlPercent: 0 });
+const dashboard = ref({ totalUsd: 0, totalInvestedTwd: 0, unrealizedPnl: 0, realizedPnl: 0, pnlPercent: 0 });
 const holdings = ref([]);
 const rebalanceData = ref({ currentUsdtRatio: 0, targetRatio: 10, action: 'HOLD', message: '載入中...' });
 const futuresStats = ref({ win_rate: 0, total_pnl: 0, avg_roi: 0, total_trades: 0, history: [] });
@@ -381,6 +431,23 @@ async function fetchHistory(range = '1y') {
             renderChart(result.data);
         }
     }
+}
+
+// 🟢 [新增] 輔助函式：取得交易類型名稱
+function getTxTypeName(type) {
+    const map = {
+        'buy': '買入', 'sell': '賣出',
+        'deposit': '入金', 'withdraw': '出金',
+        'earn': '收益', 'adjustment': '調整'
+    };
+    return map[type] || type;
+}
+
+// 🟢 [新增] 輔助函式：取得標籤樣式 class
+function getTxBadgeClass(type) {
+    if (['buy', 'deposit', 'earn'].includes(type)) return 'badge-success';
+    if (['sell', 'withdraw'].includes(type)) return 'badge-danger';
+    return 'badge-neutral';
 }
 
 function renderChart(chartData) {
@@ -689,6 +756,15 @@ onMounted(() => {
 .main-balance { font-size: 2rem; font-weight: 800; color: #333; margin-bottom: 16px; }
 .currency-symbol { font-size: 1.1rem; color: #888; margin-right: 2px; }
 .currency-code { font-size: 0.9rem; color: #aaa; font-weight: 400; margin-left: 4px; }
+
+/* 3欄佈局樣式 */
+.stats-row.three-col {
+    display: flex;
+    justify-content: space-between;
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 12px;
+}
 .stats-row { display: flex; background: #f8f9fa; padding: 12px; border-radius: 12px; }
 .stat-item { flex: 1; text-align: center; }
 .stat-item .label { font-size: 0.75rem; color: #999; display: block; margin-bottom: 2px; }
@@ -708,19 +784,91 @@ onMounted(() => {
 .section-header h3 { font-size: 1.1rem; color: #555; margin: 0; }
 .add-btn { background: #d4a373; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; box-shadow: 0 2px 6px rgba(212, 163, 115, 0.3); cursor: pointer; }
 
-.coin-list { display: flex; flex-direction: column; gap: 10px; }
-.account-card-style { background: white; padding: 14px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
-.acc-name { font-weight: 600; color: #333; font-size: 1rem; }
-.acc-meta { display: flex; gap: 6px; margin-top: 4px; align-items: center; }
-.badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+/* 🟢 [修改] 列表卡片樣式優化，統一風格 */
+.coin-list { display: flex; flex-direction: column; gap: 12px; }
+
+.account-card-style {
+    background: white;
+    padding: 16px 20px; /* 增加內距 */
+    border-radius: 16px; /* 圓角加大 */
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03); /* 柔和陰影 */
+    border: 1px solid #f0f0f0; /* 極淡邊框 */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: transform 0.1s;
+}
+
+.card-left { display: flex; flex-direction: column; gap: 6px; }
+
+/* 🟢 [修改] 標題字體加大 */
+.acc-name {
+    font-size: 1.1rem; 
+    font-weight: 700; 
+    color: #333;
+    letter-spacing: 0.5px;
+}
+
+.acc-meta { display: flex; align-items: center; gap: 8px; }
+
+/* 🟢 [修改] 標籤樣式調整 */
+.badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; font-weight: 600; }
+
+/* 交易類型標籤配色 */
+.badge-success { background-color: #e9edc9; color: #556b2f; } /* 抹茶綠 */
+.badge-danger { background-color: #ffedea; color: #c44536; }  /* 淡紅 */
+.badge-neutral { background-color: #f3f4f6; color: #6b7280; } /* 灰 */
+
+/* 原有的標籤樣式保留 */
 .badge-crypto { background: #e6fcf5; color: #2A9D8F; }
 .badge-stable { background: #f0f0f0; color: #666; }
 .badge-long { background: #e6fcf5; color: #2A9D8F; }
 .badge-short { background: #fff5f5; color: #e5989b; }
+
 .currency { font-size: 0.7rem; color: #aaa; }
+.date-text { font-size: 0.85rem; color: #999; letter-spacing: 0.5px; } /* 新增日期樣式 */
+
+.card-right { 
+    text-align: right; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: flex-end; 
+    gap: 4px; 
+}
+
 .acc-balance { font-weight: 700; font-size: 1rem; text-align: right; }
+
+/* 🟢 [新增] 大字號金額樣式 */
+.large-balance {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #333;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
 .pill-btn { font-size: 0.75rem; padding: 4px 10px; border-radius: 10px; border: none; cursor: pointer; margin-top: 4px; }
 .pill-btn.update-crypto { background: #f0f0f0; color: #666; }
+
+/* 🟢 [新增] 文字按鈕區塊 */
+.action-buttons-text {
+    display: flex;
+    gap: 12px; /* 按鈕間距 */
+    margin-top: 4px;
+}
+
+/* 🟢 [新增] 文字連結按鈕樣式 */
+.text-link {
+    background: none;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0;
+    transition: opacity 0.2s;
+    color: #888; /* 預設灰色 */
+}
+.text-link:hover { opacity: 0.7; text-decoration: underline; }
+.text-link.delete { color: #e5989b; } /* 刪除用淺紅色 */
 
 .rebalance-card { background: white; padding: 20px; border-radius: 16px; margin: 0 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center; }
 .progress-bar-container { position: relative; height: 16px; background: #eee; border-radius: 10px; margin: 20px 0; overflow: visible; }
@@ -768,13 +916,5 @@ onMounted(() => {
 .save-btn:disabled { opacity: 0.6; }
 .form-row { display: flex; gap: 12px; } .half { flex: 1; }
 .mt-2 { margin-top: 8px; } .mt-4 { margin-top: 16px; }
-.account-tag {
-    font-size: 0.75rem;
-    background-color: #f0f0f0;
-    color: #666;
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-left: 6px;
-    font-weight: normal;
-}
+.account-tag { font-size: 0.75rem; background-color: #f0f0f0; color: #666; padding: 2px 6px; border-radius: 4px; margin-left: 6px; font-weight: normal; }
 </style>

@@ -52,8 +52,10 @@ class CryptoService {
     }
 
     /**
-     * 🟢 [完全重寫] 取得歷史資產趨勢 (基於帳戶快照)
-     * 邏輯：讀取 account_balance_history -> 篩選加密貨幣 -> 每日重播補值 -> 顯示特定日期
+     * 🟢 [修正] 取得歷史資產趨勢 (基於帳戶快照)
+     * 1. 篩選：只抓加密貨幣帳戶
+     * 2. 顯示：長週期只顯示特定日期，短週期顯示每天
+     * 3. 數值：保留一位小數
      */
     public function getHistoryChartData(int $userId, string $range = '1y'): array {
         // 1. 設定時間範圍
@@ -112,11 +114,8 @@ class CryptoService {
         foreach ($period as $dt) {
             $currentDate = $dt->format('Y-m-d');
             $dayOfMonth = $dt->format('d');
-
-            // 判斷今天是否有實際的快照紀錄
             $isSnapshotDay = isset($historyByDate[$currentDate]);
 
-            // A. 更新餘額
             if ($isSnapshotDay) {
                 foreach ($historyByDate[$currentDate] as $record) {
                     $accName = $record['account_name'];
@@ -128,47 +127,30 @@ class CryptoService {
                 }
             }
 
-            // B. 決定是否記錄點位
             if ($currentDate >= $startDate) {
                 $shouldRecord = true;
                 if ($range !== '1m') {
-                    // 規則：1號、15號、今天，或者「這一天有快照紀錄」
                     $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $endDate || $isSnapshotDay);
                 }
 
                 if ($shouldRecord) {
                     $dailyTotalUsd = 0.0;
-
                     foreach ($currentBalances as $acc) {
                         $bal = $acc['balance'];
                         $unit = $acc['unit'];
-                        
                         $rate = 0;
-                        if ($unit === 'USDT') {
-                            $rate = 1.0;
-                        } elseif ($acc['hist_rate']) {
-                            $rate = $acc['hist_rate'];
-                        } else {
-                            $rate = $currentRates[$unit] ?? 0;
-                        }
-
+                        if ($unit === 'USDT') $rate = 1.0;
+                        elseif ($acc['hist_rate']) $rate = $acc['hist_rate'];
+                        else $rate = $currentRates[$unit] ?? 0;
                         $dailyTotalUsd += ($bal * $rate);
                     }
-
                     $chartLabels[] = $currentDate;
-                    // 🟢 [修改]：保留 1 位小數
                     $chartData[] = round($dailyTotalUsd, 1);
                 }
             }
         }
-
-        return [
-            'labels' => $chartLabels,
-            'data' => $chartData
-        ];
+        return ['labels' => $chartLabels, 'data' => $chartData];
     }
-
-    // ... (以下方法保持不變) ...
 
     public function addTransaction(int $userId, array $data): bool {
         if (empty($data['type']) || !isset($data['quantity'])) { return false; }
@@ -188,135 +170,181 @@ class CryptoService {
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([':uid'=>$userId, ':type'=>$type, ':base'=>$base, ':quote'=>$quote, ':price'=>$price, ':qty'=>$qty, ':total'=>$total, ':fee'=>$fee, ':date'=>$date, ':note'=>$note]);
-        } catch (PDOException $e) {
-            error_log("Crypto Insert Failed: " . $e->getMessage());
-            return false;
-        }
+        } catch (PDOException $e) { return false; }
     }
 
+    /**
+     * 🟢 [重寫] 儀表板數據 (區分 已實現/未實現 損益)
+     * 修正：使用動態匯率 (usdTwdRate) 取代寫死的 32.0
+     */
     public function getDashboardData(int $userId): array {
-        // ... (這部分維持原樣，用於顯示當前持倉列表) ...
+        // 1. 撈取所有交易
         $sql = "SELECT * FROM crypto_transactions WHERE user_id = :uid ORDER BY transaction_date ASC, id ASC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':uid' => $userId]);
         $txs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $holdings = []; 
+        $portfolio = [];
         $totalInvestedTwd = 0; 
+
+        // 🟢 [修正] 動態取得 USD/TWD 匯率 (例如 32.5)
+        $usdTwdRate = $this->rateService->getUsdTwdRate();
 
         foreach ($txs as $tx) {
             $type = $tx['type'];
-            $symbol = strtoupper($tx['base_currency'] ?? ''); 
+            $base = strtoupper($tx['base_currency'] ?? '');
             $quote = strtoupper($tx['quote_currency'] ?? 'USDT');
             $qty = (float)$tx['quantity'];
             $total = (float)$tx['total'];
             $fee = (float)$tx['fee'];
 
-            if ($symbol && !isset($holdings[$symbol])) {
-                $holdings[$symbol] = ['balance' => 0, 'cost_usd' => 0, 'source' => 'trade']; 
+            if ($base && !isset($portfolio[$base])) {
+                $portfolio[$base] = ['qty' => 0, 'cost' => 0, 'realized' => 0];
             }
-            if ($quote === 'USDT' && !isset($holdings['USDT'])) {
-                $holdings['USDT'] = ['balance' => 0, 'cost_usd' => 0, 'source' => 'trade'];
+            if ($quote === 'USDT' && !isset($portfolio['USDT'])) {
+                $portfolio['USDT'] = ['qty' => 0, 'cost' => 0, 'realized' => 0];
             }
 
+            // 🟢 [修正] 匯率換算使用動態匯率
+            // 如果交易是用 TWD 計價，轉為 USD
+            $rateToUsd = ($quote === 'TWD') ? (1 / $usdTwdRate) : 1.0;
+            $totalUsd = $total * $rateToUsd;
+            $feeUsd = $fee * $rateToUsd;
+
             switch ($type) {
-                case 'deposit': 
+                case 'deposit':
                     if ($quote === 'TWD') $totalInvestedTwd += $total;
-                    if ($symbol === 'USDT') { $holdings['USDT']['balance'] += $qty; $holdings['USDT']['cost_usd'] += $qty; }
-                    else if ($symbol) { $holdings[$symbol]['balance'] += $qty; }
+                    
+                    if ($base === 'USDT') $portfolio['USDT']['qty'] += $qty;
+                    else if ($base) $portfolio[$base]['qty'] += $qty;
                     break;
+
                 case 'withdraw':
                     if ($quote === 'TWD') $totalInvestedTwd -= $total;
-                    if ($symbol === 'USDT') { $holdings['USDT']['balance'] -= $qty; $holdings['USDT']['cost_usd'] -= $qty; }
-                    else if ($symbol) { $holdings[$symbol]['balance'] -= $qty; }
-                    break;
-                case 'buy':
-                    if ($symbol) { $holdings[$symbol]['balance'] += $qty; $holdings[$symbol]['cost_usd'] += $total + $fee; }
-                    if ($quote === 'USDT') { $holdings['USDT']['balance'] -= $total; $holdings['USDT']['cost_usd'] -= $total; }
-                    break;
-                case 'sell':
-                    if ($symbol) {
-                        $currentBal = $holdings[$symbol]['balance'];
-                        $currentCost = $holdings[$symbol]['cost_usd'];
-                        $avgPrice = $currentBal > 0 ? ($currentCost / $currentBal) : 0;
-                        $holdings[$symbol]['balance'] -= $qty;
-                        $holdings[$symbol]['cost_usd'] -= ($avgPrice * $qty);
+
+                    $target = ($base === 'USDT') ? 'USDT' : $base;
+                    if (isset($portfolio[$target]) && $portfolio[$target]['qty'] > 0) {
+                        $avgCost = $portfolio[$target]['cost'] / $portfolio[$target]['qty'];
+                        $costPart = $avgCost * $qty;
+                        $portfolio[$target]['qty'] -= $qty;
+                        $portfolio[$target]['cost'] -= $costPart;
                     }
-                    if ($quote === 'USDT') { $holdings['USDT']['balance'] += ($total - $fee); $holdings['USDT']['cost_usd'] += ($total - $fee); }
                     break;
+
+                case 'buy':
+                    if ($base) {
+                        $portfolio[$base]['qty'] += $qty;
+                        $portfolio[$base]['cost'] += ($totalUsd + $feeUsd); 
+                    }
+                    if ($quote === 'USDT') {
+                        $portfolio['USDT']['qty'] -= $total;
+                    }
+                    break;
+
+                case 'sell':
+                    if ($base) {
+                        $currentQty = $portfolio[$base]['qty'];
+                        $currentCost = $portfolio[$base]['cost'];
+                        
+                        $avgCost = ($currentQty > 0) ? ($currentCost / $currentQty) : 0;
+                        $costOfSold = $avgCost * $qty;
+                        $revenue = $totalUsd - $feeUsd;
+
+                        $realized = $revenue - $costOfSold;
+                        $portfolio[$base]['realized'] += $realized;
+
+                        $portfolio[$base]['qty'] -= $qty;
+                        $portfolio[$base]['cost'] -= $costOfSold;
+                    }
+                    if ($quote === 'USDT') {
+                        $portfolio['USDT']['qty'] += ($total - $fee);
+                    }
+                    break;
+
                 case 'earn':
                 case 'adjustment':
-                    if ($symbol) $holdings[$symbol]['balance'] += $qty;
+                    if ($base) {
+                        $portfolio[$base]['qty'] += $qty;
+                    }
                     break;
             }
         }
 
+        // 3. 計算當前市值與未實現損益
+        $finalList = [];
+        $globalTotalUsd = 0;
+        $globalUnrealizedPnl = 0;
+        $globalRealizedPnl = 0;
+
+        // A. 處理交易推算帳戶
+        foreach ($portfolio as $sym => $data) {
+            $qty = $data['qty'];
+            if ($qty < 0.00000001 && $qty > -0.00000001) $qty = 0; 
+            
+            $globalRealizedPnl += $data['realized'];
+
+            if ($qty > 0) {
+                $price = $this->rateService->getRateToUSD($sym);
+                if ($sym === 'USDT') $price = 1.0;
+
+                $marketValue = $qty * $price;
+                $costBasis = $data['cost'];
+                
+                $unrealized = $marketValue - $costBasis;
+                $avgPrice = $costBasis / $qty;
+                $roi = ($costBasis > 0) ? ($unrealized / $costBasis) * 100 : 0;
+
+                $globalTotalUsd += $marketValue;
+                $globalUnrealizedPnl += $unrealized;
+
+                $finalList[] = [
+                    'type' => 'trade',
+                    'name' => 'Trading Wallet',
+                    'symbol' => $sym,
+                    'balance' => $qty,
+                    'valueUsd' => $marketValue,
+                    'costUsd' => $costBasis,
+                    'avgPrice' => $avgPrice,
+                    'currentPrice' => $price,
+                    'pnl' => $unrealized,
+                    'realized_pnl' => $data['realized'],
+                    'pnlPercent' => $roi
+                ];
+            }
+        }
+
+        // B. 融合靜態帳戶
         $cryptoList = array_keys(ExchangeRateService::COIN_ID_MAP);
         $cryptoList[] = 'USDT';
-        
         $placeholders = implode(',', array_fill(0, count($cryptoList), '?'));
         
-        $accSql = "SELECT name, balance, currency_unit, type 
-                   FROM accounts 
-                   WHERE user_id = ? AND currency_unit IN ($placeholders)";
-        
+        $accSql = "SELECT name, balance, currency_unit FROM accounts WHERE user_id = ? AND currency_unit IN ($placeholders)";
         $params = array_merge([$userId], $cryptoList);
-        
         $stmtAcc = $this->pdo->prepare($accSql);
         $stmtAcc->execute($params);
         $accounts = $stmtAcc->fetchAll(PDO::FETCH_ASSOC);
-
-        $finalList = [];
-        $totalValUsd = 0;
-        $totalUnrealizedPnl = 0;
-
-        foreach ($holdings as $sym => $data) {
-            $bal = $data['balance'];
-            if ($bal <= 0.000001) continue; 
-
-            $price = $this->rateService->getRateToUSD($sym) ?: 0;
-            $currentVal = $bal * $price;
-            $cost = $data['cost_usd'];
-            $pnl = $currentVal - $cost;
-            $roi = $cost > 0 ? ($pnl / $cost) * 100 : 0;
-
-            $totalValUsd += $currentVal;
-            $totalUnrealizedPnl += $pnl;
-
-            $finalList[] = [
-                'type' => 'trade', 
-                'name' => 'Trading Wallet', 
-                'symbol' => $sym,
-                'balance' => $bal,
-                'valueUsd' => $currentVal,
-                'costUsd' => $cost,
-                'avgPrice' => $bal > 0 ? ($cost / $bal) : 0,
-                'currentPrice' => $price,
-                'pnl' => $pnl,
-                'pnlPercent' => $roi
-            ];
-        }
 
         foreach ($accounts as $acc) {
             $sym = strtoupper($acc['currency_unit']);
             $bal = (float)$acc['balance'];
             if ($bal <= 0) continue;
 
-            $price = $this->rateService->getRateToUSD($sym) ?: 0;
-            $currentVal = $bal * $price;
-            $totalValUsd += $currentVal;
-
+            $price = ($sym === 'USDT') ? 1.0 : ($this->rateService->getRateToUSD($sym) ?: 0);
+            $val = $bal * $price;
+            
+            $globalTotalUsd += $val;
+            
             $finalList[] = [
-                'type' => 'account', 
-                'name' => $acc['name'], 
+                'type' => 'account',
+                'name' => $acc['name'],
                 'symbol' => $sym,
                 'balance' => $bal,
-                'valueUsd' => $currentVal,
-                'costUsd' => 0, 
-                'avgPrice' => 0, 
+                'valueUsd' => $val,
+                'costUsd' => 0,
+                'avgPrice' => 0,
                 'currentPrice' => $price,
-                'pnl' => 0, 
-                'pnlPercent' => 0 
+                'pnl' => 0,
+                'pnlPercent' => 0
             ];
         }
 
@@ -324,22 +352,51 @@ class CryptoService {
             return $b['valueUsd'] <=> $a['valueUsd'];
         });
 
-        $totalInvestedTrade = 0;
-        foreach($holdings as $h) $totalInvestedTrade += $h['cost_usd'];
-        $totalRoiPercent = $totalInvestedTrade > 0 ? ($totalUnrealizedPnl / $totalInvestedTrade) * 100 : 0;
+        // 🟢 [修正] ROI 計算使用總本金 (若有) 作為分母，並使用動態匯率換算
+        $totalHoldingCost = 0;
+        foreach($finalList as $item) $totalHoldingCost += $item['costUsd'];
+        
+        $roiDenominator = 0;
+        // 如果有入金紀錄，優先以總入金(換算成USD)為分母
+        if ($totalInvestedTwd > 0) {
+            $roiDenominator = $totalInvestedTwd / $usdTwdRate;
+        } else {
+            // 否則退回使用交易持倉成本 (若只用快照，這可能是 0)
+            $roiDenominator = $totalHoldingCost;
+        }
+
+        $pnlPercent = ($roiDenominator > 0) ? ($globalUnrealizedPnl / $roiDenominator) * 100 : 0;
 
         return [
             'dashboard' => [
-                'totalUsd' => $totalValUsd,
+                'totalUsd' => $globalTotalUsd,
                 'totalInvestedTwd' => $totalInvestedTwd, 
-                'pnl' => $totalUnrealizedPnl,
-                'pnlPercent' => $totalRoiPercent
+                'unrealizedPnl' => $globalUnrealizedPnl, 
+                'realizedPnl' => $globalRealizedPnl,     
+                'pnlPercent' => $pnlPercent
             ],
             'holdings' => $finalList,
-            'usdTwdRate' => 32.0, 
+            'usdTwdRate' => $usdTwdRate, // 回傳動態匯率
         ];
     }
 
+    public function deleteTransaction(int $userId, int $id): bool {
+        $sql = "DELETE FROM crypto_transactions WHERE id = :id AND user_id = :uid";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute([':id' => $id, ':uid' => $userId]);
+        } catch (PDOException $e) { return false; }
+    }
+
+    public function updateTransaction(int $userId, int $id, array $data): bool {
+        if (empty($data['type']) || !isset($data['quantity'])) return false;
+        $sql = "UPDATE crypto_transactions SET type=:type, base_currency=:base, quote_currency=:quote, price=:price, quantity=:qty, total=:total, fee=:fee, transaction_date=:date, note=:note WHERE id=:id AND user_id=:uid";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute([':id'=>$id, ':uid'=>$userId, ':type'=>$data['type'], ':base'=>strtoupper($data['baseCurrency']??''), ':quote'=>strtoupper($data['quoteCurrency']??'USDT'), ':price'=>(float)($data['price']??0), ':qty'=>(float)$data['quantity'], ':total'=>(float)($data['total']??0), ':fee'=>(float)($data['fee']??0), ':date'=>$data['date'], ':note'=>$data['note']??'']);
+        } catch (PDOException $e) { return false; }
+    }
+    
     public function getRebalancingAdvice(int $userId): array {
         $stmt = $this->pdo->prepare("SELECT target_usdt_ratio FROM users WHERE id = ?");
         $stmt->execute([$userId]);
