@@ -558,18 +558,35 @@ try {
                 $response = ['status' => 'error', 'message' => '刪除失敗'];
             }
             break;
-        case 'analyze_file':
+            case 'analyze_file':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
     
-            // 1. 檔案處理 (與之前相同)
+            // 1. 檔案處理 (驗證是否有上傳)
             if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-                $response = ['status' => 'error', 'message' => '上傳失敗'];
+                $response = ['status' => 'error', 'message' => '上傳失敗: 檔案無效或傳輸錯誤'];
                 break;
             }
             
-            // ... (儲存檔案到 temp 目錄的邏輯) ...
-            $tempPath = __DIR__ . '/temp/' . $fileName;
-            move_uploaded_file($_FILES['file']['tmp_name'], $tempPath);
+            // --- 🟢 [修復開始] 補上缺少的目錄檢查與檔名產生邏輯 ---
+            $tempDir = __DIR__ . '/temp';
+            if (!is_dir($tempDir)) {
+                mkdir($tempDir, 0777, true); // 確保 temp 資料夾存在
+            }
+
+            // 取得副檔名並產生唯一檔名，避免檔名衝突或中文亂碼
+            $ext = pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION);
+            // 若抓不到副檔名，預設為 jpg (或是根據 mime type 判斷，這裡先簡單處理)
+            if (empty($ext)) $ext = 'jpg'; 
+            
+            $fileName = uniqid('upload_') . '.' . $ext;
+            $tempPath = $tempDir . '/' . $fileName;
+            // --- 🟢 [修復結束] ---
+
+            // 移動檔案
+            if (!move_uploaded_file($_FILES['file']['tmp_name'], $tempPath)) {
+                $response = ['status' => 'error', 'message' => '系統錯誤: 無法儲存暫存檔'];
+                break;
+            }
     
             // 2. 🟢 核心分流邏輯
             $mode = $_POST['mode'] ?? 'general'; // 預設為一般記帳
@@ -582,12 +599,30 @@ try {
                 $message = "Crypto 截圖辨識成功";
             } else {
                 // B. 一般記帳模式 (DashboardView 呼叫)
-                // 包含：發票、收據、信用卡帳單 PDF
                 $resultData = $geminiService->parseTransaction("FILE:" . $tempPath);
-                $message = "單據辨識成功";
                 
-                // 選項：一般記帳通常可以直接入庫 (視需求而定)
-                // 如果希望自動入庫，可以在這裡呼叫 TransactionService->addTransaction
+                // --- 🟢 [新增] 自動寫入資料庫 (Transactions 表) ---
+                if (!empty($resultData) && is_array($resultData)) {
+                    $savedCount = 0;
+                    // 從 POST 接收 ledger_id (Dashboard 上傳時會帶)
+                    $targetLedgerId = $_POST['ledger_id'] ?? null;
+
+                    foreach ($resultData as $tx) {
+                        // 確保將這筆交易歸戶到正確的帳本
+                        if ($targetLedgerId) {
+                            $tx['ledger_id'] = $targetLedgerId;
+                        }
+                        
+                        // 呼叫 TransactionService 寫入 transactions 資料表
+                        if ($transactionService->addTransaction($dbUserId, $tx)) {
+                            $savedCount++;
+                        }
+                    }
+                    $message = "單據辨識成功，已自動新增 {$savedCount} 筆紀錄";
+                } else {
+                    $message = "單據辨識完成，但無有效資料";
+                }
+                // --- 🟢 [新增結束] ---
             }
     
             unlink($tempPath); // 刪除暫存檔
