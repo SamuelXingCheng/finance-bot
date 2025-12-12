@@ -404,21 +404,59 @@ function renderChart(chartData) {
                 backgroundColor: gradient,
                 borderWidth: 2,
                 fill: true,
-                pointRadius: 0,
-                pointHoverRadius: 6,
+                pointRadius: 3, // 保持點點顯示
+                pointHoverRadius: 6, // 滑鼠移上去時點點變大
+                pointBackgroundColor: '#ffffff', // 點點中間白色
+                pointBorderColor: primaryColor,  // 點點邊框顏色
                 tension: 0.4
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            // 🟢 [新增] 互動模式設定：讓滑鼠不用精準指到點也能觸發
+            interaction: {
+                mode: 'index',   // 只要滑鼠在該 X 軸的區間內就觸發
+                intersect: false, // 不需要游標真的碰到點
+            },
             plugins: { 
                 legend: { display: false },
-                tooltip: { callbacks: { label: (ctx) => `市值: $ ${numberFormat(ctx.raw, 2)}` } },
+                // 🟢 [關鍵修改] 關閉原本印在圖上的數字
+                datalabels: { 
+                    display: false 
+                },
+                // 🟢 [優化] Tooltip 提示框設定
+                tooltip: { 
+                    enabled: true,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)', // 背景改白
+                    titleColor: '#333', // 標題深色
+                    bodyColor: '#2A9D8F', // 數值顏色
+                    borderColor: '#ddd',
+                    borderWidth: 1,
+                    padding: 10,
+                    displayColors: false, // 不顯示前面的小色塊
+                    callbacks: { 
+                        // 設定標題顯示日期
+                        title: (tooltipItems) => {
+                            return tooltipItems[0].label;
+                        },
+                        // 設定數值格式 (保留 1 位小數)
+                        label: (ctx) => {
+                            return `USD $ ${numberFormat(ctx.raw, 1)}`; 
+                        } 
+                    } 
+                },
             },
             scales: {
-                x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
-                y: { beginAtZero: false, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => '$' + numberFormat(val, 0) } }
+                x: { 
+                    grid: { display: false }, 
+                    ticks: { maxTicksLimit: 6 } 
+                },
+                y: { 
+                    beginAtZero: false, 
+                    grid: { color: '#f0f0f0' }, 
+                    ticks: { callback: (val) => '$' + numberFormat(val, 1) } 
+                }
             }
         }
     });
