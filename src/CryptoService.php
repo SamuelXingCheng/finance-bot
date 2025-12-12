@@ -385,16 +385,47 @@ class CryptoService {
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([':id' => $id, ':uid' => $userId]);
-        } catch (PDOException $e) { return false; }
+        } catch (PDOException $e) {
+            error_log("Delete Crypto Tx Error: " . $e->getMessage());
+            return false;
+        }
     }
 
     public function updateTransaction(int $userId, int $id, array $data): bool {
+        // 簡單防呆
         if (empty($data['type']) || !isset($data['quantity'])) return false;
-        $sql = "UPDATE crypto_transactions SET type=:type, base_currency=:base, quote_currency=:quote, price=:price, quantity=:qty, total=:total, fee=:fee, transaction_date=:date, note=:note WHERE id=:id AND user_id=:uid";
+
+        $sql = "UPDATE crypto_transactions 
+                SET type = :type, 
+                    base_currency = :base, 
+                    quote_currency = :quote, 
+                    price = :price, 
+                    quantity = :qty, 
+                    total = :total, 
+                    fee = :fee, 
+                    transaction_date = :date, 
+                    note = :note 
+                WHERE id = :id AND user_id = :uid";
+        
         try {
             $stmt = $this->pdo->prepare($sql);
-            return $stmt->execute([':id'=>$id, ':uid'=>$userId, ':type'=>$data['type'], ':base'=>strtoupper($data['baseCurrency']??''), ':quote'=>strtoupper($data['quoteCurrency']??'USDT'), ':price'=>(float)($data['price']??0), ':qty'=>(float)$data['quantity'], ':total'=>(float)($data['total']??0), ':fee'=>(float)($data['fee']??0), ':date'=>$data['date'], ':note'=>$data['note']??'']);
-        } catch (PDOException $e) { return false; }
+            return $stmt->execute([
+                ':id' => $id,
+                ':uid' => $userId,
+                ':type' => $data['type'],
+                ':base' => strtoupper($data['baseCurrency'] ?? ''),
+                ':quote' => strtoupper($data['quoteCurrency'] ?? 'USDT'), // 預設 Quote 為 USDT
+                ':price' => (float)($data['price'] ?? 0),
+                ':qty' => (float)$data['quantity'],
+                ':total' => (float)($data['total'] ?? 0),
+                ':fee' => (float)($data['fee'] ?? 0),
+                ':date' => $data['date'],
+                ':note' => $data['note'] ?? ''
+            ]);
+        } catch (PDOException $e) {
+            error_log("Update Crypto Tx Error: " . $e->getMessage());
+            return false;
+        }
     }
     
     public function getRebalancingAdvice(int $userId): array {

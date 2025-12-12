@@ -382,6 +382,58 @@ const submitButtonText = computed(() => {
   return '新增紀錄';
 });
 
+const isEditingTransaction = ref(false);
+const editingId = ref(null); // 用來記錄正在編輯哪一筆 ID
+
+// 🟢 [補上] 2. 刪除交易函式
+async function deleteTx(id) {
+    if (!confirm("確定要刪除這筆交易紀錄嗎？\n刪除後將重新計算持倉，無法復原。")) return;
+    
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_crypto_transaction`, {
+        method: 'POST',
+        body: JSON.stringify({ id })
+    });
+
+    if (response && response.ok) {
+        const res = await response.json();
+        if (res.status === 'success') {
+            fetchCryptoData();
+            fetchRecentTransactions();
+            alert("刪除成功");
+        } else {
+            alert(res.message);
+        }
+    }
+}
+
+// 🟢 [補上] 3. 開啟編輯 Modal 函式 (點擊編輯按鈕時觸發)
+function openEditTxModal(tx) {
+    isEditingTransaction.value = true;
+    editingId.value = tx.id;
+    
+    // 將交易資料填回表單
+    form.type = tx.type;
+    form.baseCurrency = tx.base_currency;
+    form.quoteCurrency = tx.quote_currency || 'USDT';
+    form.price = parseFloat(tx.price);
+    form.quantity = parseFloat(tx.quantity);
+    form.total = parseFloat(tx.total);
+    form.fee = parseFloat(tx.fee);
+    form.date = tx.transaction_date.substring(0, 10);
+    form.note = tx.note;
+
+    // 自動切換到對應的 Tab
+    if (['deposit', 'withdraw'].includes(tx.type)) {
+        currentTab.value = 'fiat';
+    } else if (['buy', 'sell'].includes(tx.type)) {
+        currentTab.value = 'trade';
+    } else {
+        currentTab.value = 'earn';
+    }
+    
+    isModalOpen.value = true;
+}
+
 function switchView(target) {
     view.value = target;
     if (target === 'portfolio') {
@@ -590,9 +642,12 @@ async function saveTargetRatio() {
     saving.value = false;
 }
 
+// 🟢 [修正] 4. 修改原本的 openTransactionModal (確保按新增時是乾淨的狀態)
 function openTransactionModal() {
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
     resetForm(); 
+    isEditingTransaction.value = false; // 確保不是編輯模式
+    editingId.value = null;
     isModalOpen.value = true; 
 }
 function closeModal() { isModalOpen.value = false; }
@@ -678,20 +733,33 @@ async function submitBalanceAdjustment() {
 
 async function submitTransaction() {
   const payload = { ...form };
+  
+  // 自動計算邏輯 (輔助)
   if (currentTab.value === 'fiat') {
-    payload.price = form.quantity > 0 ? (form.total / form.quantity) : 0;
+    if (!payload.price && payload.quantity > 0) payload.price = (payload.total / payload.quantity);
     payload.baseCurrency = 'USDT'; payload.quoteCurrency = 'TWD';
   } else if (currentTab.value === 'trade') {
     payload.baseCurrency = form.baseCurrency.toUpperCase(); payload.quoteCurrency = form.quoteCurrency.toUpperCase();
-  } else { payload.baseCurrency = form.baseCurrency.toUpperCase(); }
+  } else { 
+    payload.baseCurrency = form.baseCurrency.toUpperCase(); 
+  }
 
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_crypto_transaction`, { method: 'POST', body: JSON.stringify(payload) });
+  // 判斷是新增還是更新
+  let url = `${window.API_BASE_URL}?action=add_crypto_transaction`;
+  if (isEditingTransaction.value) {
+      url = `${window.API_BASE_URL}?action=update_crypto_transaction`;
+      payload.id = editingId.value; // 帶上 ID
+  }
+
+  const response = await fetchWithLiffToken(url, { method: 'POST', body: JSON.stringify(payload) });
   if (response && response.ok) {
     const res = await response.json();
     if (res.status === 'success') {
-        closeModal(); fetchCryptoData(); fetchHistory(); 
-        fetchRecentTransactions(); // 刷新交易列表
-        alert('紀錄成功');
+        closeModal(); 
+        fetchCryptoData(); 
+        fetchHistory(historyRange.value); 
+        fetchRecentTransactions(); 
+        alert(isEditingTransaction.value ? '更新成功' : '紀錄成功');
     } else { alert('失敗：' + res.message); }
   } else { alert('網路錯誤'); }
 }
