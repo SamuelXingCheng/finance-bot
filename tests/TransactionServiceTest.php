@@ -53,37 +53,6 @@ class TransactionServiceTest extends TestCase {
         $this->service = new TransactionService($this->pdo);
     }
 
-    public function processRecurring(int $userId): int {
-        $today = date('Y-m-d');
-        
-        // 1. 查找該用戶所有到期的規則
-        $sql = "SELECT * FROM recurring_rules WHERE user_id = ? AND next_run_date <= ? AND is_active = 1";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$userId, $today]);
-        $rules = $stmt->fetchAll();
-        
-        $count = 0;
-        foreach ($rules as $rule) {
-            // 2. 執行記帳
-            $this->addTransaction($userId, [
-                'amount' => $rule['amount'],
-                'type' => $rule['type'],
-                'category' => $rule['category'],
-                'description' => $rule['description'] . ' (自動)',
-                'date' => $rule['next_run_date'], // 使用原本預定的日期
-                'currency' => 'TWD' // 簡化
-            ]);
-            
-            // 3. 更新下一次執行日期
-            $nextDate = date('Y-m-d', strtotime('+1 month', strtotime($rule['next_run_date'])));
-            $upd = $this->pdo->prepare("UPDATE recurring_rules SET next_run_date = ? WHERE id = ?");
-            $upd->execute([$nextDate, $rule['id']]);
-            
-            $count++;
-        }
-        return $count;
-    }
-    
     public function testAddTransaction() {
         $data = [
             'amount' => 100,

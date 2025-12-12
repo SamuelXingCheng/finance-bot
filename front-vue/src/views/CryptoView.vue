@@ -62,29 +62,36 @@
         </div>
 
         <div v-else class="coin-list">
-          <div v-for="coin in holdings" :key="coin.symbol" class="account-card-style">
-            <div class="card-left">
-              <div class="acc-name">{{ coin.symbol }}</div>
-              <div class="acc-meta">
-                <span class="badge" :class="coin.symbol === 'USDT' ? 'badge-stable' : 'badge-crypto'">
-                  {{ coin.symbol === 'USDT' ? '穩定幣' : '投資' }}
-                </span>
-                <span class="currency">均價: ${{ numberFormat(coin.avgPrice, 2) }}</span>
-              </div>
+        <div v-for="(coin, index) in holdings" :key="index" class="account-card-style">
+          <div class="card-left">
+            <div class="acc-name">
+              {{ coin.symbol }} 
+              <span class="account-tag" v-if="coin.type === 'account'">{{ coin.name }}</span>
             </div>
-            
-            <div class="card-right">
-              <div class="acc-balance" :class="coin.valueUsd >= 0 ? 'text-asset' : 'text-debt'">
-                $ {{ numberFormat(coin.valueUsd, 2) }}
-              </div>
-              <div class="action-buttons">
-                <button class="pill-btn update-crypto" @click.stop="openEditBalanceModal(coin)">
-                    更新快照
-                </button>
-              </div>
+            <div class="acc-meta">
+              <span class="badge" :class="coin.symbol === 'USDT' ? 'badge-stable' : 'badge-crypto'">
+                {{ coin.symbol === 'USDT' ? '穩定幣' : '投資' }}
+              </span>
+              <span class="currency" v-if="coin.type === 'trade'">均價: ${{ numberFormat(coin.avgPrice, 2) }}</span>
+              <span class="currency" v-else>來自帳戶</span>
+            </div>
+          </div>
+          
+          <div class="card-right">
+            <div class="acc-balance" :class="coin.valueUsd >= 0 ? 'text-asset' : 'text-debt'">
+              $ {{ numberFormat(coin.valueUsd, 2) }}
+            </div>
+            <div v-if="coin.type === 'trade'" class="pnl-text-sm" :class="coin.pnl >= 0 ? 'text-profit-sm' : 'text-loss-sm'">
+              {{ coin.pnl >= 0 ? '+' : '' }}{{ numberFormat(coin.pnl, 2) }}
+            </div>
+            <div class="action-buttons">
+              <button class="pill-btn update-crypto" @click.stop="openEditBalanceModal(coin)">
+                  更新快照
+              </button>
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       <div class="list-section mt-4">
@@ -317,6 +324,7 @@ const form = reactive({ type: 'buy', baseCurrency: '', quoteCurrency: 'USDT', pr
 const editBalanceForm = reactive({ symbol: '', current: 0, newBalance: 0, date: new Date().toISOString().substring(0, 10) });
 const tempTargetRatio = ref(10);
 const saving = ref(false);
+const isEditAccountOpen = ref(false);
 
 const submitButtonText = computed(() => {
   if (currentTab.value === 'fiat') return form.type === 'deposit' ? '確認入金' : '確認出金';
@@ -499,12 +507,50 @@ function openEditBalanceModal(coin) {
     editBalanceForm.current = coin.balance;
     editBalanceForm.newBalance = coin.balance; 
     editBalanceForm.date = new Date().toISOString().substring(0, 10); 
+    
+    // 辨識來源
+    editBalanceForm.type = coin.type; 
+    editBalanceForm.name = coin.name; // 用於 API 識別
+
     isEditBalanceOpen.value = true;
 }
+
 function closeEditModal() { isEditBalanceOpen.value = false; }
 
 async function submitBalanceAdjustment() {
-    if (!confirm(`確定要更新 ${editBalanceForm.symbol} 的快照嗎？`)) return;
+    // 1. 處理靜態帳戶 (type === 'account')
+    if (editBalanceForm.type === 'account') {
+        if (!confirm(`確定要更新帳戶 [${editBalanceForm.name}] 的餘額為 ${editBalanceForm.newBalance} 嗎？`)) return;
+        
+        // 呼叫 save_account API (復用 AccountManagerView 的邏輯)
+        const payload = {
+            name: editBalanceForm.name,
+            balance: editBalanceForm.newBalance,
+            type: 'Investment', // 或根據幣種自動判斷
+            currency: editBalanceForm.symbol,
+            date: editBalanceForm.date,
+            ledger_id: props.ledgerId // 確保帶上當前帳本 ID
+        };
+
+        const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        if (response && response.ok) {
+            const res = await response.json();
+            if (res.status === 'success') {
+                closeEditModal();
+                fetchCryptoData(); // 重新整理列表
+                alert('帳戶快照已更新！');
+            } else { alert('失敗：' + res.message); }
+        }
+        return;
+    }
+
+    // 2. 處理交易推算帳戶 (type === 'trade') - 維持原有補差額邏輯
+    if (!confirm(`確定要校正 ${editBalanceForm.symbol} (Trading) 的餘額嗎？系統將自動新增一筆校正交易。`)) return;
+    
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=adjust_crypto_balance`, {
         method: 'POST',
         body: JSON.stringify({ 
@@ -519,7 +565,7 @@ async function submitBalanceAdjustment() {
             closeEditModal();
             fetchCryptoData(); 
             fetchHistory(historyRange.value); 
-            fetchRecentTransactions(); // 刷新交易列表
+            fetchRecentTransactions(); 
             alert('快照已更新！');
         } else { alert('失敗：' + res.message); }
     }
@@ -557,7 +603,7 @@ onMounted(() => {
 :root { --text-primary: #5d5d5d; --color-primary: #d4a373; --color-teal: #2A9D8F; --color-danger: #e5989b; }
 
 .crypto-container {
-    max-width: 600px;
+    max-width: 800px;
     margin: 0 auto;
     padding-bottom: 80px;
     color: var(--text-primary);
@@ -684,4 +730,13 @@ onMounted(() => {
 .save-btn:disabled { opacity: 0.6; }
 .form-row { display: flex; gap: 12px; } .half { flex: 1; }
 .mt-2 { margin-top: 8px; } .mt-4 { margin-top: 16px; }
+.account-tag {
+    font-size: 0.75rem;
+    background-color: #f0f0f0;
+    color: #666;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    font-weight: normal;
+}
 </style>

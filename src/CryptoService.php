@@ -183,119 +183,104 @@ class CryptoService {
     }
 
     /**
-     * 🟢 [除錯版] getDashboardData
+     * 🟢 [增強版] getDashboardData
+     * 同時整合「交易流水帳」與「靜態帳戶(accounts)」的加密資產
      */
     public function getDashboardData(int $userId): array {
-        // 1. 撈取該用戶所有交易
+        // 1. [原有邏輯] 撈取該用戶所有交易並計算持倉
         $sql = "SELECT * FROM crypto_transactions WHERE user_id = :uid ORDER BY transaction_date ASC, id ASC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':uid' => $userId]);
         $txs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // [Debug] 記錄原始筆數
-        $rawTxCount = count($txs);
-
-        // 2. 初始化
-        $holdings = []; 
+        $holdings = []; // Key: Symbol
         $totalInvestedTwd = 0; 
 
-        // 3. 交易重播
+        // --- A. 計算交易流水帳 (Transaction-based) ---
         foreach ($txs as $tx) {
+            // ... (保留原有的 switch case 邏輯不變) ...
             $type = $tx['type'];
-            $symbol = strtoupper($tx['base_currency'] ?? ''); // 確保大寫
+            $symbol = strtoupper($tx['base_currency'] ?? ''); 
             $quote = strtoupper($tx['quote_currency'] ?? 'USDT');
-            
             $qty = (float)$tx['quantity'];
             $total = (float)$tx['total'];
             $fee = (float)$tx['fee'];
 
-            // 初始化 Symbol
             if ($symbol && !isset($holdings[$symbol])) {
-                $holdings[$symbol] = ['balance' => 0, 'cost_usd' => 0];
+                $holdings[$symbol] = ['balance' => 0, 'cost_usd' => 0, 'source' => 'trade']; // 標記來源
             }
-            // USDT 特殊處理
             if ($quote === 'USDT' && !isset($holdings['USDT'])) {
-                $holdings['USDT'] = ['balance' => 0, 'cost_usd' => 0];
+                $holdings['USDT'] = ['balance' => 0, 'cost_usd' => 0, 'source' => 'trade'];
             }
 
             switch ($type) {
                 case 'deposit': 
                     if ($quote === 'TWD') $totalInvestedTwd += $total;
-                    if ($symbol === 'USDT') {
-                        $holdings['USDT']['balance'] += $qty;
-                        $holdings['USDT']['cost_usd'] += $qty; 
-                    }
-                    // 🟢 修正：如果是直接入金其他幣種 (如 BTC) 也要加餘額
-                    else if ($symbol && $symbol !== 'USDT') {
-                        $holdings[$symbol]['balance'] += $qty;
-                    }
+                    if ($symbol === 'USDT') { $holdings['USDT']['balance'] += $qty; $holdings['USDT']['cost_usd'] += $qty; }
+                    else if ($symbol) { $holdings[$symbol]['balance'] += $qty; }
                     break;
-
                 case 'withdraw':
                     if ($quote === 'TWD') $totalInvestedTwd -= $total;
-                    if ($symbol === 'USDT') {
-                        $holdings['USDT']['balance'] -= $qty;
-                        $holdings['USDT']['cost_usd'] -= $qty;
-                    } else if ($symbol) {
-                        $holdings[$symbol]['balance'] -= $qty;
-                    }
+                    if ($symbol === 'USDT') { $holdings['USDT']['balance'] -= $qty; $holdings['USDT']['cost_usd'] -= $qty; }
+                    else if ($symbol) { $holdings[$symbol]['balance'] -= $qty; }
                     break;
-
                 case 'buy':
-                    if ($symbol) {
-                        $holdings[$symbol]['balance'] += $qty;
-                        $holdings[$symbol]['cost_usd'] += $total + $fee; 
-                    }
-                    if ($quote === 'USDT') {
-                        $holdings['USDT']['balance'] -= $total;
-                        $holdings['USDT']['cost_usd'] -= $total; 
-                    }
+                    if ($symbol) { $holdings[$symbol]['balance'] += $qty; $holdings[$symbol]['cost_usd'] += $total + $fee; }
+                    if ($quote === 'USDT') { $holdings['USDT']['balance'] -= $total; $holdings['USDT']['cost_usd'] -= $total; }
                     break;
-
                 case 'sell':
                     if ($symbol) {
                         $currentBal = $holdings[$symbol]['balance'];
                         $currentCost = $holdings[$symbol]['cost_usd'];
                         $avgPrice = $currentBal > 0 ? ($currentCost / $currentBal) : 0;
-                        $soldCost = $avgPrice * $qty;
-
                         $holdings[$symbol]['balance'] -= $qty;
-                        $holdings[$symbol]['cost_usd'] -= $soldCost;
+                        $holdings[$symbol]['cost_usd'] -= ($avgPrice * $qty);
                     }
-                    if ($quote === 'USDT') {
-                        $holdings['USDT']['balance'] += ($total - $fee);
-                        $holdings['USDT']['cost_usd'] += ($total - $fee);
-                    }
+                    if ($quote === 'USDT') { $holdings['USDT']['balance'] += ($total - $fee); $holdings['USDT']['cost_usd'] += ($total - $fee); }
                     break;
-
                 case 'earn':
+                case 'adjustment':
                     if ($symbol) $holdings[$symbol]['balance'] += $qty;
                     break;
             }
         }
 
-        // 4. 計算現值
+        // --- B. [新增] 融合靜態帳戶 (Account-based) ---
+        // 撈取 accounts 表中 currency_unit 是加密貨幣的項目
+        // 定義常見加密貨幣清單，或根據 AssetService 的邏輯
+        $cryptoList = ['BTC','ETH','USDT','BNB','SOL','XRP','USDC','ADA','DOGE','TRX','DOT','MATIC','LTC'];
+        
+        // 動態產生 SQL IN 子句的佔位符
+        $placeholders = implode(',', array_fill(0, count($cryptoList), '?'));
+        
+        $accSql = "SELECT name, balance, currency_unit, type 
+                   FROM accounts 
+                   WHERE user_id = ? AND currency_unit IN ($placeholders)";
+        
+        // 參數陣列：先放 userId，再放 cryptoList
+        $params = array_merge([$userId], $cryptoList);
+        
+        $stmtAcc = $this->pdo->prepare($accSql);
+        $stmtAcc->execute($params);
+        $accounts = $stmtAcc->fetchAll(PDO::FETCH_ASSOC);
+
+        // 將帳戶資料合併進結果
+        // 策略：為了讓前端能區分「交易推算」跟「靜態帳戶」，我們將其作為獨立的項目加入列表
+        // 或者，如果前端希望依幣種聚合，我們可以在這裡聚合。但為了「更新快照」功能，分開列出比較合理。
+        // 這裡我們採用「混合列表」策略。
+
         $finalList = [];
         $totalValUsd = 0;
         $totalUnrealizedPnl = 0;
 
+        // 1. 處理交易推算的持倉
         foreach ($holdings as $sym => $data) {
             $bal = $data['balance'];
-            
-            // 🟢 [Debug] 暫時註解掉這個過濾器，看看是不是因為餘額太小
-            // if ($bal <= 0.000001) continue; 
+            if ($bal <= 0.000001) continue; // 隱藏過小的餘額
 
-            // 避免 API 錯誤導致崩潰，加個 try
-            try {
-                $currentPrice = $this->rateService->getRateToUSD($sym);
-            } catch (Exception $e) {
-                $currentPrice = 0; // API 失敗時歸零
-            }
-            
-            $currentVal = $bal * $currentPrice;
+            $price = $this->rateService->getRateToUSD($sym) ?: 0;
+            $currentVal = $bal * $price;
             $cost = $data['cost_usd'];
-            $avgPrice = $bal > 0 ? ($cost / $bal) : 0; // 防止除以零
-            
             $pnl = $currentVal - $cost;
             $roi = $cost > 0 ? ($pnl / $cost) * 100 : 0;
 
@@ -303,35 +288,68 @@ class CryptoService {
             $totalUnrealizedPnl += $pnl;
 
             $finalList[] = [
+                'type' => 'trade', // 標記來源
+                'name' => 'Trading Wallet', // 顯示名稱
                 'symbol' => $sym,
                 'balance' => $bal,
                 'valueUsd' => $currentVal,
                 'costUsd' => $cost,
-                'avgPrice' => $avgPrice,
-                'currentPrice' => $currentPrice,
+                'avgPrice' => $bal > 0 ? ($cost / $bal) : 0,
+                'currentPrice' => $price,
                 'pnl' => $pnl,
                 'pnlPercent' => $roi
             ];
         }
 
-        $totalHoldingsCostUsd = $totalValUsd - $totalUnrealizedPnl;
-        $totalRoiPercent = $totalHoldingsCostUsd > 0 ? ($totalUnrealizedPnl / $totalHoldingsCostUsd) * 100 : 0;
+        // 2. 處理靜態帳戶持倉
+        foreach ($accounts as $acc) {
+            $sym = strtoupper($acc['currency_unit']);
+            $bal = (float)$acc['balance'];
+            if ($bal <= 0) continue;
+
+            $price = $this->rateService->getRateToUSD($sym) ?: 0;
+            $currentVal = $bal * $price;
+            
+            // 靜態帳戶通常沒有成本紀錄，除非我們去撈歷史，這裡先假設成本為 0 或不計算 PnL
+            // 為了不影響總 PnL 計算，這裡設為 0
+            
+            $totalValUsd += $currentVal;
+            // $totalUnrealizedPnl 不計入靜態帳戶，因為不知道成本
+
+            $finalList[] = [
+                'type' => 'account', // 標記來源
+                'name' => $acc['name'], // 使用帳戶名稱 (例如：Cold Wallet)
+                'symbol' => $sym,
+                'balance' => $bal,
+                'valueUsd' => $currentVal,
+                'costUsd' => 0, 
+                'avgPrice' => 0, 
+                'currentPrice' => $price,
+                'pnl' => 0, 
+                'pnlPercent' => 0 
+            ];
+        }
+
+        // 排序：金額大到小
+        usort($finalList, function($a, $b) {
+            return $b['valueUsd'] <=> $a['valueUsd'];
+        });
+
+        // 重新計算總 ROI (僅針對 Trade 部分)
+        // 這裡可以選擇是否顯示總 ROI，或者只顯示 Trading 的 ROI
+        $totalInvestedTrade = 0;
+        foreach($holdings as $h) $totalInvestedTrade += $h['cost_usd'];
+        $totalRoiPercent = $totalInvestedTrade > 0 ? ($totalUnrealizedPnl / $totalInvestedTrade) * 100 : 0;
 
         return [
             'dashboard' => [
                 'totalUsd' => $totalValUsd,
-                'totalInvestedTwd' => $totalInvestedTwd,
+                'totalInvestedTwd' => $totalInvestedTwd, // 注意：這只有包含透過 Crypto 分頁入金的金額
                 'pnl' => $totalUnrealizedPnl,
                 'pnlPercent' => $totalRoiPercent
             ],
             'holdings' => $finalList,
-            'usdTwdRate' => 32.0, // 簡化
-            // 🟢 回傳除錯資訊，請在 Network Tab -> Response 查看
-            'debug' => [
-                'user_id_resolved' => $userId,
-                'transactions_found_in_db' => $rawTxCount,
-                'holdings_calculated_count' => count($finalList)
-            ]
+            'usdTwdRate' => 32.0, 
         ];
     }
     /**
