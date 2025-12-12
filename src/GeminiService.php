@@ -11,7 +11,7 @@ class GeminiService {
         $this->apiKey = GEMINI_API_KEY;
         $this->model = GEMINI_MODEL;
         
-        // 修正後的 Schema：根類型為 Array，並擴增 date, currency 欄位
+        // 定義標準記帳 Schema
         $this->transactionSchema = [
             'type' => 'array', 
             'items' => [
@@ -20,22 +20,23 @@ class GeminiService {
                     'amount' => ['type' => 'number', 'description' => '交易金額，必須是正數'],
                     'category' => ['type' => 'string', 'description' => '交易類別，例如: Food, Transport, Salary, Bills'],
                     'description' => ['type' => 'string', 'description' => '詳細描述或備註'],
-                    'type' => ['type' => 'string', 'enum' => ['expense', 'income'], 'description' => '交易類型：收入(income)或支出(expense)'],
-                    
-                    'date' => ['type' => 'string', 'description' => '交易日期，必須是 YYYY-MM-DD 格式，從輸入中推斷。若無時間提示，請使用今日日期。'],
-                    'currency' => ['type' => 'string', 'description' => '貨幣代碼，例如 TWD, USD, JPY。若未提及，預設為 TWD。'],
+                    'type' => ['type' => 'string', 'enum' => ['expense', 'income'], 'description' => '交易類型'],
+                    'date' => ['type' => 'string', 'description' => '交易日期 (YYYY-MM-DD)'],
+                    'currency' => ['type' => 'string', 'description' => '貨幣代碼 (TWD, USD...)'],
                 ],
-                // 擴增 'required' 列表
                 'required' => ['amount', 'category', 'type', 'date', 'currency'] 
             ]
         ];
     }
 
+    /**
+     * [一般記帳] 處理生活記帳 (語音/文字/發票/信用卡帳單)
+     * 使用 Schema 強制約束格式
+     */
     public function parseTransaction(string $textOrPath): ?array {
-        // 取得當前日期，用於 AI 推斷日期的預設值
         $today = date('Y-m-d');
         
-        // 🟢 [微調] System Instruction：加入圖片處理規則，其他保持原樣
+        // (保留您的原始 Instruction 不動)
         $systemInstruction = <<<EOD
 --- 核心指令：專業結構化數據轉換引擎 ---
 
@@ -86,71 +87,101 @@ Output:
 規則 3: 請提取具體品項作為 description。
 EOD;
         
+        // 傳入 true 表示使用 transactionSchema
+        return $this->callGeminiAPI($systemInstruction, $textOrPath, true);
+    }
+
+    /**
+     * [加密貨幣] 專門處理交易所截圖
+     * 不使用 Schema，讓 Prompt 自由定義回傳欄位 (如 price, fee)
+     */
+    public function parseCryptoScreenshot(string $filePath): ?array {
+        $today = date('Y-m-d');
+        
+        // (保留您的原始 Instruction 不動)
+        $systemInstruction = <<<EOD
+--- 角色設定 ---
+你是一位專業的加密貨幣財務助理。你的任務是分析使用者上傳的「交易所截圖」或「合約 PNL 圖」，並提取結構化的交易數據。
+
+--- 輸出規則 ---
+1. **輸出格式**：JSON Array。
+2. **必要欄位**：
+   - `type`: buy, sell, deposit, withdraw, earn (獲利), loss (虧損)。
+   - `baseCurrency`: 標的幣種 (如 BTC, ETH)。
+   - `quoteCurrency`: 計價幣種 (通常是 USDT)。
+   - `price`, `quantity`, `total`, `fee`。
+   - `date`: 交易日期，若無則使用 {$today}。
+   - `note`: 備註 (例如 "Binance 合約平倉")。
+
+--- 辨識邏輯 ---
+1. 若是現貨成交單：Buy ETH/USDT -> type="buy", base="ETH", quote="USDT"。
+2. 若是合約 PNL 卡：Positive -> type="earn"; Negative -> type="loss"。Base 設為 USDT。
+EOD;
+
+        // 傳入 false 表示不使用 Schema，且明確標示 FILE: 前綴
+        return $this->callGeminiAPI($systemInstruction, "FILE:" . $filePath, false);
+    }
+
+    /**
+     * [核心] 共用的 Gemini API 呼叫邏輯
+     * 負責處理檔案讀取、Base64 編碼、CURL 請求發送
+     */
+    private function callGeminiAPI(string $systemInstruction, string $content, bool $useSchema = false): ?array {
         $parts = [];
 
-        // 🟢 檢查字串是否以 'FILE:' 開頭
-        if (strncmp($textOrPath, 'FILE:', 5) === 0) {
-            // === 處理檔案 (音訊 或 圖片) ===
-            $filePath = trim(substr($textOrPath, 5)); // 去掉前綴取得路徑
+        // 判斷是否為檔案路徑 (FILE:...)
+        if (strncmp($content, 'FILE:', 5) === 0) {
+            $filePath = trim(substr($content, 5));
             
             if (file_exists($filePath)) {
-                // 讀取檔案並轉為 Base64
                 $fileData = file_get_contents($filePath);
                 $base64Data = base64_encode($fileData);
-
-                // 🟢 自動偵測檔案類型 (關鍵修改)
                 $mimeType = mime_content_type($filePath);
                 
-                // 修正：PHP 有時會將 .m4a 誤判，手動強制修正為 Gemini 支援的格式
+                // 修正 m4a 誤判為 application/octet-stream 的問題
                 if (str_ends_with($filePath, '.m4a')) {
                     $mimeType = 'audio/mp4';
                 }
 
-                // 建構多模態請求 (Prompt + File Data)
                 $parts = [
-                    ['text' => $systemInstruction . "\n\n[系統提示] 請分析此檔案（語音或圖片）並提取記帳資訊。"],
+                    ['text' => $systemInstruction . "\n\n[系統提示] 請分析此檔案。"],
                     [
                         'inline_data' => [
-                            'mime_type' => $mimeType, // 動態傳入正確的 MIME Type (image/jpeg 或 audio/mp4)
+                            'mime_type' => $mimeType, 
                             'data' => $base64Data
                         ]
                     ]
                 ];
-                
-                // (可選) 處理完後刪除暫存檔以節省空間
-                // unlink($filePath); 
             } else {
                 error_log("GeminiService Error: File not found at {$filePath}");
                 return null;
             }
         } else {
-            // === 處理純文字 (原本的邏輯) ===
-            $mergedText = $systemInstruction . "\n\nUser input: " . $textOrPath;
+            // 純文字輸入
+            $mergedText = $systemInstruction . "\n\nUser input: " . $content;
             $parts = [['text' => $mergedText]];
         }
 
-        // 組裝最終 API 請求資料
-        $data = [
-            'contents' => [
-                [
-                    'role' => 'user',
-                    'parts' => $parts
-                ]
-            ],
-            'generationConfig' => [ 
-                'responseMimeType' => 'application/json',
-                'responseSchema' => $this->transactionSchema
-            ]
+        // 設定生成參數
+        $generationConfig = [
+            'responseMimeType' => 'application/json'
         ];
 
-        // ... (以下 API 呼叫與錯誤處理邏輯保持不變)
+        // 只有一般記帳才強制使用 Schema，Crypto 模式讓 Prompt 決定結構
+        if ($useSchema) {
+            $generationConfig['responseSchema'] = $this->transactionSchema;
+        }
+
+        $data = [
+            'contents' => [['role' => 'user', 'parts' => $parts]],
+            'generationConfig' => $generationConfig
+        ];
+
         $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json'
-        ]);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -170,16 +201,13 @@ EOD;
                 return $resultArray;
             }
         }
-        
         return null;
     }
 
     /**
-     * 🌟 分析資產配置並提供建議 (保持不變)
+     * 🌟 分析資產配置 (保持不變)
      */
     public function analyzePortfolio(array $data): string {
-        // ... (請保留原本的代碼，這裡為了節省篇幅省略) ...
-        // 1. 解構資產數據
         $assetData = $data['assets'] ?? [];
         $charts = $assetData['charts'] ?? [];
         
@@ -189,15 +217,11 @@ EOD;
         $cash = number_format($charts['cash'] ?? 0);
         $invest = number_format($charts['investment'] ?? 0);
 
-        // 2. 解構收支數據
         $flow = $data['flow'] ?? [];
         $income = number_format($flow['income'] ?? 0);
         $expense = number_format($flow['expense'] ?? 0);
-        
-        $rawNetFlow = ($flow['income'] ?? 0) - ($flow['expense'] ?? 0);
-        $netFlow = number_format($rawNetFlow);
+        $netFlow = number_format(($flow['income'] ?? 0) - ($flow['expense'] ?? 0));
 
-        // 3. 構建超級 Prompt
         $prompt = <<<EOD
 你是一位專業且貼心的個人財務顧問。請根據以下使用者的「資產負債」與「本月收支」數據，進行綜合財務健檢（300字以內）：
 

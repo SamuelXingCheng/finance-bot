@@ -59,9 +59,17 @@
       <div class="list-section">
         <div class="section-header">
           <h3>持倉資產</h3>
-          <button class="add-btn" @click="openTransactionModal()">
-            <span>+</span> 記一筆
-          </button>
+          <div class="header-actions">
+             <input type="file" ref="uploadInput" class="hidden-input" accept="image/*" @change="handleImageUpload">
+             
+             <button class="icon-btn" @click="triggerUpload" :disabled="isAnalyzing">
+                <span v-if="isAnalyzing">⏳</span>
+                <span v-else>📷</span>
+             </button>
+            <button class="add-btn" @click="openTransactionModal()">
+              <span>+</span> 記一筆
+            </button>
+          </div>
         </div>
 
         <div v-if="holdings.length === 0" class="empty-state">
@@ -381,9 +389,66 @@ const submitButtonText = computed(() => {
   if (currentTab.value === 'trade') return form.type === 'buy' ? '確認買入' : '確認賣出';
   return '新增紀錄';
 });
+const uploadInput = ref(null);
+const isAnalyzing = ref(false);
 
 const isEditingTransaction = ref(false);
 const editingId = ref(null); // 用來記錄正在編輯哪一筆 ID
+
+function triggerUpload() {
+  uploadInput.value.click();
+}
+
+async function handleImageUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  isAnalyzing.value = true;
+  
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', 'crypto'); // ★ 指定為加密貨幣模式
+
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_file`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (response && response.ok) {
+      const res = await response.json();
+      if (res.status === 'success' && res.data && res.data.length > 0) {
+        // ★ 這裡不同：不直接寫入，而是填入表單讓用戶確認
+        populateAndOpenModal(res.data[0]);
+        alert(`AI 辨識完成！\n識別為: ${res.data[0].type.toUpperCase()} ${res.data[0].baseCurrency}`);
+      } else {
+        alert('辨識失敗或無資料: ' + res.message);
+      }
+    } else {
+      alert('上傳失敗');
+    }
+  } catch (e) {
+    console.error(e);
+    alert('發生錯誤');
+  } finally {
+    isAnalyzing.value = false;
+    if (uploadInput.value) uploadInput.value.value = '';
+  }
+}
+
+// 🟢 [新增] 填表邏輯
+function populateAndOpenModal(data) {
+  // 重置並填入資料
+  isEditingTransaction.value = false;
+  // ... (這裡填入 form 的邏輯，參考上一則回應的詳細代碼) ...
+  // 簡單範例：
+  form.type = data.type === 'income' ? 'earn' : (data.type === 'expense' ? 'loss' : data.type);
+  form.baseCurrency = data.baseCurrency || '';
+  form.quantity = parseFloat(data.quantity) || 0;
+  // ... 其他欄位 ...
+  
+  isModalOpen.value = true; // 打開視窗
+}
 
 // 🟢 [補上] 2. 刪除交易函式
 async function deleteTx(id) {
@@ -985,4 +1050,11 @@ onMounted(() => {
 .form-row { display: flex; gap: 12px; } .half { flex: 1; }
 .mt-2 { margin-top: 8px; } .mt-4 { margin-top: 16px; }
 .account-tag { font-size: 0.75rem; background-color: #f0f0f0; color: #666; padding: 2px 6px; border-radius: 4px; margin-left: 6px; font-weight: normal; }
+.header-actions { display: flex; gap: 8px; align-items: center; }
+.hidden-input { display: none; }
+.icon-btn {
+  background: white; border: 1px solid #ddd; border-radius: 50%;
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 1.1rem;
+}
 </style>

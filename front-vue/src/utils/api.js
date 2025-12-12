@@ -15,9 +15,14 @@ export async function fetchWithLiffToken(url, options = {}) {
     
     const idToken = liff.getIDToken();
     const defaultHeaders = { 
-        'Authorization': `Bearer ${idToken}`, 
-        'Content-Type': 'application/json' 
+        'Authorization': `Bearer ${idToken}`
+        // ❌ 移除原本這裡的 'Content-Type': 'application/json'
     };
+
+    // 🟢 [新增] 自動判斷：只有當 body 不是 FormData (上傳檔案) 時，才加 JSON header
+    if (!(options.body instanceof FormData)) {
+        defaultHeaders['Content-Type'] = 'application/json';
+    }
 
     options.headers = { ...defaultHeaders, ...options.headers };
     

@@ -36,7 +36,30 @@
         </p>
       </div>
     </div>
-
+    <div class="card-section">
+      <div class="section-header"><h2>智慧記帳</h2></div>
+      <div class="data-box upload-card">
+        <div class="upload-area" @click="triggerFileInput" :class="{ analyzing: isAnalyzing }">
+          <input 
+            type="file" 
+            ref="fileInput" 
+            class="hidden-input" 
+            accept="image/*,application/pdf" 
+            @change="handleFileChange"
+          >
+          
+          <div v-if="isAnalyzing" class="loading-content">
+            <span class="loader"></span>
+            <p>AI 正在分析單據...</p>
+          </div>
+          <div v-else class="upload-content">
+            <span class="icon">📸</span>
+            <p><strong>拍照或上傳單據</strong></p>
+            <p class="sub">支援發票、收據、PDF 帳單</p>
+          </div>
+        </div>
+      </div>
+    </div>
     <!-- <div class="card-section"> -->
       <!-- <div class="section-header"><h2>快速記帳</h2></div>
       <div class="data-box input-card">
@@ -317,6 +340,9 @@ const selectedPaymentMethod = ref('bmc');
 const BMC_URL = 'https://buymeacoffee.com/finbot'; 
 const NOWPAYMENTS_URL = 'https://nowpayments.io/donation/finbot2'; 
 
+const fileInput = ref(null);
+const isAnalyzing = ref(false);
+
 const categoryMap = {
   'Food': '飲食', 'Transport': '交通', 'Entertainment': '娛樂', 'Shopping': '購物',
   'Bills': '帳單', 'Investment': '投資', 'Medical': '醫療', 'Education': '教育',
@@ -441,6 +467,59 @@ const calendarDays = computed(() => {
 });
 
 // --- 方法 ---
+
+// 🟢 [新增] 觸發選擇檔案
+function triggerFileInput() {
+  if (isAnalyzing.value) return;
+  fileInput.value.click();
+}
+
+// 🟢 [新增] 處理檔案上傳 (Mode: general)
+async function handleFileChange(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  // 簡單檢查大小 (10MB)
+  if (file.size > 10 * 1024 * 1024) {
+    alert('檔案過大，請上傳 10MB 以下的檔案');
+    return;
+  }
+
+  isAnalyzing.value = true;
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', 'general'); // ★ 指定為一般記帳模式
+    
+    if (props.ledgerId) {
+      formData.append('ledger_id', props.ledgerId);
+    }
+
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_file`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (response && response.ok) {
+      const result = await response.json();
+      if (result.status === 'success') {
+        alert(result.message);
+        refreshAllData(); // ★ 成功後刷新介面顯示新交易
+      } else {
+        alert('辨識失敗：' + result.message);
+      }
+    } else {
+      alert('上傳失敗');
+    }
+  } catch (e) {
+    console.error(e);
+    alert('發生錯誤，請稍後再試');
+  } finally {
+    isAnalyzing.value = false;
+    if (fileInput.value) fileInput.value.value = ''; // 清空 input
+  }
+}
 
 function formatCompactNumber(num) {
   if (num >= 10000) return (num / 10000).toFixed(1) + 'w';
@@ -697,6 +776,36 @@ async function handleTransactionSubmit() {
   }
 }
 
+async function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('mode', 'general'); // 🟢 明確指定模式
+  
+  if (props.ledgerId) formData.append('ledger_id', props.ledgerId);
+
+  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_file`, {
+      method: 'POST',
+      body: formData
+  });
+  
+  if (response && response.ok) {
+        const result = await response.json();
+        if (result.status === 'success') {
+            alert(result.message);
+            
+            // 🟢 [重要] 務必呼叫這行，讓畫面更新，顯示剛記進去的帳
+            refreshAllData(); 
+            
+        } else {
+            alert('辨識失敗：' + result.message);
+        }
+    }
+
+}
+
 async function handleLinkAndPay() {
     if (!paymentEmail.value) { alert('請輸入 Email'); return; }
     
@@ -895,4 +1004,32 @@ onMounted(() => {
 .dot-expense { font-size: 0.6rem; color: #d67a7a; background: #fff0f0; padding: 1px 3px; border-radius: 4px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .dot-income { font-size: 0.6rem; color: #8fbc8f; background: #f0f7f0; padding: 1px 3px; border-radius: 4px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 :deep(.tag-highlight) { color: #2A9D8F; font-weight: bold; background: #e6fcf5; padding: 0 2px; border-radius: 4px; }
+/* 🟢 [新增] 上傳卡片樣式 */
+.upload-card {
+  padding: 0;
+  overflow: hidden;
+  border: 2px dashed #d4a373;
+  background-color: #fffbf5;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.upload-card:hover {
+  background-color: #fff8f0;
+  border-color: #b08d65;
+}
+.upload-area {
+  padding: 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+.hidden-input { display: none; }
+.icon { font-size: 2rem; margin-bottom: 8px; }
+.upload-content p { margin: 0; color: #5d5d5d; }
+.upload-content .sub { font-size: 0.8rem; color: #999; margin-top: 4px; }
+.analyzing { pointer-events: none; opacity: 0.7; }
+.loading-content { color: #d4a373; font-weight: bold; }
 </style>

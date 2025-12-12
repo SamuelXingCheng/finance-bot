@@ -558,7 +558,52 @@ try {
                 $response = ['status' => 'error', 'message' => '刪除失敗'];
             }
             break;
-
+        case 'analyze_file':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+    
+            // 1. 檔案處理 (與之前相同)
+            if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+                $response = ['status' => 'error', 'message' => '上傳失敗'];
+                break;
+            }
+            
+            // ... (儲存檔案到 temp 目錄的邏輯) ...
+            $tempPath = __DIR__ . '/temp/' . $fileName;
+            move_uploaded_file($_FILES['file']['tmp_name'], $tempPath);
+    
+            // 2. 🟢 核心分流邏輯
+            $mode = $_POST['mode'] ?? 'general'; // 預設為一般記帳
+            $geminiService = new GeminiService();
+            $resultData = [];
+    
+            if ($mode === 'crypto') {
+                // A. 加密貨幣模式 (CryptoView 呼叫)
+                $resultData = $geminiService->parseCryptoScreenshot($tempPath);
+                $message = "Crypto 截圖辨識成功";
+            } else {
+                // B. 一般記帳模式 (DashboardView 呼叫)
+                // 包含：發票、收據、信用卡帳單 PDF
+                $resultData = $geminiService->parseTransaction("FILE:" . $tempPath);
+                $message = "單據辨識成功";
+                
+                // 選項：一般記帳通常可以直接入庫 (視需求而定)
+                // 如果希望自動入庫，可以在這裡呼叫 TransactionService->addTransaction
+            }
+    
+            unlink($tempPath); // 刪除暫存檔
+    
+            if ($resultData) {
+                $response = [
+                    'status' => 'success',
+                    'message' => $message,
+                    'data' => $resultData, // 回傳給前端確認
+                    'mode' => $mode
+                ];
+            } else {
+                $response = ['status' => 'error', 'message' => 'AI 無法辨識內容'];
+            }
+            break;
+            
         // 🟢 [新增] 更新 Crypto 交易
         case 'update_crypto_transaction':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -574,7 +619,7 @@ try {
                 $response = ['status' => 'error', 'message' => '更新失敗'];
             }
             break;
-            
+
         // 🟢 1. 新增：獲取用戶狀態 (用於前端判斷是否顯示引導頁)
         case 'get_user_status':
             // 注意：請確保 UserService.php 已新增 getUserStatus 方法
