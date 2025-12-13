@@ -14,7 +14,6 @@ class CryptoService {
 
     /**
      * 校正餘額 (支援指定日期，模擬「快照」行為)
-     * 維持原樣，讓使用者可以補登交易
      */
     public function adjustBalance(int $userId, string $symbol, float $targetBalance, string $date = null): bool {
         $dashboard = $this->getDashboardData($userId);
@@ -51,12 +50,6 @@ class CryptoService {
         }
     }
 
-    /**
-     * 🟢 [修正] 取得歷史資產趨勢 (基於帳戶快照)
-     * 1. 篩選：只抓加密貨幣帳戶
-     * 2. 顯示：長週期只顯示特定日期，短週期顯示每天
-     * 3. 數值：保留一位小數
-     */
     public function getHistoryChartData(int $userId, string $range = '1y'): array {
         // 1. 設定時間範圍
         $interval = '-1 year';
@@ -175,7 +168,7 @@ class CryptoService {
 
     /**
      * 🟢 [重寫] 儀表板數據 (區分 已實現/未實現 損益)
-     * 修正：使用動態匯率 (usdTwdRate) 取代寫死的 32.0
+     * 修正：加入合約過濾邏輯，只顯示現貨資產
      */
     public function getDashboardData(int $userId): array {
         // 1. 撈取所有交易
@@ -187,13 +180,19 @@ class CryptoService {
         $portfolio = [];
         $totalInvestedTwd = 0; 
 
-        // 🟢 [修正] 動態取得 USD/TWD 匯率 (例如 32.5)
+        // 動態取得 USD/TWD 匯率
         $usdTwdRate = $this->rateService->getUsdTwdRate();
 
         foreach ($txs as $tx) {
             $type = $tx['type'];
             $base = strtoupper($tx['base_currency'] ?? '');
             $quote = strtoupper($tx['quote_currency'] ?? 'USDT');
+            
+            // 🔴 [新增] 過濾合約交易：如果幣種包含 _PERP 或 -PERP，則跳過，不計入現貨資產
+            if (str_contains($base, '_PERP') || str_contains($base, '-PERP')) {
+                continue;
+            }
+
             $qty = (float)$tx['quantity'];
             $total = (float)$tx['total'];
             $fee = (float)$tx['fee'];
@@ -205,8 +204,7 @@ class CryptoService {
                 $portfolio['USDT'] = ['qty' => 0, 'cost' => 0, 'realized' => 0];
             }
 
-            // 🟢 [修正] 匯率換算使用動態匯率
-            // 如果交易是用 TWD 計價，轉為 USD
+            // 匯率換算使用動態匯率
             $rateToUsd = ($quote === 'TWD') ? (1 / $usdTwdRate) : 1.0;
             $totalUsd = $total * $rateToUsd;
             $feeUsd = $fee * $rateToUsd;
@@ -352,7 +350,6 @@ class CryptoService {
             return $b['valueUsd'] <=> $a['valueUsd'];
         });
 
-        // 🟢 [修正] ROI 計算使用總本金 (若有) 作為分母，並使用動態匯率換算
         $totalHoldingCost = 0;
         foreach($finalList as $item) $totalHoldingCost += $item['costUsd'];
         
@@ -361,7 +358,6 @@ class CryptoService {
         if ($totalInvestedTwd > 0) {
             $roiDenominator = $totalInvestedTwd / $usdTwdRate;
         } else {
-            // 否則退回使用交易持倉成本 (若只用快照，這可能是 0)
             $roiDenominator = $totalHoldingCost;
         }
 
@@ -376,7 +372,7 @@ class CryptoService {
                 'pnlPercent' => $pnlPercent
             ],
             'holdings' => $finalList,
-            'usdTwdRate' => $usdTwdRate, // 回傳動態匯率
+            'usdTwdRate' => $usdTwdRate,
         ];
     }
 
@@ -385,14 +381,10 @@ class CryptoService {
         try {
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([':id' => $id, ':uid' => $userId]);
-        } catch (PDOException $e) {
-            error_log("Delete Crypto Tx Error: " . $e->getMessage());
-            return false;
-        }
+        } catch (PDOException $e) { return false; }
     }
 
     public function updateTransaction(int $userId, int $id, array $data): bool {
-        // 簡單防呆
         if (empty($data['type']) || !isset($data['quantity'])) return false;
 
         $sql = "UPDATE crypto_transactions 
@@ -414,7 +406,7 @@ class CryptoService {
                 ':uid' => $userId,
                 ':type' => $data['type'],
                 ':base' => strtoupper($data['baseCurrency'] ?? ''),
-                ':quote' => strtoupper($data['quoteCurrency'] ?? 'USDT'), // 預設 Quote 為 USDT
+                ':quote' => strtoupper($data['quoteCurrency'] ?? 'USDT'),
                 ':price' => (float)($data['price'] ?? 0),
                 ':qty' => (float)$data['quantity'],
                 ':total' => (float)($data['total'] ?? 0),
@@ -422,10 +414,7 @@ class CryptoService {
                 ':date' => $data['date'],
                 ':note' => $data['note'] ?? ''
             ]);
-        } catch (PDOException $e) {
-            error_log("Update Crypto Tx Error: " . $e->getMessage());
-            return false;
-        }
+        } catch (PDOException $e) { return false; }
     }
     
     public function getRebalancingAdvice(int $userId): array {
@@ -505,6 +494,138 @@ class CryptoService {
 
     public function handleFuturesTrade(int $userId, array $data): bool {
         return true; 
+    }
+
+    /**
+     * 🟢 [強力升級] CSV 批次處理
+     * 支援 Spot (BTC_USDT) 與 Futures (USDT_ETH_PERP) 的智慧解析
+     */
+    public function processCsvBulk(int $userId, string $filePath, array $mapping): array {
+        $handle = fopen($filePath, "r");
+        if (!$handle) return ['count' => 0];
+
+        $bom = fread($handle, 3);
+        if ($bom !== "\xEF\xBB\xBF") rewind($handle);
+
+        $count = 0;
+        $lineIndex = 0;
+
+        while (($row = fgetcsv($handle)) !== false) {
+            if ($mapping['has_header'] && $lineIndex === 0) {
+                $lineIndex++;
+                continue;
+            }
+
+            $rawDate = $row[$mapping['date_col_index']] ?? null;
+            
+            // --- 🟢 智慧幣種解析邏輯 ---
+            $base = '';
+            $quote = 'USDT'; // 預設
+
+            // 情況 A: 單一欄位 Pair (如 "BTC_USDT" 或 "USDT_ETH_PERP")
+            if (isset($mapping['pair_col_index']) && $mapping['pair_col_index'] > -1) {
+                $rawPair = $row[$mapping['pair_col_index']] ?? '';
+                if (!$rawPair) continue; 
+                
+                // 1. 轉大寫並去除多餘空格，但保留底線以利辨識
+                $pairClean = strtoupper(trim($rawPair));
+                
+                // 2. 判斷邏輯
+                if (preg_match('/^USDT_([A-Z]+)_PERP$/', $pairClean, $matches)) {
+                    // ★ 命中幣本位合約 (如 USDT_ETH_PERP)
+                    // 這類合約通常 "價格" 是倒數或以幣計價，所以 Quote 設為中間幣種 (ETH)
+                    $base = $pairClean; // 保留完整名稱作為資產名
+                    $quote = $matches[1]; // ETH
+                } 
+                elseif (str_contains($pairClean, '_')) {
+                    // ★ 標準分隔 (如 BTC_USDT)
+                    $parts = explode('_', $pairClean);
+                    if (count($parts) === 2) {
+                        $base = $parts[0];
+                        $quote = $parts[1];
+                    } else {
+                        // 複雜組合，保留原樣，嘗試猜測 Quote
+                        $base = $pairClean;
+                        if (str_ends_with($pairClean, 'USDT')) $quote = 'USDT';
+                        elseif (str_ends_with($pairClean, 'USDC')) $quote = 'USDC';
+                    }
+                } 
+                else {
+                    // ★ 無分隔 (如 BTCUSDT)
+                    $base = str_replace(['USDT', 'USDC', 'BUSD', 'TWD'], '', $pairClean);
+                    if (str_ends_with($pairClean, 'TWD')) $quote = 'TWD';
+                    elseif (str_ends_with($pairClean, 'USDC')) $quote = 'USDC';
+                    elseif (str_ends_with($pairClean, 'BUSD')) $quote = 'BUSD';
+                    else $quote = 'USDT'; // 預設
+                }
+            } 
+            // 情況 B: 分離欄位 (Base/Quote)
+            elseif (isset($mapping['base_col_index']) && isset($mapping['quote_col_index'])) {
+                if ($mapping['base_col_index'] > -1) {
+                    $base = strtoupper($row[$mapping['base_col_index']] ?? '');
+                }
+                if ($mapping['quote_col_index'] > -1) {
+                    $quote = strtoupper($row[$mapping['quote_col_index']] ?? 'USDT');
+                }
+            }
+
+            if (!$rawDate || !$base) continue;
+
+            // --- 2. 其他數據提取 ---
+            $rawSide  = isset($mapping['side_col_index']) && $mapping['side_col_index'] > -1 ? ($row[$mapping['side_col_index']] ?? '') : '';
+            $rawPrice = isset($mapping['price_col_index']) && $mapping['price_col_index'] > -1 ? ($row[$mapping['price_col_index']] ?? 0) : 0;
+            $rawQty   = isset($mapping['qty_col_index']) && $mapping['qty_col_index'] > -1 ? ($row[$mapping['qty_col_index']] ?? 0) : 0;
+            $rawFee   = isset($mapping['fee_col_index']) && $mapping['fee_col_index'] > -1 ? ($row[$mapping['fee_col_index']] ?? 0) : 0;
+            $rawTotal = isset($mapping['total_col_index']) && $mapping['total_col_index'] > -1 ? ($row[$mapping['total_col_index']] ?? 0) : 0;
+
+            // --- 3. 資料正規化 ---
+            try {
+                $dateObj = DateTime::createFromFormat($mapping['date_format'], $rawDate);
+                $transDate = $dateObj ? $dateObj->format('Y-m-d H:i:s') : date('Y-m-d H:i:s', strtotime($rawDate));
+            } catch (Exception $e) {
+                $transDate = date('Y-m-d H:i:s');
+            }
+
+            $type = 'buy'; 
+            $rawSideLower = strtolower($rawSide);
+            if (isset($mapping['side_mapping']['sell_keywords'])) {
+                foreach ($mapping['side_mapping']['sell_keywords'] as $kw) {
+                    if (strpos($rawSideLower, strtolower($kw)) !== false) {
+                        $type = 'sell'; break;
+                    }
+                }
+            }
+            if (strpos($rawSideLower, 'sell') !== false || strpos($rawSideLower, 'short') !== false) $type = 'sell';
+
+            $price = (float)str_replace(',', '', (string)$rawPrice);
+            $qty   = (float)str_replace(',', '', (string)$rawQty);
+            $total = (float)str_replace(',', '', (string)$rawTotal);
+            $fee   = (float)str_replace(',', '', (string)$rawFee);
+
+            if ($total == 0 && $price > 0 && $qty > 0) {
+                $total = $price * $qty;
+            }
+
+            // --- 4. 寫入資料庫 ---
+            $note = "CSV匯入 ({$mapping['exchange_name']})";
+            $success = $this->addTransaction($userId, [
+                'type' => $type,
+                'baseCurrency' => $base,
+                'quoteCurrency' => $quote,
+                'price' => $price,
+                'quantity' => $qty,
+                'total' => $total,
+                'fee' => $fee,
+                'date' => $transDate,
+                'note' => $note
+            ]);
+
+            if ($success) $count++;
+            $lineIndex++;
+        }
+        
+        fclose($handle);
+        return ['count' => $count];
     }
 }
 ?>

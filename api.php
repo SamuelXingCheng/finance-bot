@@ -563,7 +563,8 @@ try {
     
             // 1. 檔案處理 (驗證是否有上傳)
             if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-                $response = ['status' => 'error', 'message' => '上傳失敗: 檔案無效或傳輸錯誤'];
+                $code = isset($_FILES['file']) ? $_FILES['file']['error'] : 'No File';
+                $response = ['status' => 'error', 'message' => '檔案上傳失敗 (錯誤代碼: ' . $code . ')'];
                 break;
             }
             
@@ -884,6 +885,58 @@ try {
             // 呼叫 Service 計算建議
             $advice = $cryptoService->getRebalancingAdvice($dbUserId);
             $response = ['status' => 'success', 'data' => $advice];
+            break;
+
+        case 'import_crypto_csv':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+            
+            if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+                $errorMsg = isset($_FILES['file']) ? ('Code: ' . $_FILES['file']['error']) : 'Empty File';
+                $response = ['status' => 'error', 'message' => '檔案上傳失敗 (' . $errorMsg . ')'];
+                break;
+            }
+    
+            $filePath = $_FILES['file']['tmp_name'];
+    
+            // 1. 讀取前 5 行 (包含 Header 和少量數據) 給 AI 分析
+            $csvSnippet = "";
+            $handle = fopen($filePath, "r");
+            $lineCount = 0;
+            if ($handle) {
+                // 處理 BOM (Byte Order Mark) 防止 AI 讀取錯誤
+                $bom = fread($handle, 3);
+                if ($bom !== "\xEF\xBB\xBF") {
+                    rewind($handle); // 沒有 BOM，倒帶回開頭
+                }
+                
+                while (($row = fgetcsv($handle)) !== false && $lineCount < 5) {
+                    // 將陣列轉回 CSV 字串格式餵給 AI
+                    $csvSnippet .= implode(",", $row) . "\n";
+                    $lineCount++;
+                }
+                fclose($handle);
+            }
+    
+            // 2. 呼叫 Gemini 產生規則 (Rule Generation)
+            $geminiService = new GeminiService();
+            $mappingRule = $geminiService->generateCsvMapping($csvSnippet);
+    
+            if (!$mappingRule) {
+                $response = ['status' => 'error', 'message' => 'AI 無法識別此 CSV 格式'];
+                break;
+            }
+    
+            // 3. 呼叫 CryptoService 使用規則處理整個檔案 (PHP Loop)
+            $cryptoService = new CryptoService();
+            $result = $cryptoService->processCsvBulk($dbUserId, $filePath, $mappingRule);
+    
+            $response = [
+                'status' => 'success',
+                'data' => [
+                    'count' => $result['count'],
+                    'exchange_guess' => $mappingRule['exchange_name'] ?? 'Unknown'
+                ]
+            ];
             break;
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];

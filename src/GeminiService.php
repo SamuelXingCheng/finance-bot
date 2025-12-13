@@ -125,8 +125,9 @@ EOD;
     /**
      * [核心] 共用的 Gemini API 呼叫邏輯
      * 負責處理檔案讀取、Base64 編碼、CURL 請求發送
+     * @param mixed $useSchema boolean|array 若為 true 使用預設記帳 Schema；若為 array 則使用該自定義 Schema；若為 false 則不使用。
      */
-    private function callGeminiAPI(string $systemInstruction, string $content, bool $useSchema = false): ?array {
+    private function callGeminiAPI(string $systemInstruction, string $content, $useSchema = false): ?array {
         $parts = [];
 
         // 判斷是否為檔案路徑 (FILE:...)
@@ -158,7 +159,11 @@ EOD;
             }
         } else {
             // 純文字輸入
-            $mergedText = $systemInstruction . "\n\nUser input: " . $content;
+            if (empty($content)) {
+                $mergedText = $systemInstruction;
+            } else {
+                $mergedText = $systemInstruction . "\n\nUser input: " . $content;
+            }
             $parts = [['text' => $mergedText]];
         }
 
@@ -167,9 +172,11 @@ EOD;
             'responseMimeType' => 'application/json'
         ];
 
-        // 只有一般記帳才強制使用 Schema，Crypto 模式讓 Prompt 決定結構
-        if ($useSchema) {
+        // 🟢 [修正] 支援 boolean 或 array 類型的 Schema 設定
+        if ($useSchema === true) {
             $generationConfig['responseSchema'] = $this->transactionSchema;
+        } elseif (is_array($useSchema)) {
+            $generationConfig['responseSchema'] = $useSchema;
         }
 
         $data = [
@@ -264,5 +271,69 @@ EOD;
         $result = json_decode($response, true);
         return $result['candidates'][0]['content']['parts'][0]['text'] ?? 'AI 目前無法進行分析，請稍後再試。';
     }
+
+    /**
+     * [CSV 規則生成]
+     * 分析 CSV 片段，回傳欄位對應表 (Mapping Schema)
+     */
+    /**
+     * 🟢 [CSV 規則生成] (已修正：強制要求所有欄位)
+     */
+    public function generateCsvMapping(string $csvSnippet): ?array {
+        $schema = [
+            'type' => 'object',
+            'properties' => [
+                'exchange_name' => ['type' => 'string', 'description' => '交易所名稱推測'],
+                'has_header' => ['type' => 'boolean', 'description' => '第一行是否為標題'],
+                'date_col_index' => ['type' => 'integer', 'description' => '日期欄位索引(0起)'],
+                
+                // 幣種欄位 (必填，無則填-1)
+                'pair_col_index' => ['type' => 'integer', 'description' => '交易對欄位索引 (若無則填 -1)'],
+                'base_col_index' => ['type' => 'integer', 'description' => '基準幣欄位索引 (如 BTC)'],
+                'quote_col_index' => ['type' => 'integer', 'description' => '計價幣欄位索引 (如 USDT/TWD)'],
+                
+                'side_col_index' => ['type' => 'integer', 'description' => '方向(Buy/Sell)欄位索引'],
+                'price_col_index' => ['type' => 'integer', 'description' => '價格欄位索引'],
+                'qty_col_index' => ['type' => 'integer', 'description' => '數量欄位索引'],
+                'fee_col_index' => ['type' => 'integer', 'description' => '手續費欄位索引'],
+                'total_col_index' => ['type' => 'integer', 'description' => '總金額欄位索引，若無填-1'],
+                'date_format' => ['type' => 'string', 'description' => 'PHP日期格式，如 Y-m-d H:i:s'],
+                'side_mapping' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'buy_keywords' => ['type' => 'array', 'items' => ['type' => 'string']],
+                        'sell_keywords' => ['type' => 'array', 'items' => ['type' => 'string']]
+                    ]
+                ]
+            ],
+            // 🟢 關鍵修正：將所有欄位設為 required，強迫 AI 思考並填寫
+            'required' => [
+                'exchange_name', 'has_header', 'date_col_index', 
+                'pair_col_index', 'base_col_index', 'quote_col_index',
+                'side_col_index', 'price_col_index', 'qty_col_index', 'total_col_index', 'date_format'
+            ]
+        ];
+
+        $prompt = <<<EOD
+你是一個資料工程師。請分析以下 CSV 片段（含 Header），並告訴我關鍵欄位的 Index（從 0 開始）。
+
+**規則與邏輯：**
+1. **幣種處理**：
+   - 若有單一欄位 "Pair" (如 BTCUSDT)，填 `pair_col_index`，其餘幣種欄位填 -1。
+   - 若幣種分開 (如 "Base Currency" 和 "Quote Currency")，填 `base_col_index` 和 `quote_col_index`，並將 `pair_col_index` 填 -1。
+2. **數值選擇**：
+   - 請優先選擇 **「成交/已執行 (Executed)」** 的價格與數量。
+   - 不要選擇「委託 (Order)」的數值，因為那可能未完全成交。
+3. **日期格式**：
+   - 請觀察範例，如果是 "2025-05-12 08:25:11" 請用 "Y-m-d H:i:s"。
+
+CSV 片段：
+```csv
+{$csvSnippet}
+EOD;
+// 傳入自定義 Schema
+    return $this->callGeminiAPI($prompt, "", $schema);
+    }
+
 }
 ?>

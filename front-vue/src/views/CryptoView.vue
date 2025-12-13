@@ -62,10 +62,24 @@
           <div class="header-actions">
              <input type="file" ref="uploadInput" class="hidden-input" accept="image/*" @change="handleImageUpload">
              
+             <input 
+              type="file" 
+              ref="csvInput" 
+              class="hidden-input" 
+              accept=".csv,text/csv,application/vnd.ms-excel" 
+              @change="handleCsvUpload"
+            >
+
              <button class="icon-btn" @click="triggerUpload" :disabled="isAnalyzing">
                 <span v-if="isAnalyzing">⏳</span>
                 <span v-else>📷</span>
              </button>
+
+             <button class="icon-btn" @click="triggerCsvUpload" :disabled="isAnalyzing" style="margin-left: 4px;">
+                <span v-if="isAnalyzing">⏳</span>
+                <span v-else>📂</span>
+            </button>
+            
             <button class="add-btn" @click="openTransactionModal()">
               <span>+</span> 記一筆
             </button>
@@ -394,6 +408,59 @@ const isAnalyzing = ref(false);
 
 const isEditingTransaction = ref(false);
 const editingId = ref(null); // 用來記錄正在編輯哪一筆 ID
+
+const csvInput = ref(null);
+
+function triggerCsvUpload() {
+    // 模擬使用者點擊那個隱藏的 input
+    if (csvInput.value) {
+        csvInput.value.click();
+    } else {
+        console.error("找不到 CSV Input 元件");
+    }
+}
+
+async function handleCsvUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!confirm(`確定要匯入 ${file.name} 嗎？\n這將使用 AI 自動分析表頭規則並批次匯入。`)) {
+        csvInput.value.value = ''; // 清空
+        return;
+    }
+
+    isAnalyzing.value = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // 呼叫新的 API action
+        const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=import_crypto_csv`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (response && response.ok) {
+            const res = await response.json();
+            if (res.status === 'success') {
+                alert(`匯入成功！\n共新增 ${res.data.count} 筆交易。\n規則來源: ${res.data.exchange_guess || 'AI 自動判斷'}`);
+                fetchCryptoData();        // 重新整理資產
+                fetchRecentTransactions(); // 重新整理列表
+            } else {
+                alert('匯入失敗: ' + res.message);
+            }
+        } else {
+            alert('上傳發生錯誤');
+        }
+    } catch (e) {
+        console.error(e);
+        alert('系統錯誤');
+    } finally {
+        isAnalyzing.value = false;
+        csvInput.value.value = ''; // 重置 input
+    }
+}
 
 function triggerUpload() {
   uploadInput.value.click();
