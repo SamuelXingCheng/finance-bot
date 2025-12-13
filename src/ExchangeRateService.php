@@ -69,6 +69,28 @@ class ExchangeRateService {
         return 0.0; 
     }
 
+    // 新增方法：查詢歷史日期的匯率
+    public function getHistoricalRateToUSD(string $symbol, string $date): float {
+        // 1. 先查資料庫有沒有存過這天這個幣的匯率 (避免重複 Call API)
+        // (您可能需要一張新的表 historical_rates 或暫時不存)
+        
+        $coinId = self::COIN_ID_MAP[$symbol] ?? null;
+        if (!$coinId) return 0.0;
+
+        // 2. 格式化日期為 dd-mm-yyyy (CoinGecko 格式)
+        $dateStr = date('d-m-Y', strtotime($date));
+
+        // 3. Call CoinGecko History API
+        $url = "https://api.coingecko.com/api/v3/coins/{$coinId}/history?date={$dateStr}";
+        $data = $this->makeRequest($url);
+
+        if (isset($data['market_data']['current_price']['usd'])) {
+            return (float)$data['market_data']['current_price']['usd'];
+        }
+        
+        return 0.0;
+    }
+    
     // ==========================================
     // 邏輯區：加密貨幣處理
     // ==========================================

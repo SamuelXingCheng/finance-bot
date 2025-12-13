@@ -147,6 +147,7 @@ class CryptoService {
 
     public function addTransaction(int $userId, array $data): bool {
         if (empty($data['type']) || !isset($data['quantity'])) { return false; }
+        $exchangeRateUsd = (float)($data['exchange_rate_usd'] ?? 1.0);
         $type = $data['type'];
         $base = strtoupper($data['baseCurrency'] ?? '');
         $quote = strtoupper($data['quoteCurrency'] ?? 'USDT');
@@ -158,11 +159,16 @@ class CryptoService {
         $note = $data['note'] ?? '';
 
         $sql = "INSERT INTO crypto_transactions 
-                (user_id, type, base_currency, quote_currency, price, quantity, total, fee, transaction_date, note, created_at)
-                VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :date, :note, NOW())";
+                (user_id, type, base_currency, quote_currency, price, quantity, total, fee, transaction_date, note, exchange_rate_usd, created_at)
+                VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :date, :note, :rate, NOW())";
         try {
             $stmt = $this->pdo->prepare($sql);
-            return $stmt->execute([':uid'=>$userId, ':type'=>$type, ':base'=>$base, ':quote'=>$quote, ':price'=>$price, ':qty'=>$qty, ':total'=>$total, ':fee'=>$fee, ':date'=>$date, ':note'=>$note]);
+            return $stmt->execute([
+                ':uid'=>$userId, ':type'=>$type, ':base'=>$base, ':quote'=>$quote, 
+                ':price'=>$price, ':qty'=>$qty, ':total'=>$total, ':fee'=>$fee, 
+                ':date'=>$date, ':note'=>$note, 
+                ':rate' => $exchangeRateUsd // 🟢 綁定參數
+            ]);
         } catch (PDOException $e) { return false; }
     }
 
@@ -497,14 +503,14 @@ class CryptoService {
     }
 
     /**
-     * 🟢 [台灣專用版] CSV 批次處理 (已修復 Undefined array key 警告)
+     * 🟢 [台灣專用版] CSV 批次處理 (整合歷史匯率查詢)
      */
     public function processCsvBulk(int $userId, string $filePath, array $mapping): array {
         // 1. 讀取整個檔案內容
         $content = file_get_contents($filePath);
         if ($content === false) return ['count' => 0];
 
-        // 2. 偵測並轉換編碼
+        // 2. 偵測並轉換編碼 (防止中文亂碼)
         if (!preg_match('//u', $content)) {
             $content = mb_convert_encoding($content, 'UTF-8', 'BIG-5');
         }
@@ -513,78 +519,133 @@ class CryptoService {
         $lines = explode("\n", $content);
         $count = 0;
         
+        // 🟢 [新增] 匯率快取與設定
+        $rateCache = []; // 暫存已查詢過的匯率 (Key: Symbol_Date)
+        $skipRates = ['USDT', 'USDC', 'BUSD', 'DAI', 'TWD', 'FDUSD']; // 這些幣種視為 1:1，不查匯率
+
         foreach ($lines as $index => $line) {
             $line = trim($line);
             if (empty($line)) continue;
 
             $row = str_getcsv($line);
 
+            // 跳過標頭
             if ($mapping['has_header'] && $index === 0) {
                 continue;
             }
 
-            // ... (中間的判斷邏輯保持不變，省略以節省篇幅) ...
-            // 請保留原本的 date, type, price, quantity 等判斷邏輯
-            
-            // 為求完整，這裡重貼關鍵變數的提取邏輯，確保您上下文對接正確
+            // --- A. 解析日期 ---
             $rawDate = $row[$mapping['date_col_index']] ?? null;
             if (!$rawDate) continue;
 
-            // ... (中間省略：這裡應該是您原本的 type/base/quote/price/qty 判斷邏輯) ...
-            // ... (請務必保留上一版完整的判斷代碼) ...
-            
-            // 為了讓您好複製，我把中間省略的部分補回來 (基於上一版的邏輯)
-            // -----------------------------------------------------------
+            try {
+                $dateObj = DateTime::createFromFormat($mapping['date_format'], $rawDate);
+                $transDate = $dateObj ? $dateObj->format('Y-m-d H:i:s') : date('Y-m-d H:i:s', strtotime($rawDate));
+            } catch (Exception $e) { 
+                $transDate = date('Y-m-d H:i:s'); 
+            }
+
+            // --- B. 解析交易方向 (Type) ---
             $rawSide = isset($mapping['side_col_index']) && $mapping['side_col_index'] > -1 ? ($row[$mapping['side_col_index']] ?? '') : '';
             $rawSideLower = mb_strtolower($rawSide, 'UTF-8'); 
             $type = 'buy'; 
             $isTransfer = false;
-            if (isset($mapping['side_mapping']['deposit_keywords'])) { foreach ($mapping['side_mapping']['deposit_keywords'] as $kw) { if (str_contains($rawSideLower, mb_strtolower($kw, 'UTF-8'))) { $type = 'deposit'; $isTransfer = true; break; } } }
-            if (!$isTransfer && isset($mapping['side_mapping']['withdraw_keywords'])) { foreach ($mapping['side_mapping']['withdraw_keywords'] as $kw) { if (str_contains($rawSideLower, mb_strtolower($kw, 'UTF-8'))) { $type = 'withdraw'; $isTransfer = true; break; } } }
-            if (!$isTransfer && isset($mapping['side_mapping']['sell_keywords'])) { foreach ($mapping['side_mapping']['sell_keywords'] as $kw) { if (str_contains($rawSideLower, mb_strtolower($kw, 'UTF-8'))) { $type = 'sell'; break; } } }
+
+            // 優先檢查 Mapping 設定的關鍵字
+            if (isset($mapping['side_mapping']['deposit_keywords'])) { 
+                foreach ($mapping['side_mapping']['deposit_keywords'] as $kw) { 
+                    if (str_contains($rawSideLower, mb_strtolower($kw, 'UTF-8'))) { $type = 'deposit'; $isTransfer = true; break; } 
+                } 
+            }
+            if (!$isTransfer && isset($mapping['side_mapping']['withdraw_keywords'])) { 
+                foreach ($mapping['side_mapping']['withdraw_keywords'] as $kw) { 
+                    if (str_contains($rawSideLower, mb_strtolower($kw, 'UTF-8'))) { $type = 'withdraw'; $isTransfer = true; break; } 
+                } 
+            }
+            if (!$isTransfer && isset($mapping['side_mapping']['sell_keywords'])) { 
+                foreach ($mapping['side_mapping']['sell_keywords'] as $kw) { 
+                    if (str_contains($rawSideLower, mb_strtolower($kw, 'UTF-8'))) { $type = 'sell'; break; } 
+                } 
+            }
+            // 預設關鍵字檢查
             if (!$isTransfer) {
                 if (str_contains($rawSideLower, '加值') || str_contains($rawSideLower, 'deposit') || str_contains($rawSideLower, 'in')) $type = 'deposit';
                 elseif (str_contains($rawSideLower, '提領') || str_contains($rawSideLower, 'withdraw') || str_contains($rawSideLower, 'out')) $type = 'withdraw';
                 elseif (str_contains($rawSideLower, '賣') || str_contains($rawSideLower, 'sell') || str_contains($rawSideLower, 'short')) $type = 'sell';
             }
 
+            // --- C. 解析幣種 (Base/Quote) ---
             $base = ''; $quote = 'USDT';
             if (isset($mapping['pair_col_index']) && $mapping['pair_col_index'] > -1) {
+                // 模式 1: 單一欄位 (如 ETH_BTC)
                 $rawPair = $row[$mapping['pair_col_index']] ?? '';
                 if ($rawPair) {
                     $pairClean = strtoupper(trim($rawPair));
-                    if (preg_match('/^USDT_([A-Z]+)_PERP$/', $pairClean, $matches)) { $base = $pairClean; $quote = $matches[1]; } 
-                    elseif (str_contains($pairClean, '_')) { $parts = explode('_', $pairClean); if (count($parts) === 2) { $base = $parts[0]; $quote = $parts[1]; } } 
-                    else { $base = str_replace(['USDT', 'USDC', 'BUSD', 'TWD'], '', $pairClean); if (str_ends_with($pairClean, 'TWD')) $quote = 'TWD'; else $quote = 'USDT'; }
+                    if (preg_match('/^USDT_([A-Z]+)_PERP$/', $pairClean, $matches)) { 
+                        $base = $pairClean; $quote = $matches[1]; 
+                    } elseif (str_contains($pairClean, '_')) { 
+                        $parts = explode('_', $pairClean); 
+                        if (count($parts) === 2) { $base = $parts[0]; $quote = $parts[1]; } 
+                    } else { 
+                        // 簡單推測
+                        $base = str_replace(['USDT', 'USDC', 'BUSD', 'TWD'], '', $pairClean); 
+                        if (str_ends_with($pairClean, 'TWD')) $quote = 'TWD'; else $quote = 'USDT'; 
+                    }
                 }
             } elseif (isset($mapping['base_col_index'])) {
+                // 模式 2: 分開欄位
                 if ($mapping['base_col_index'] > -1) $base = strtoupper($row[$mapping['base_col_index']] ?? '');
                 if (isset($mapping['quote_col_index']) && $mapping['quote_col_index'] > -1) $quote = strtoupper($row[$mapping['quote_col_index']] ?? 'USDT');
                 else if ($base === 'TWD') $quote = 'TWD';
             }
-            if (!$base) continue;
+            if (!$base) continue; // 沒幣種就跳過
 
+            // --- D. 解析數值 (Price, Qty, Fee, Total) ---
             $rawPrice = isset($mapping['price_col_index']) && $mapping['price_col_index'] > -1 ? ($row[$mapping['price_col_index']] ?? 0) : 0;
             $rawQty   = isset($mapping['qty_col_index']) && $mapping['qty_col_index'] > -1 ? ($row[$mapping['qty_col_index']] ?? 0) : 0;
             $rawFee   = isset($mapping['fee_col_index']) && $mapping['fee_col_index'] > -1 ? ($row[$mapping['fee_col_index']] ?? 0) : 0;
             $rawTotal = isset($mapping['total_col_index']) && $mapping['total_col_index'] > -1 ? ($row[$mapping['total_col_index']] ?? 0) : 0;
 
+            // 去除千分位逗號並轉浮點數
             $price = (float)str_replace(',', '', (string)$rawPrice);
             $qty   = (float)str_replace(',', '', (string)$rawQty);
             $total = (float)str_replace(',', '', (string)$rawTotal);
             $fee   = (float)str_replace(',', '', (string)$rawFee);
 
-            if ($type === 'deposit' || $type === 'withdraw') { $price = 0; $total = $qty; } 
-            else { if ($total == 0 && $price > 0 && $qty > 0) $total = $price * $qty; }
+            // 數值校正
+            if ($type === 'deposit' || $type === 'withdraw') { 
+                $price = 0; $total = $qty; 
+            } else { 
+                if ($total == 0 && $price > 0 && $qty > 0) $total = $price * $qty; 
+            }
 
-            try {
-                $dateObj = DateTime::createFromFormat($mapping['date_format'], $rawDate);
-                $transDate = $dateObj ? $dateObj->format('Y-m-d H:i:s') : date('Y-m-d H:i:s', strtotime($rawDate));
-            } catch (Exception $e) { $transDate = date('Y-m-d H:i:s'); }
-            // -----------------------------------------------------------
+            // --- 🟢 E. 核心修改：查詢歷史匯率 ---
+            $exchangeRateUsd = 1.0; // 預設 1:1
 
-            // 🟢 6. 寫入資料庫 (修正點在這裡)
-            // 使用 ?? 'Unknown' 防止 exchange_name 不存在時報錯
+            // 只有當計價貨幣不是穩定幣且不是 TWD 時，才去查匯率 (例如 Quote 是 BTC)
+            if (!in_array($quote, $skipRates)) {
+                // 建立快取 Key: "BTC_2023-10-25"
+                $dateKey = date('Y-m-d', strtotime($transDate));
+                $cacheKey = "{$quote}_{$dateKey}";
+
+                if (isset($rateCache[$cacheKey])) {
+                    // 命中快取，直接使用
+                    $exchangeRateUsd = $rateCache[$cacheKey];
+                } else {
+                    // 沒查過，呼叫 API
+                    // 注意：需確保 ExchangeRateService 已實作 getHistoricalRateToUSD 方法
+                    $exchangeRateUsd = $this->rateService->getHistoricalRateToUSD($quote, $transDate);
+                    
+                    // 寫入快取
+                    $rateCache[$cacheKey] = $exchangeRateUsd;
+
+                    // ⚠️ API 頻率保護 (1.5秒)
+                    usleep(1500000); 
+                }
+            }
+            // ------------------------------------
+
+            // --- F. 寫入資料庫 ---
             $exchangeName = $mapping['exchange_name'] ?? 'Unknown';
             $note = "CSV匯入 ({$exchangeName})";
             
@@ -597,7 +658,8 @@ class CryptoService {
                 'total' => $total,
                 'fee' => $fee,
                 'date' => $transDate,
-                'note' => $note
+                'note' => $note,
+                'exchange_rate_usd' => $exchangeRateUsd // 🟢 傳入查到的匯率
             ]);
 
             if ($success) $count++;
