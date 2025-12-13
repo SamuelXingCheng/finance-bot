@@ -43,36 +43,6 @@ export async function fetchWithLiffToken(url, options = {}) {
     }
 }
 
-/**
- * 上傳加密貨幣 CSV 檔案
- * @param {number|string} userId 用戶ID
- * @param {File} file 選取的檔案物件
- */
-export async function uploadCryptoCsv(userId, file) {
-    const formData = new FormData();
-    formData.append('csv_file', file); // 'csv_file' 對應後端 $_FILES 的 key
-
-    // 假設您的 API_BASE_URL 已經定義在 window 物件或此檔案上方
-    // 如果沒有，請替換成實際的 API 網址，例如 '/api.php'
-    const baseUrl = window.API_BASE_URL || '/finance-bot-dev/api.php'; 
-
-    try {
-        const response = await fetch(`${baseUrl}?action=upload_crypto_csv&user_id=${userId}`, {
-            method: 'POST',
-            body: formData, // fetch 會自動設定 multipart/form-data
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        return await response.json();
-    } catch (error) {
-        console.error('Upload failed:', error);
-        return { status: 'error', message: error.message };
-    }
-}
-
 // ... numberFormat 和 generateColors 保持不變 ...
 export function numberFormat(number, decimals = 2, dec_point = '.', thousands_sep = ',') {
     number = (number + '').replace(/[^0-9+\-Ee.]/g, ' ');

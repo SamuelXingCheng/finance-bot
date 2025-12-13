@@ -100,7 +100,6 @@ try {
     // 4. API 路由與分發
     // ----------------------------------------------------
     $action = $_GET['action'] ?? '';
-    $userId = $_GET['user_id'] ?? 1;
     $response = ['status' => 'error', 'message' => 'Invalid action.'];
 
     switch ($action) {
@@ -885,32 +884,6 @@ try {
             // 呼叫 Service 計算建議
             $advice = $cryptoService->getRebalancingAdvice($dbUserId);
             $response = ['status' => 'success', 'data' => $advice];
-            break;
-
-            // 🟢 [新增] 處理 CSV 上傳
-        case 'upload_crypto_csv':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405);
-                echo json_encode(['error' => 'Method Not Allowed']);
-                exit;
-            }
-
-            if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-                http_response_code(400);
-                echo json_encode(['error' => 'No file uploaded or upload error']);
-                exit;
-            }
-
-            $tmpName = $_FILES['csv_file']['tmp_name'];
-            
-            // 呼叫 CryptoService 進行智慧解析
-            $cryptoService = new CryptoService();
-            $result = $cryptoService->importTransactionsFromCsv((int)$userId, $tmpName);
-
-            echo json_encode([
-                'status' => 'success',
-                'data' => $result
-            ]);
             break;
         default:
             $response = ['status' => 'error', 'message' => 'Invalid action.'];
