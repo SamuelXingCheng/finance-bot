@@ -56,6 +56,59 @@
           </div>
       </div>
 
+      <div class="import-section card">
+        <div class="section-header">
+            <h3>📥 匯入交易記錄 (CSV)</h3>
+        </div>
+        <p class="hint">支援 BitoPro、Binance 或其他交易所 (AI 自動辨識)</p>
+        
+        <div class="upload-controls">
+          <input 
+            type="file" 
+            ref="fileInput" 
+            accept=".csv" 
+            class="hidden-input"
+            @change="handleFileSelect" 
+            :disabled="isUploading"
+          />
+          <button class="pill-btn update-crypto" @click="$refs.fileInput.click()" :disabled="isUploading">
+             選擇檔案
+          </button>
+          <span v-if="selectedFile" class="file-name">{{ selectedFile.name }}</span>
+          
+          <button 
+            class="btn-primary" 
+            @click="uploadFile" 
+            :disabled="!selectedFile || isUploading"
+            style="margin-left: auto;"
+          >
+            <span v-if="isUploading">🤖 AI 分析中...</span>
+            <span v-else>開始匯入</span>
+          </button>
+        </div>
+
+        <div v-if="errorMessage" class="alert error">
+          {{ errorMessage }}
+        </div>
+
+        <div v-if="uploadResult" class="alert success">
+          <h4>✅ 匯入完成</h4>
+          <ul>
+            <li><strong>解析模式：</strong> {{ formatExchangeName(uploadResult.exchange) }}</li>
+            <li><strong>成功筆數：</strong> {{ uploadResult.success }} 筆</li>
+            <li v-if="uploadResult.failed > 0" class="text-danger">
+              <strong>失敗筆數：</strong> {{ uploadResult.failed }} 筆
+            </li>
+          </ul>
+          <div v-if="uploadResult.errors && uploadResult.errors.length > 0" class="error-details">
+            <small>錯誤詳情：</small>
+            <ul>
+              <li v-for="(err, index) in uploadResult.errors" :key="index">{{ err }}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div class="list-section">
         <div class="section-header">
           <h3>持倉資產</h3>
@@ -71,120 +124,141 @@
             </button>
           </div>
         </div>
-
+        
         <div v-if="holdings.length === 0" class="empty-state">
           <p>尚未有交易紀錄</p>
           <p class="sub-text">點擊上方按鈕開始記錄您的第一筆交易。</p>
         </div>
 
         <div v-else class="coin-list">
-        <div v-for="(coin, index) in holdings" :key="index" class="account-card-style">
-          <div class="card-left">
-            <div class="acc-name">
-              {{ coin.symbol }} 
-              <span class="account-tag" v-if="coin.type === 'account'">{{ coin.name }}</span>
+          <div v-for="(coin, index) in holdings" :key="index" class="account-card-style">
+            <div class="card-left">
+              <div class="acc-name">
+                {{ coin.symbol }} 
+                <span class="account-tag" v-if="coin.type === 'account'">{{ coin.name }}</span>
+              </div>
+              <div class="acc-meta">
+                <span class="badge" :class="coin.symbol === 'USDT' ? 'badge-stable' : 'badge-crypto'">
+                  {{ coin.symbol === 'USDT' ? '穩定幣' : '投資' }}
+                </span>
+                <span class="currency" v-if="coin.type === 'trade'">均價: ${{ numberFormat(coin.avgPrice, 2) }}</span>
+                <span class="currency" v-else>來自帳戶</span>
+              </div>
             </div>
-            <div class="acc-meta">
-              <span class="badge" :class="coin.symbol === 'USDT' ? 'badge-stable' : 'badge-crypto'">
-                {{ coin.symbol === 'USDT' ? '穩定幣' : '投資' }}
-              </span>
-              <span class="currency" v-if="coin.type === 'trade'">均價: ${{ numberFormat(coin.avgPrice, 2) }}</span>
-              <span class="currency" v-else>來自帳戶</span>
-            </div>
-          </div>
-          
-          <div class="card-right">
-            <div class="acc-balance" :class="coin.valueUsd >= 0 ? 'text-asset' : 'text-debt'">
-              $ {{ numberFormat(coin.valueUsd, 2) }}
-            </div>
-            <div v-if="coin.type === 'trade'" class="pnl-text-sm" :class="coin.pnl >= 0 ? 'text-profit-sm' : 'text-loss-sm'">
-              {{ coin.pnl >= 0 ? '+' : '' }}{{ numberFormat(coin.pnl, 2) }}
-            </div>
-            <div class="action-buttons">
-              <button class="pill-btn update-crypto" @click.stop="openEditBalanceModal(coin)">
-                  更新快照
-              </button>
+            
+            <div class="card-right">
+              <div class="acc-balance" :class="coin.valueUsd >= 0 ? 'text-asset' : 'text-debt'">
+                $ {{ numberFormat(coin.valueUsd, 2) }}
+              </div>
+              <div v-if="coin.type === 'trade'" class="pnl-text-sm" :class="coin.pnl >= 0 ? 'text-profit-sm' : 'text-loss-sm'">
+                {{ coin.pnl >= 0 ? '+' : '' }}{{ numberFormat(coin.pnl, 2) }}
+              </div>
+              <div class="action-buttons">
+                <button class="pill-btn update-crypto" @click.stop="openEditBalanceModal(coin)">
+                    更新快照
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
-      </div>
 
       <div class="list-section mt-4">
-      <div class="section-header">
-        <h3>近期交易紀錄</h3>
-      </div>
+        <div class="section-header">
+          <h3>近期交易紀錄</h3>
+        </div>
 
-      <div v-if="recentTransactions.length === 0" class="empty-state">
-        <p>尚無交易紀錄</p>
-      </div>
+        <div v-if="recentTransactions.length === 0" class="empty-state">
+          <p>尚無交易紀錄</p>
+        </div>
 
-      <div v-else class="coin-list">
-        <div v-for="tx in recentTransactions" :key="tx.id" class="account-card-style tx-card">
-            <div class="card-left">
-              <div class="acc-name">
-                  {{ tx.base_currency || 'USDT' }}
+        <div v-else class="coin-list">
+          <div v-for="tx in recentTransactions" :key="tx.id" class="account-card-style tx-card">
+              <div class="card-left">
+                <div class="acc-name">
+                    {{ tx.base_currency || 'USDT' }}
+                </div>
+                
+                <div class="acc-meta">
+                    <span class="badge" :class="getTxBadgeClass(tx.type)">
+                      {{ getTxTypeName(tx.type) }}
+                    </span>
+                    <span class="currency date-text">{{ tx.transaction_date ? tx.transaction_date.substring(0, 10) : '' }}</span>
+                </div>
               </div>
-              
-              <div class="acc-meta">
-                  <span class="badge" :class="getTxBadgeClass(tx.type)">
-                    {{ getTxTypeName(tx.type) }}
-                  </span>
-                  <span class="currency date-text">{{ tx.transaction_date ? tx.transaction_date.substring(0, 10) : '' }}</span>
-              </div>
-            </div>
 
-            <div class="card-right">
-              <div class="acc-balance large-balance" :class="['buy','deposit','earn','adjustment'].includes(tx.type) ? 'text-profit' : 'text-loss'">
-                  {{ ['buy','deposit','earn','adjustment'].includes(tx.type) ? '+' : '-' }} 
-                  {{ numberFormat(tx.quantity, 4) }}
+              <div class="card-right">
+                <div class="acc-balance large-balance" :class="['buy','deposit','earn','adjustment'].includes(tx.type) ? 'text-profit' : 'text-loss'">
+                    {{ ['buy','deposit','earn','adjustment'].includes(tx.type) ? '+' : '-' }} 
+                    {{ numberFormat(tx.quantity, 4) }}
+                </div>
+                
+                <div class="action-buttons-text">
+                    <button class="text-link edit" @click="openEditTxModal(tx)">編輯</button>
+                    <button class="text-link delete" @click="deleteTx(tx.id)">刪除</button>
+                </div>
               </div>
-              
-              <div class="action-buttons-text">
-                  <button class="text-link edit" @click="openEditTxModal(tx)">編輯</button>
-                  <button class="text-link delete" @click="deleteTx(tx.id)">刪除</button>
-              </div>
-            </div>
+          </div>
         </div>
       </div>
     </div>
 
-      <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3>
-            <button class="close-btn" @click="closeModal">×</button>
-          </div>
-
-          <div class="tabs" v-if="!isEditingTransaction">
-            <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
-          </div>
-
-          <form @submit.prevent="submitTransaction" class="tx-form">
-            <div v-if="['deposit', 'withdraw'].includes(form.type)">
-              <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
-              <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
-            </div>
-
-            <div v-if="['buy', 'sell'].includes(form.type)">
-              <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
-              <div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div>
-              <div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div>
-              <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
-            </div>
-
-            <div v-if="['earn', 'adjustment'].includes(form.type)">
-              <div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div>
-              <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
-            </div>
-
-            <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
-            
-            <button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button>
-          </form>
+    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3>
+          <button class="close-btn" @click="closeModal">×</button>
         </div>
-      </div>
 
+        <div class="tabs" v-if="!isEditingTransaction">
+          <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
+        </div>
+
+        <form @submit.prevent="submitTransaction" class="tx-form">
+          <div v-if="['deposit', 'withdraw'].includes(form.type)">
+            <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
+            <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
+          </div>
+
+          <div v-if="['buy', 'sell'].includes(form.type)">
+            <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
+            <div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div>
+            <div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div>
+            <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
+          </div>
+
+          <div v-if="['earn', 'adjustment'].includes(form.type)">
+            <div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div>
+            <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
+          </div>
+
+          <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
+          
+          <button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button>
+        </form>
+      </div>
+    </div>
+
+    <div v-if="isEditBalanceOpen" class="modal-overlay" @click.self="closeEditModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>更新快照: {{ editBalanceForm.symbol }}</h3>
+                <button class="close-btn" @click="closeEditModal">×</button>
+            </div>
+            <p class="hint-text">請輸入該資產在指定日期的實際餘額，系統將自動補齊差額記錄。</p>
+            <form @submit.prevent="submitBalanceAdjustment">
+                <div class="form-group mt-4">
+                    <label>快照日期</label>
+                    <input type="date" v-model="editBalanceForm.date" class="input-std" required>
+                </div>
+                <div class="form-group">
+                    <label>目前紀錄餘額: {{ numberFormat(editBalanceForm.current, 6) }}</label>
+                    <label class="mt-2" style="color:#2A9D8F; font-weight:bold;">實際正確餘額:</label>
+                    <input type="number" step="any" v-model.number="editBalanceForm.newBalance" class="input-std" required>
+                </div>
+                <button type="submit" class="save-btn update-crypto">確認更新</button>
+            </form>
+        </div>
     </div>
 
     <div v-if="view === 'rebalance'" class="rebalance-panel fade-in">
@@ -294,66 +368,12 @@
         </div>
     </div>
 
-    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>新增現貨紀錄</h3>
-          <button class="close-btn" @click="closeModal">×</button>
-        </div>
-
-        <div class="tabs">
-          <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
-        </div>
-
-        <form @submit.prevent="submitTransaction" class="tx-form">
-          <div v-if="currentTab === 'fiat'">
-            <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
-            <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>收到/轉出 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
-          </div>
-          <div v-if="currentTab === 'trade'">
-            <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
-            <div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div>
-            <div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div>
-            <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
-          </div>
-          <div v-if="currentTab === 'earn'">
-            <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>獲得數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
-          </div>
-          <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
-          
-          <button type="submit" class="save-btn main-action">{{ submitButtonText }}</button>
-        </form>
-      </div>
-    </div>
-
-    <div v-if="isEditBalanceOpen" class="modal-overlay" @click.self="closeEditModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>更新快照: {{ editBalanceForm.symbol }}</h3>
-                <button class="close-btn" @click="closeEditModal">×</button>
-            </div>
-            <p class="hint-text">請輸入該資產在指定日期的實際餘額，系統將自動補齊差額記錄。</p>
-            <form @submit.prevent="submitBalanceAdjustment">
-                <div class="form-group mt-4">
-                    <label>快照日期</label>
-                    <input type="date" v-model="editBalanceForm.date" class="input-std" required>
-                </div>
-                <div class="form-group">
-                    <label>目前紀錄餘額: {{ numberFormat(editBalanceForm.current, 6) }}</label>
-                    <label class="mt-2" style="color:#2A9D8F; font-weight:bold;">實際正確餘額:</label>
-                    <input type="number" step="any" v-model.number="editBalanceForm.newBalance" class="input-std" required>
-                </div>
-                <button type="submit" class="save-btn update-crypto">確認更新</button>
-            </form>
-        </div>
-    </div>
-
   </div>
 </template>
 
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue';
-import { fetchWithLiffToken, numberFormat } from '@/utils/api';
+import { fetchWithLiffToken, numberFormat, uploadCryptoCsv } from '@/utils/api';
 import Chart from 'chart.js/auto';
 import liff from '@line/liff';
 
@@ -366,7 +386,7 @@ const futuresStats = ref({ win_rate: 0, total_pnl: 0, avg_roi: 0, total_trades: 
 const usdTwdRate = ref(32);
 const loading = ref(false);
 
-const recentTransactions = ref([]); // 近期交易
+const recentTransactions = ref([]); 
 
 const historyChartCanvas = ref(null);
 let historyChart = null;
@@ -382,7 +402,6 @@ const form = reactive({ type: 'buy', baseCurrency: '', quoteCurrency: 'USDT', pr
 const editBalanceForm = reactive({ symbol: '', current: 0, newBalance: 0, date: new Date().toISOString().substring(0, 10) });
 const tempTargetRatio = ref(10);
 const saving = ref(false);
-const isEditAccountOpen = ref(false);
 
 const submitButtonText = computed(() => {
   if (currentTab.value === 'fiat') return form.type === 'deposit' ? '確認入金' : '確認出金';
@@ -393,7 +412,67 @@ const uploadInput = ref(null);
 const isAnalyzing = ref(false);
 
 const isEditingTransaction = ref(false);
-const editingId = ref(null); // 用來記錄正在編輯哪一筆 ID
+const editingId = ref(null); 
+
+// 🟢 修正：移除 TypeScript 語法
+const fileInput = ref(null);
+const selectedFile = ref(null);
+const isUploading = ref(false);
+const errorMessage = ref('');
+const uploadResult = ref(null);
+
+const handleFileSelect = (event) => {
+  const target = event.target;
+  if (target.files && target.files.length > 0) {
+    selectedFile.value = target.files[0];
+    errorMessage.value = '';
+    uploadResult.value = null; // 重置上次結果
+  }
+};
+
+// 2. 執行上傳
+const uploadFile = async () => {
+  if (!selectedFile.value) return;
+
+  isUploading.value = true;
+  errorMessage.value = '';
+  uploadResult.value = null;
+
+  try {
+    const userId = 1; // 這裡帶入 user_id，實際專案請從 pinia 或 localStorage 拿
+    
+    // 呼叫 API
+    const response = await uploadCryptoCsv(userId, selectedFile.value);
+
+    if (response.status === 'success') {
+      uploadResult.value = response.data;
+      // 匯入成功後，重新撈取資料
+      fetchCryptoData();
+      fetchHistory(historyRange.value);
+      fetchRecentTransactions();
+    } else {
+      errorMessage.value = response.error || '上傳失敗';
+    }
+  } catch (error) {
+    console.error(error);
+    errorMessage.value = '連線錯誤，請稍後再試';
+  } finally {
+    isUploading.value = false;
+    // 清空 input 讓使用者可以再次選擇同一個檔案
+    if (fileInput.value) fileInput.value.value = '';
+    selectedFile.value = null;
+  }
+};
+
+// 輔助顯示
+const formatExchangeName = (code) => {
+  const map = {
+    'bitopro': 'BitoPro (台灣幣託)',
+    'binance': 'Binance (幣安)',
+    'ai_auto': '✨ Gemini AI 自動規則生成'
+  };
+  return map[code] || code;
+};
 
 function triggerUpload() {
   uploadInput.value.click();
@@ -408,7 +487,7 @@ async function handleImageUpload(event) {
   try {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('mode', 'crypto'); // ★ 指定為加密貨幣模式
+    formData.append('mode', 'crypto'); 
 
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_file`, {
       method: 'POST',
@@ -418,7 +497,6 @@ async function handleImageUpload(event) {
     if (response && response.ok) {
       const res = await response.json();
       if (res.status === 'success' && res.data && res.data.length > 0) {
-        // ★ 這裡不同：不直接寫入，而是填入表單讓用戶確認
         populateAndOpenModal(res.data[0]);
         alert(`AI 辨識完成！\n識別為: ${res.data[0].type.toUpperCase()} ${res.data[0].baseCurrency}`);
       } else {
@@ -436,21 +514,27 @@ async function handleImageUpload(event) {
   }
 }
 
-// 🟢 [新增] 填表邏輯
+// 填表邏輯
 function populateAndOpenModal(data) {
-  // 重置並填入資料
   isEditingTransaction.value = false;
-  // ... (這裡填入 form 的邏輯，參考上一則回應的詳細代碼) ...
-  // 簡單範例：
+  // 簡單映射
   form.type = data.type === 'income' ? 'earn' : (data.type === 'expense' ? 'loss' : data.type);
   form.baseCurrency = data.baseCurrency || '';
   form.quantity = parseFloat(data.quantity) || 0;
-  // ... 其他欄位 ...
+  form.total = parseFloat(data.total) || 0;
+  form.price = parseFloat(data.price) || 0;
   
-  isModalOpen.value = true; // 打開視窗
+  if (['deposit', 'withdraw'].includes(form.type)) {
+      currentTab.value = 'fiat';
+  } else if (['buy', 'sell'].includes(form.type)) {
+      currentTab.value = 'trade';
+  } else {
+      currentTab.value = 'earn';
+  }
+  
+  isModalOpen.value = true;
 }
 
-// 🟢 [補上] 2. 刪除交易函式
 async function deleteTx(id) {
     if (!confirm("確定要刪除這筆交易紀錄嗎？\n刪除後將重新計算持倉，無法復原。")) return;
     
@@ -471,12 +555,10 @@ async function deleteTx(id) {
     }
 }
 
-// 🟢 [補上] 3. 開啟編輯 Modal 函式 (點擊編輯按鈕時觸發)
 function openEditTxModal(tx) {
     isEditingTransaction.value = true;
     editingId.value = tx.id;
     
-    // 將交易資料填回表單
     form.type = tx.type;
     form.baseCurrency = tx.base_currency;
     form.quoteCurrency = tx.quote_currency || 'USDT';
@@ -487,7 +569,6 @@ function openEditTxModal(tx) {
     form.date = tx.transaction_date.substring(0, 10);
     form.note = tx.note;
 
-    // 自動切換到對應的 Tab
     if (['deposit', 'withdraw'].includes(tx.type)) {
         currentTab.value = 'fiat';
     } else if (['buy', 'sell'].includes(tx.type)) {
@@ -503,7 +584,7 @@ function switchView(target) {
     view.value = target;
     if (target === 'portfolio') {
         fetchCryptoData();
-        fetchRecentTransactions(); // 切換回來時刷新列表
+        fetchRecentTransactions(); 
         setTimeout(() => fetchHistory(historyRange.value), 100);
     } else if (target === 'rebalance') {
         fetchRebalance();
@@ -526,7 +607,6 @@ async function fetchCryptoData() {
   loading.value = false;
 }
 
-// 撈取最近交易
 async function fetchRecentTransactions() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_transactions&limit=20`);
     if (response && response.ok) {
@@ -550,7 +630,6 @@ async function fetchHistory(range = '1y') {
     }
 }
 
-// 🟢 [新增] 輔助函式：取得交易類型名稱
 function getTxTypeName(type) {
     const map = {
         'buy': '買入', 'sell': '賣出',
@@ -560,7 +639,6 @@ function getTxTypeName(type) {
     return map[type] || type;
 }
 
-// 🟢 [新增] 輔助函式：取得標籤樣式 class
 function getTxBadgeClass(type) {
     if (['buy', 'deposit', 'earn'].includes(type)) return 'badge-success';
     if (['sell', 'withdraw'].includes(type)) return 'badge-danger';
@@ -588,43 +666,38 @@ function renderChart(chartData) {
                 backgroundColor: gradient,
                 borderWidth: 2,
                 fill: true,
-                pointRadius: 3, // 保持點點顯示
-                pointHoverRadius: 6, // 滑鼠移上去時點點變大
-                pointBackgroundColor: '#ffffff', // 點點中間白色
-                pointBorderColor: primaryColor,  // 點點邊框顏色
+                pointRadius: 3, 
+                pointHoverRadius: 6, 
+                pointBackgroundColor: '#ffffff', 
+                pointBorderColor: primaryColor,  
                 tension: 0.4
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            // 🟢 [新增] 互動模式設定：讓滑鼠不用精準指到點也能觸發
             interaction: {
-                mode: 'index',   // 只要滑鼠在該 X 軸的區間內就觸發
-                intersect: false, // 不需要游標真的碰到點
+                mode: 'index',   
+                intersect: false, 
             },
             plugins: { 
                 legend: { display: false },
-                // 🟢 [關鍵修改] 關閉原本印在圖上的數字
                 datalabels: { 
                     display: false 
                 },
-                // 🟢 [優化] Tooltip 提示框設定
                 tooltip: { 
                     enabled: true,
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)', // 背景改白
-                    titleColor: '#333', // 標題深色
-                    bodyColor: '#2A9D8F', // 數值顏色
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)', 
+                    titleColor: '#333', 
+                    bodyColor: '#2A9D8F', 
                     borderColor: '#ddd',
                     borderWidth: 1,
                     padding: 10,
-                    displayColors: false, // 不顯示前面的小色塊
+                    displayColors: false, 
                     callbacks: { 
-                        // 設定標題顯示日期
                         title: (tooltipItems) => {
                             return tooltipItems[0].label;
                         },
-                        // 設定數值格式 (保留 1 位小數)
                         label: (ctx) => {
                             return `USD $ ${numberFormat(ctx.raw, 1)}`; 
                         } 
@@ -652,10 +725,9 @@ async function fetchRebalance() {
     if (response && response.ok) {
         const result = await response.json();
         if (result.status === 'success') {
-            // 更新再平衡資料
             rebalanceData.value = {
                 currentUsdtRatio: parseFloat(result.data.current_usdt_ratio || 0),
-                targetRatio: parseFloat(result.data.target_ratio || 10), // 注意：若後端沒回傳值，這裡會變回 10
+                targetRatio: parseFloat(result.data.target_ratio || 10), 
                 action: result.data.action || 'HOLD',
                 message: result.data.message || '目前配置平衡。'
             };
@@ -678,7 +750,6 @@ function openTargetModal() {
     isTargetModalOpen.value = true;
 }
 
-// 🟢 [修正] 儲存目標比例後，前端先更新變數 (Optimistic Update)
 async function saveTargetRatio() {
     if (tempTargetRatio.value < 0 || tempTargetRatio.value > 100) {
         alert("比例必須在 0 ~ 100 之間");
@@ -694,11 +765,10 @@ async function saveTargetRatio() {
     if (response && response.ok) {
         const res = await response.json();
         if (res.status === 'success') {
-            // 🟢 這裡：先直接更新前端顯示，不要等 fetchRebalance
             rebalanceData.value.targetRatio = tempTargetRatio.value; 
             
             isTargetModalOpen.value = false;
-            fetchRebalance(); // 背景再去抓最新的 (作為雙重確認)
+            fetchRebalance(); 
             alert("設定已更新");
         } else {
             alert(res.message);
@@ -707,11 +777,10 @@ async function saveTargetRatio() {
     saving.value = false;
 }
 
-// 🟢 [修正] 4. 修改原本的 openTransactionModal (確保按新增時是乾淨的狀態)
 function openTransactionModal() {
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
     resetForm(); 
-    isEditingTransaction.value = false; // 確保不是編輯模式
+    isEditingTransaction.value = false; 
     editingId.value = null;
     isModalOpen.value = true; 
 }
@@ -733,9 +802,8 @@ function openEditBalanceModal(coin) {
     editBalanceForm.newBalance = coin.balance; 
     editBalanceForm.date = new Date().toISOString().substring(0, 10); 
     
-    // 辨識來源
     editBalanceForm.type = coin.type; 
-    editBalanceForm.name = coin.name; // 用於 API 識別
+    editBalanceForm.name = coin.name; 
 
     isEditBalanceOpen.value = true;
 }
@@ -743,18 +811,16 @@ function openEditBalanceModal(coin) {
 function closeEditModal() { isEditBalanceOpen.value = false; }
 
 async function submitBalanceAdjustment() {
-    // 1. 處理靜態帳戶 (type === 'account')
     if (editBalanceForm.type === 'account') {
         if (!confirm(`確定要更新帳戶 [${editBalanceForm.name}] 的餘額為 ${editBalanceForm.newBalance} 嗎？`)) return;
         
-        // 呼叫 save_account API (復用 AccountManagerView 的邏輯)
         const payload = {
             name: editBalanceForm.name,
             balance: editBalanceForm.newBalance,
-            type: 'Investment', // 或根據幣種自動判斷
+            type: 'Investment', 
             currency: editBalanceForm.symbol,
             date: editBalanceForm.date,
-            ledger_id: props.ledgerId // 確保帶上當前帳本 ID
+            ledger_id: 1 // 這裡需要注意，若有多帳本需動態帶入
         };
 
         const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, {
@@ -766,14 +832,13 @@ async function submitBalanceAdjustment() {
             const res = await response.json();
             if (res.status === 'success') {
                 closeEditModal();
-                fetchCryptoData(); // 重新整理列表
+                fetchCryptoData(); 
                 alert('帳戶快照已更新！');
             } else { alert('失敗：' + res.message); }
         }
         return;
     }
 
-    // 2. 處理交易推算帳戶 (type === 'trade') - 維持原有補差額邏輯
     if (!confirm(`確定要校正 ${editBalanceForm.symbol} (Trading) 的餘額嗎？系統將自動新增一筆校正交易。`)) return;
     
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=adjust_crypto_balance`, {
@@ -799,7 +864,6 @@ async function submitBalanceAdjustment() {
 async function submitTransaction() {
   const payload = { ...form };
   
-  // 自動計算邏輯 (輔助)
   if (currentTab.value === 'fiat') {
     if (!payload.price && payload.quantity > 0) payload.price = (payload.total / payload.quantity);
     payload.baseCurrency = 'USDT'; payload.quoteCurrency = 'TWD';
@@ -809,11 +873,10 @@ async function submitTransaction() {
     payload.baseCurrency = form.baseCurrency.toUpperCase(); 
   }
 
-  // 判斷是新增還是更新
   let url = `${window.API_BASE_URL}?action=add_crypto_transaction`;
   if (isEditingTransaction.value) {
       url = `${window.API_BASE_URL}?action=update_crypto_transaction`;
-      payload.id = editingId.value; // 帶上 ID
+      payload.id = editingId.value; 
   }
 
   const response = await fetchWithLiffToken(url, { method: 'POST', body: JSON.stringify(payload) });
@@ -837,7 +900,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 樣式區 (保持不變) */
 :root { --text-primary: #5d5d5d; --color-primary: #d4a373; --color-teal: #2A9D8F; --color-danger: #e5989b; }
 
 .crypto-container {
@@ -890,7 +952,6 @@ onMounted(() => {
 .currency-symbol { font-size: 1.1rem; color: #888; margin-right: 2px; }
 .currency-code { font-size: 0.9rem; color: #aaa; font-weight: 400; margin-left: 4px; }
 
-/* 3欄佈局樣式 */
 .stats-row.three-col {
     display: flex;
     justify-content: space-between;
@@ -917,15 +978,14 @@ onMounted(() => {
 .section-header h3 { font-size: 1.1rem; color: #555; margin: 0; }
 .add-btn { background: #d4a373; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; box-shadow: 0 2px 6px rgba(212, 163, 115, 0.3); cursor: pointer; }
 
-/* 🟢 [修改] 列表卡片樣式優化，統一風格 */
 .coin-list { display: flex; flex-direction: column; gap: 12px; }
 
 .account-card-style {
     background: white;
-    padding: 16px 20px; /* 增加內距 */
-    border-radius: 16px; /* 圓角加大 */
-    box-shadow: 0 2px 10px rgba(0,0,0,0.03); /* 柔和陰影 */
-    border: 1px solid #f0f0f0; /* 極淡邊框 */
+    padding: 16px 20px; 
+    border-radius: 16px; 
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03); 
+    border: 1px solid #f0f0f0; 
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -934,7 +994,6 @@ onMounted(() => {
 
 .card-left { display: flex; flex-direction: column; gap: 6px; }
 
-/* 🟢 [修改] 標題字體加大 */
 .acc-name {
     font-size: 1.1rem; 
     font-weight: 700; 
@@ -944,22 +1003,19 @@ onMounted(() => {
 
 .acc-meta { display: flex; align-items: center; gap: 8px; }
 
-/* 🟢 [修改] 標籤樣式調整 */
 .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; font-weight: 600; }
 
-/* 交易類型標籤配色 */
-.badge-success { background-color: #e9edc9; color: #556b2f; } /* 抹茶綠 */
-.badge-danger { background-color: #ffedea; color: #c44536; }  /* 淡紅 */
-.badge-neutral { background-color: #f3f4f6; color: #6b7280; } /* 灰 */
+.badge-success { background-color: #e9edc9; color: #556b2f; } 
+.badge-danger { background-color: #ffedea; color: #c44536; }  
+.badge-neutral { background-color: #f3f4f6; color: #6b7280; } 
 
-/* 原有的標籤樣式保留 */
 .badge-crypto { background: #e6fcf5; color: #2A9D8F; }
 .badge-stable { background: #f0f0f0; color: #666; }
 .badge-long { background: #e6fcf5; color: #2A9D8F; }
 .badge-short { background: #fff5f5; color: #e5989b; }
 
 .currency { font-size: 0.7rem; color: #aaa; }
-.date-text { font-size: 0.85rem; color: #999; letter-spacing: 0.5px; } /* 新增日期樣式 */
+.date-text { font-size: 0.85rem; color: #999; letter-spacing: 0.5px; } 
 
 .card-right { 
     text-align: right; 
@@ -971,7 +1027,6 @@ onMounted(() => {
 
 .acc-balance { font-weight: 700; font-size: 1rem; text-align: right; }
 
-/* 🟢 [新增] 大字號金額樣式 */
 .large-balance {
     font-size: 1.2rem;
     font-weight: 800;
@@ -982,14 +1037,12 @@ onMounted(() => {
 .pill-btn { font-size: 0.75rem; padding: 4px 10px; border-radius: 10px; border: none; cursor: pointer; margin-top: 4px; }
 .pill-btn.update-crypto { background: #f0f0f0; color: #666; }
 
-/* 🟢 [新增] 文字按鈕區塊 */
 .action-buttons-text {
     display: flex;
-    gap: 12px; /* 按鈕間距 */
+    gap: 12px; 
     margin-top: 4px;
 }
 
-/* 🟢 [新增] 文字連結按鈕樣式 */
 .text-link {
     background: none;
     border: none;
@@ -998,10 +1051,10 @@ onMounted(() => {
     cursor: pointer;
     padding: 0;
     transition: opacity 0.2s;
-    color: #888; /* 預設灰色 */
+    color: #888; 
 }
 .text-link:hover { opacity: 0.7; text-decoration: underline; }
-.text-link.delete { color: #e5989b; } /* 刪除用淺紅色 */
+.text-link.delete { color: #e5989b; } 
 
 .rebalance-card { background: white; padding: 20px; border-radius: 16px; margin: 0 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center; }
 .progress-bar-container { position: relative; height: 16px; background: #eee; border-radius: 10px; margin: 20px 0; overflow: visible; }
@@ -1056,5 +1109,69 @@ onMounted(() => {
   background: white; border: 1px solid #ddd; border-radius: 50%;
   width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; font-size: 1.1rem;
+}
+.import-section {
+  background: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #eee;
+}
+
+.hint {
+  color: #666;
+  font-size: 0.9em;
+  margin-bottom: 15px;
+}
+
+.upload-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.file-name {
+    font-size: 0.9em;
+    color: #555;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-primary:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.alert {
+  padding: 15px;
+  border-radius: 4px;
+  margin-top: 10px;
+}
+.alert.success {
+  background-color: #d4edda;
+  color: #155724;
+}
+.alert.error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+.text-danger {
+  color: #dc3545;
+}
+.error-details {
+  margin-top: 10px;
+  font-size: 0.85em;
+  color: #555;
 }
 </style>
