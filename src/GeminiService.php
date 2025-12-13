@@ -273,11 +273,7 @@ EOD;
     }
 
     /**
-     * [CSV 規則生成]
-     * 分析 CSV 片段，回傳欄位對應表 (Mapping Schema)
-     */
-    /**
-     * 🟢 [CSV 規則生成] (已修正：強制要求所有欄位)
+     * 🟢 [CSV 規則生成] (支援出入金)
      */
     public function generateCsvMapping(string $csvSnippet): ?array {
         $schema = [
@@ -287,45 +283,44 @@ EOD;
                 'has_header' => ['type' => 'boolean', 'description' => '第一行是否為標題'],
                 'date_col_index' => ['type' => 'integer', 'description' => '日期欄位索引(0起)'],
                 
-                // 幣種欄位 (必填，無則填-1)
-                'pair_col_index' => ['type' => 'integer', 'description' => '交易對欄位索引 (若無則填 -1)'],
-                'base_col_index' => ['type' => 'integer', 'description' => '基準幣欄位索引 (如 BTC)'],
-                'quote_col_index' => ['type' => 'integer', 'description' => '計價幣欄位索引 (如 USDT/TWD)'],
+                'pair_col_index' => ['type' => 'integer', 'description' => '交易對欄位索引 (若無填-1)'],
+                'base_col_index' => ['type' => 'integer', 'description' => '基準幣/幣種欄位索引'],
+                'quote_col_index' => ['type' => 'integer', 'description' => '計價幣欄位索引 (若無填-1)'],
                 
-                'side_col_index' => ['type' => 'integer', 'description' => '方向(Buy/Sell)欄位索引'],
-                'price_col_index' => ['type' => 'integer', 'description' => '價格欄位索引'],
-                'qty_col_index' => ['type' => 'integer', 'description' => '數量欄位索引'],
+                'side_col_index' => ['type' => 'integer', 'description' => '類型/方向欄位索引'],
+                'price_col_index' => ['type' => 'integer', 'description' => '價格欄位索引 (出入金填-1)'],
+                'qty_col_index' => ['type' => 'integer', 'description' => '數量/金額欄位索引'],
                 'fee_col_index' => ['type' => 'integer', 'description' => '手續費欄位索引'],
-                'total_col_index' => ['type' => 'integer', 'description' => '總金額欄位索引，若無填-1'],
-                'date_format' => ['type' => 'string', 'description' => 'PHP日期格式，如 Y-m-d H:i:s'],
+                'total_col_index' => ['type' => 'integer', 'description' => '總金額欄位索引 (若無填-1)'],
+                'date_format' => ['type' => 'string', 'description' => 'PHP日期格式'],
                 'side_mapping' => [
                     'type' => 'object',
                     'properties' => [
                         'buy_keywords' => ['type' => 'array', 'items' => ['type' => 'string']],
-                        'sell_keywords' => ['type' => 'array', 'items' => ['type' => 'string']]
+                        'sell_keywords' => ['type' => 'array', 'items' => ['type' => 'string']],
+                        // 🟢 新增：出入金關鍵字
+                        'deposit_keywords' => ['type' => 'array', 'items' => ['type' => 'string']],
+                        'withdraw_keywords' => ['type' => 'array', 'items' => ['type' => 'string']]
                     ]
                 ]
             ],
-            // 🟢 關鍵修正：將所有欄位設為 required，強迫 AI 思考並填寫
             'required' => [
-                'exchange_name', 'has_header', 'date_col_index', 
-                'pair_col_index', 'base_col_index', 'quote_col_index',
-                'side_col_index', 'price_col_index', 'qty_col_index', 'total_col_index', 'date_format'
+                'date_col_index', 'base_col_index', 'side_col_index', 'qty_col_index', 
+                'price_col_index', 'side_mapping'
             ]
         ];
 
         $prompt = <<<EOD
 你是一個資料工程師。請分析以下 CSV 片段（含 Header），並告訴我關鍵欄位的 Index（從 0 開始）。
 
-**規則與邏輯：**
-1. **幣種處理**：
-   - 若有單一欄位 "Pair" (如 BTCUSDT)，填 `pair_col_index`，其餘幣種欄位填 -1。
-   - 若幣種分開 (如 "Base Currency" 和 "Quote Currency")，填 `base_col_index` 和 `quote_col_index`，並將 `pair_col_index` 填 -1。
-2. **數值選擇**：
-   - 請優先選擇 **「成交/已執行 (Executed)」** 的價格與數量。
-   - 不要選擇「委託 (Order)」的數值，因為那可能未完全成交。
-3. **日期格式**：
-   - 請觀察範例，如果是 "2025-05-12 08:25:11" 請用 "Y-m-d H:i:s"。
+**規則：**
+1. **交易 (Trading)**：若有買賣，請填寫 Price, Qty, Pair/Base/Quote。
+2. **出入金 (Funding)**：
+   - 類型欄位填入 `side_col_index`。
+   - `price_col_index` 填 -1。
+   - 金額填入 `qty_col_index`。
+   - 幣種填入 `base_col_index`。
+3. **關鍵字**：請在 `side_mapping` 中列出識別 "Deposit"(入金/加值) 和 "Withdraw"(出金/提領) 的關鍵字。
 
 CSV 片段：
 ```csv
