@@ -619,37 +619,7 @@ class CryptoService {
                 if ($total == 0 && $price > 0 && $qty > 0) $total = $price * $qty; 
             }
 
-            // --- 🟢 E. 核心修改：查詢歷史匯率 ---
-            $exchangeRateUsd = 1.0; // 預設 1:1
-
-            // 只有當計價貨幣不是穩定幣且不是 TWD 時，才去查匯率 (例如 Quote 是 BTC)
-            if (!in_array($quote, $skipRates)) {
-                // 建立快取 Key: "BTC_2023-10-25"
-                $dateKey = date('Y-m-d', strtotime($transDate));
-                $cacheKey = "{$quote}_{$dateKey}";
-
-                if (isset($rateCache[$cacheKey])) {
-                    // 命中快取，直接使用
-                    $exchangeRateUsd = $rateCache[$cacheKey];
-                } else {
-                    // 沒查過，呼叫 API
-                    // 注意：需確保 ExchangeRateService 已實作 getHistoricalRateToUSD 方法
-                    $exchangeRateUsd = $this->rateService->getHistoricalRateToUSD($quote, $transDate);
-                    
-                    // 寫入快取
-                    $rateCache[$cacheKey] = $exchangeRateUsd;
-
-                    // ⚠️ API 頻率保護 (1.5秒)
-                    usleep(1500000); 
-                }
-            }
-            // ------------------------------------
-
-            // --- F. 寫入資料庫 ---
-            $exchangeName = $mapping['exchange_name'] ?? 'Unknown';
-            $note = "CSV匯入 ({$exchangeName})";
-            
-            $success = $this->addTransaction($userId, [
+            $payload = [
                 'type' => $type,
                 'baseCurrency' => $base,
                 'quoteCurrency' => $quote,
@@ -658,14 +628,27 @@ class CryptoService {
                 'total' => $total,
                 'fee' => $fee,
                 'date' => $transDate,
-                'note' => $note,
-                'exchange_rate_usd' => $exchangeRateUsd // 🟢 傳入查到的匯率
-            ]);
-
-            if ($success) $count++;
+                'note' => $note ?? "CSV匯入",
+                'exchange_name' => $mapping['exchange_name'] ?? 'Unknown'
+            ];
+    
+            // 寫入佇列資料表
+            $sql = "INSERT INTO crypto_import_queue (user_id, data_payload, status, created_at) 
+                    VALUES (:uid, :data, 'PENDING', NOW())";
+            
+            try {
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->execute([
+                    ':uid' => $userId,
+                    ':data' => json_encode($payload, JSON_UNESCAPED_UNICODE)
+                ]);
+                $count++;
+            } catch (Exception $e) {
+                error_log("Queue Insert Failed: " . $e->getMessage());
+            }
         }
         
-        return ['count' => $count];
+        return ['count' => $count, 'message' => '已加入排程佇列，系統將在背景陸續處理。'];
     }
 }
 ?>
