@@ -147,7 +147,7 @@ class CryptoService {
 
     public function addTransaction(int $userId, array $data): bool {
         if (empty($data['type']) || !isset($data['quantity'])) { return false; }
-        $exchangeRateUsd = (float)($data['exchange_rate_usd'] ?? 1.0);
+        $exchangeRateUsd = array_key_exists('exchange_rate_usd', $data) ? (float)$data['exchange_rate_usd'] : 1.0;
         $type = $data['type'];
         $base = strtoupper($data['baseCurrency'] ?? '');
         $quote = strtoupper($data['quoteCurrency'] ?? 'USDT');
@@ -158,6 +158,42 @@ class CryptoService {
         $date = $data['date'] ?? date('Y-m-d H:i:s');
         $note = $data['note'] ?? '';
 
+        // 🟢 [新增] 防重複檢查邏輯
+        // 檢查條件：同一用戶、同一時間、同一幣種、同一數量、同一類型
+        // 使用 ABS() < 0.00000001 是為了避免浮點數精確度問題
+        $checkSql = "SELECT id FROM crypto_transactions 
+                     WHERE user_id = :uid 
+                     AND transaction_date = :date 
+                     AND type = :type 
+                     AND base_currency = :base 
+                     AND quote_currency = :quote 
+                     AND ABS(quantity - :qty) < 0.00000001
+                     LIMIT 1";
+        
+        try {
+            $stmtCheck = $this->pdo->prepare($checkSql);
+            $stmtCheck->execute([
+                ':uid' => $userId,
+                ':date' => $date,
+                ':type' => $type,
+                ':base' => $base,
+                ':quote' => $quote,
+                ':qty' => $qty
+            ]);
+            
+            if ($stmtCheck->fetch()) {
+                // ⚠️ 發現重複資料！
+                // 這裡回傳 true 是為了讓 Queue 視為「處理完成」，而不是「失敗」
+                // 這樣就不會一直卡在失敗列表，且不會寫入重複資料
+                error_log("Duplicate transaction skipped: User {$userId}, {$type} {$base}/{$quote} qty:{$qty} date:{$date}");
+                return true; 
+            }
+        } catch (PDOException $e) {
+            // 檢查過程出錯不應阻擋寫入，但建議記錄 Log
+            error_log("Duplicate Check Failed: " . $e->getMessage());
+        }
+        // 🟢 [結束] 防重複檢查邏輯
+
         $sql = "INSERT INTO crypto_transactions 
                 (user_id, type, base_currency, quote_currency, price, quantity, total, fee, transaction_date, note, exchange_rate_usd, created_at)
                 VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :date, :note, :rate, NOW())";
@@ -167,14 +203,17 @@ class CryptoService {
                 ':uid'=>$userId, ':type'=>$type, ':base'=>$base, ':quote'=>$quote, 
                 ':price'=>$price, ':qty'=>$qty, ':total'=>$total, ':fee'=>$fee, 
                 ':date'=>$date, ':note'=>$note, 
-                ':rate' => $exchangeRateUsd // 🟢 綁定參數
+                ':rate' => $exchangeRateUsd
             ]);
-        } catch (PDOException $e) { return false; }
+        } catch (PDOException $e) { 
+            // 🔴 強制記錄詳細錯誤原因到 log
+            error_log("❌ SQL Insert Failed: " . $e->getMessage());
+            return false; 
+        }
     }
 
     /**
-     * 🟢 [重寫] 儀表板數據 (區分 已實現/未實現 損益)
-     * 修正：加入合約過濾邏輯，只顯示現貨資產
+     * 🟢 [進階版] 儀表板數據 (支援損益分類：U本位 vs 幣本位)
      */
     public function getDashboardData(int $userId): array {
         // 1. 撈取所有交易
@@ -184,17 +223,25 @@ class CryptoService {
         $txs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $portfolio = [];
-        $totalInvestedTwd = 0; 
+        $netInvestedUsd = 0.0; 
+        $totalInvestedTwd = 0.0;
+
+        // 🟢 [新增] 損益分類累加器
+        $realizedSpotUsd = 0.0; // U本位/法幣本位 已實現損益
+        $realizedCoinUsd = 0.0; // 幣本位/交叉盤 已實現損益
 
         // 動態取得 USD/TWD 匯率
         $usdTwdRate = $this->rateService->getUsdTwdRate();
+        
+        // 定義穩定幣與法幣 (視為純現貨/U本位)
+        $stableCoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'FDUSD', 'TWD'];
 
         foreach ($txs as $tx) {
             $type = $tx['type'];
             $base = strtoupper($tx['base_currency'] ?? '');
             $quote = strtoupper($tx['quote_currency'] ?? 'USDT');
             
-            // 🔴 [新增] 過濾合約交易：如果幣種包含 _PERP 或 -PERP，則跳過，不計入現貨資產
+            // 過濾合約
             if (str_contains($base, '_PERP') || str_contains($base, '-PERP')) {
                 continue;
             }
@@ -203,6 +250,7 @@ class CryptoService {
             $total = (float)$tx['total'];
             $fee = (float)$tx['fee'];
 
+            // 初始化
             if ($base && !isset($portfolio[$base])) {
                 $portfolio[$base] = ['qty' => 0, 'cost' => 0, 'realized' => 0];
             }
@@ -210,28 +258,36 @@ class CryptoService {
                 $portfolio['USDT'] = ['qty' => 0, 'cost' => 0, 'realized' => 0];
             }
 
-            // 匯率換算使用動態匯率
-            $rateToUsd = ($quote === 'TWD') ? (1 / $usdTwdRate) : 1.0;
-            $totalUsd = $total * $rateToUsd;
-            $feeUsd = $fee * $rateToUsd;
+            // 1. 取得正確的計價匯率
+            $quoteRateToUsd = 1.0;
+            if (isset($tx['exchange_rate_usd']) && $tx['exchange_rate_usd'] > 0) {
+                $quoteRateToUsd = (float)$tx['exchange_rate_usd'];
+            } elseif ($quote === 'TWD') {
+                $quoteRateToUsd = 1 / $usdTwdRate;
+            } elseif (!in_array($quote, $stableCoins)) {
+                $quoteRateToUsd = $this->rateService->getRateToUSD($quote);
+            }
 
+            $totalUsd = $total * $quoteRateToUsd;
+            $feeUsd = $fee * $quoteRateToUsd;
+
+            // 2. 計算邏輯
             switch ($type) {
                 case 'deposit':
+                    $netInvestedUsd += $totalUsd;
                     if ($quote === 'TWD') $totalInvestedTwd += $total;
-                    
+
                     if ($base === 'USDT') $portfolio['USDT']['qty'] += $qty;
                     else if ($base) $portfolio[$base]['qty'] += $qty;
                     break;
 
                 case 'withdraw':
+                    $netInvestedUsd -= $totalUsd;
                     if ($quote === 'TWD') $totalInvestedTwd -= $total;
 
                     $target = ($base === 'USDT') ? 'USDT' : $base;
-                    if (isset($portfolio[$target]) && $portfolio[$target]['qty'] > 0) {
-                        $avgCost = $portfolio[$target]['cost'] / $portfolio[$target]['qty'];
-                        $costPart = $avgCost * $qty;
+                    if (isset($portfolio[$target])) {
                         $portfolio[$target]['qty'] -= $qty;
-                        $portfolio[$target]['cost'] -= $costPart;
                     }
                     break;
 
@@ -252,13 +308,22 @@ class CryptoService {
                         
                         $avgCost = ($currentQty > 0) ? ($currentCost / $currentQty) : 0;
                         $costOfSold = $avgCost * $qty;
+                        
                         $revenue = $totalUsd - $feeUsd;
-
                         $realized = $revenue - $costOfSold;
+                        
                         $portfolio[$base]['realized'] += $realized;
-
                         $portfolio[$base]['qty'] -= $qty;
                         $portfolio[$base]['cost'] -= $costOfSold;
+
+                        // 🟢 [核心修改] 分類統計已實現損益
+                        if (in_array($quote, $stableCoins)) {
+                            // Quote 是 USDT/TWD -> 純現貨損益
+                            $realizedSpotUsd += $realized;
+                        } else {
+                            // Quote 是 BTC/ETH -> 幣本位損益
+                            $realizedCoinUsd += $realized;
+                        }
                     }
                     if ($quote === 'USDT') {
                         $portfolio['USDT']['qty'] += ($total - $fee);
@@ -267,22 +332,19 @@ class CryptoService {
 
                 case 'earn':
                 case 'adjustment':
-                    if ($base) {
-                        $portfolio[$base]['qty'] += $qty;
-                    }
+                    if ($base) $portfolio[$base]['qty'] += $qty;
                     break;
             }
         }
 
-        // 3. 計算當前市值與未實現損益
+        // 3. 計算總資產與績效
         $finalList = [];
-        $globalTotalUsd = 0;
-        $globalUnrealizedPnl = 0;
+        $globalTotalUsd = 0; 
         $globalRealizedPnl = 0;
 
-        // A. 處理交易推算帳戶
         foreach ($portfolio as $sym => $data) {
             $qty = $data['qty'];
+            // 浮點數校正
             if ($qty < 0.00000001 && $qty > -0.00000001) $qty = 0; 
             
             $globalRealizedPnl += $data['realized'];
@@ -295,11 +357,10 @@ class CryptoService {
                 $costBasis = $data['cost'];
                 
                 $unrealized = $marketValue - $costBasis;
-                $avgPrice = $costBasis / $qty;
+                $avgPrice = ($qty > 0) ? ($costBasis / $qty) : 0;
                 $roi = ($costBasis > 0) ? ($unrealized / $costBasis) * 100 : 0;
 
                 $globalTotalUsd += $marketValue;
-                $globalUnrealizedPnl += $unrealized;
 
                 $finalList[] = [
                     'type' => 'trade',
@@ -317,7 +378,7 @@ class CryptoService {
             }
         }
 
-        // B. 融合靜態帳戶
+        // 處理靜態帳戶 (Accounts)
         $cryptoList = array_keys(ExchangeRateService::COIN_ID_MAP);
         $cryptoList[] = 'USDT';
         $placeholders = implode(',', array_fill(0, count($cryptoList), '?'));
@@ -352,30 +413,24 @@ class CryptoService {
             ];
         }
 
-        usort($finalList, function($a, $b) {
-            return $b['valueUsd'] <=> $a['valueUsd'];
-        });
+        usort($finalList, function($a, $b) { return $b['valueUsd'] <=> $a['valueUsd']; });
 
-        $totalHoldingCost = 0;
-        foreach($finalList as $item) $totalHoldingCost += $item['costUsd'];
-        
-        $roiDenominator = 0;
-        // 如果有入金紀錄，優先以總入金(換算成USD)為分母
-        if ($totalInvestedTwd > 0) {
-            $roiDenominator = $totalInvestedTwd / $usdTwdRate;
-        } else {
-            $roiDenominator = $totalHoldingCost;
-        }
-
-        $pnlPercent = ($roiDenominator > 0) ? ($globalUnrealizedPnl / $roiDenominator) * 100 : 0;
+        // 4. 計算 Global ROI
+        $totalPnlUsd = $globalTotalUsd - $netInvestedUsd;
+        $pnlPercent = ($netInvestedUsd > 0) ? ($totalPnlUsd / $netInvestedUsd) * 100 : 0;
 
         return [
             'dashboard' => [
                 'totalUsd' => $globalTotalUsd,
-                'totalInvestedTwd' => $totalInvestedTwd, 
-                'unrealizedPnl' => $globalUnrealizedPnl, 
-                'realizedPnl' => $globalRealizedPnl,     
-                'pnlPercent' => $pnlPercent
+                'totalInvestedTwd' => $totalInvestedTwd,
+                'unrealizedPnl' => $totalPnlUsd,
+                'realizedPnl' => $globalRealizedPnl,
+                'pnlPercent' => $pnlPercent,
+                // 🟢 新增回傳分類數據
+                'breakdown' => [
+                    'realizedSpot' => $realizedSpotUsd, // 純現貨獲利 (USD)
+                    'realizedCoin' => $realizedCoinUsd  // 幣本位獲利 (USD)
+                ]
             ],
             'holdings' => $finalList,
             'usdTwdRate' => $usdTwdRate,

@@ -24,14 +24,33 @@
                 {{ dashboard.unrealizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.unrealizedPnl, 2) }}
               </span>
             </div>
+            
             <div class="vertical-line"></div>
+            
             <div class="stat-item">
               <span class="label">已實現損益 (Realized)</span>
               <span class="value" :class="dashboard.realizedPnl >= 0 ? 'text-profit' : 'text-loss'">
                 {{ dashboard.realizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.realizedPnl, 2) }}
               </span>
+              
+              <div class="pnl-capsule-row" v-if="dashboard.breakdown">
+                  <div class="pnl-capsule">
+                    <span class="cap-label">U本位</span>
+                    <span class="cap-val" :class="dashboard.breakdown.realizedSpot >= 0 ? 'text-profit-xs' : 'text-loss-xs'">
+                      {{ numberFormat(dashboard.breakdown.realizedSpot, 0) }}
+                    </span>
+                  </div>
+                  <div class="pnl-capsule">
+                    <span class="cap-label">幣本位</span>
+                    <span class="cap-val" :class="dashboard.breakdown.realizedCoin >= 0 ? 'text-profit-xs' : 'text-loss-xs'">
+                      {{ numberFormat(dashboard.breakdown.realizedCoin, 0) }}
+                    </span>
+                  </div>
+              </div>
             </div>
+
             <div class="vertical-line"></div>
+            
             <div class="stat-item">
               <span class="label">未實現 ROI</span>
               <span class="value" :class="dashboard.pnlPercent >= 0 ? 'text-profit' : 'text-loss'">
@@ -61,14 +80,7 @@
           <h3>持倉資產</h3>
           <div class="header-actions">
              <input type="file" ref="uploadInput" class="hidden-input" accept="image/*" @change="handleImageUpload">
-             
-             <input 
-              type="file" 
-              ref="csvInput" 
-              class="hidden-input" 
-              accept=".csv,text/csv,application/vnd.ms-excel" 
-              @change="handleCsvUpload"
-            >
+             <input type="file" ref="csvInput" class="hidden-input" accept=".csv,text/csv,application/vnd.ms-excel" @change="handleCsvUpload">
 
              <button class="icon-btn" @click="triggerUpload" :disabled="isAnalyzing">
                 <span v-if="isAnalyzing">⏳</span>
@@ -162,72 +174,56 @@
         </div>
       </div>
     </div>
-
-      <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3>
-            <button class="close-btn" @click="closeModal">×</button>
-          </div>
-
-          <div class="tabs" v-if="!isEditingTransaction">
-            <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
-          </div>
-
-          <form @submit.prevent="submitTransaction" class="tx-form">
-            <div v-if="['deposit', 'withdraw'].includes(form.type)">
-              <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
-              <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
-            </div>
-
-            <div v-if="['buy', 'sell'].includes(form.type)">
-              <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
-              <div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div>
-              <div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div>
-              <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
-            </div>
-
-            <div v-if="['earn', 'adjustment'].includes(form.type)">
-              <div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div>
-              <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
-            </div>
-
-            <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
-            
-            <button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button>
-          </form>
-        </div>
-      </div>
-
     </div>
 
     <div v-if="view === 'rebalance'" class="rebalance-panel fade-in">
-      <div class="card-section">
-        <div class="section-header"><h3>現金水位監控</h3></div>
-        
-        <div class="data-box rebalance-card">
-          <div class="progress-bar-container">
-             <div class="bar-fill" :style="{width: Math.min(rebalanceData.currentUsdtRatio, 100) + '%'}"></div>
-             <div class="target-line" :style="{left: rebalanceData.targetRatio + '%'}">
-                <span class="target-label">目標 {{ rebalanceData.targetRatio }}%</span>
-             </div>
+      <div class="stats-grid">
+          <div class="stat-box">
+             <span class="label">目前現金 (USDT)</span>
+             <span class="val">{{ numberFormat(rebalanceData.currentUsdtRatio, 1) }}%</span>
           </div>
-          
-          <div class="ratio-text">
-             目前現金比例: <span class="highlight">{{ numberFormat(rebalanceData.currentUsdtRatio, 1) }}%</span> 
+          <div class="stat-box">
+             <span class="label">目標設定</span>
+             <span class="val">{{ rebalanceData.targetRatio }}%</span>
           </div>
-          
-          <div class="advice-box" :class="rebalanceData.action">
-             <div class="advice-icon">
-                {{ rebalanceData.action === 'BUY' ? '🟢' : (rebalanceData.action === 'SELL' ? '🔴' : '⚪') }}
-             </div>
-             <div class="advice-content">
-                <h4>{{ rebalanceData.action === 'BUY' ? '建議買入' : (rebalanceData.action === 'SELL' ? '建議賣出' : '持有觀望') }}</h4>
-                <p>{{ rebalanceData.message }}</p>
-             </div>
+          <div class="stat-box">
+             <span class="label">系統建議</span>
+             <span class="val" :class="rebalanceData.action === 'BUY' ? 'text-profit' : (rebalanceData.action === 'SELL' ? 'text-loss' : 'text-neutral')">
+                {{ rebalanceData.action === 'BUY' ? '買入' : (rebalanceData.action === 'SELL' ? '賣出' : '觀望') }}
+             </span>
           </div>
+      </div>
 
-          <button class="setting-btn" @click="openTargetModal">⚙️ 設定目標比例</button>
+      <div class="card-section mt-4">
+        <div class="section-header">
+            <h3>資金水位監控</h3>
+            <button class="pill-btn update-crypto" @click="openTargetModal">⚙️ 設定</button>
+        </div>
+        
+        <div class="rebalance-visual-box">
+            <div class="progress-bar-group">
+                <div class="progress-bar-container">
+                   <div class="bar-fill" :class="rebalanceData.action === 'BUY' ? 'bg-low' : (rebalanceData.action === 'SELL' ? 'bg-high' : 'bg-normal')" 
+                        :style="{width: Math.min(rebalanceData.currentUsdtRatio, 100) + '%'}">
+                   </div>
+                   <div class="target-line" :style="{left: rebalanceData.targetRatio + '%'}"></div>
+                </div>
+                
+                <div class="progress-labels">
+                    <span class="p-min">0%</span>
+                    <span class="p-target" :style="{left: rebalanceData.targetRatio + '%'}">Target</span>
+                    <span class="p-max">100%</span>
+                </div>
+            </div>
+
+            <div class="advice-card">
+                <div class="advice-content">
+                    <span class="advice-icon">
+                        {{ rebalanceData.action === 'BUY' ? '🟢' : (rebalanceData.action === 'SELL' ? '🔴' : '⚪') }}
+                    </span>
+                    <p class="advice-msg">{{ rebalanceData.message }}</p>
+                </div>
+            </div>
         </div>
       </div>
     </div>
@@ -311,18 +307,18 @@
     <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>新增現貨紀錄</h3>
+          <h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3>
           <button class="close-btn" @click="closeModal">×</button>
         </div>
 
-        <div class="tabs">
+        <div class="tabs" v-if="!isEditingTransaction">
           <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
         </div>
 
         <form @submit.prevent="submitTransaction" class="tx-form">
           <div v-if="currentTab === 'fiat'">
             <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
-            <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>收到/轉出 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
+            <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
           </div>
           <div v-if="currentTab === 'trade'">
             <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
@@ -331,11 +327,12 @@
             <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
           </div>
           <div v-if="currentTab === 'earn'">
-            <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>獲得數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
+            <div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div>
+            <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
           </div>
           <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
           
-          <button type="submit" class="save-btn main-action">{{ submitButtonText }}</button>
+          <button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button>
         </form>
       </div>
     </div>
@@ -366,38 +363,42 @@
 </template>
 
 <script setup>
+// ... (JavaScript 邏輯部分完全保持不變) ...
+// 🟢 重要提醒：請確認 dashboard 預設值有包含 breakdown
 import { ref, computed, reactive, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto';
 import liff from '@line/liff';
 
-// 狀態管理
 const view = ref('portfolio');
-const dashboard = ref({ totalUsd: 0, totalInvestedTwd: 0, unrealizedPnl: 0, realizedPnl: 0, pnlPercent: 0 });
+// 🟢 確保 breakdown 有預設值
+const dashboard = ref({ 
+  totalUsd: 0, 
+  totalInvestedTwd: 0, 
+  unrealizedPnl: 0, 
+  realizedPnl: 0, 
+  pnlPercent: 0,
+  breakdown: { realizedSpot: 0, realizedCoin: 0 } 
+});
 const holdings = ref([]);
 const rebalanceData = ref({ currentUsdtRatio: 0, targetRatio: 10, action: 'HOLD', message: '載入中...' });
 const futuresStats = ref({ win_rate: 0, total_pnl: 0, avg_roi: 0, total_trades: 0, history: [] });
 const usdTwdRate = ref(32);
 const loading = ref(false);
-
-const recentTransactions = ref([]); // 近期交易
-
+const recentTransactions = ref([]);
 const historyChartCanvas = ref(null);
 let historyChart = null;
 const historyRange = ref('1y');
-
 const isModalOpen = ref(false);
 const isEditBalanceOpen = ref(false);
 const isTargetModalOpen = ref(false);
 const currentTab = ref('trade');
 const tabs = [{ id: 'fiat', name: '出入金' }, { id: 'trade', name: '交易' }, { id: 'earn', name: '理財' }];
-
 const form = reactive({ type: 'buy', baseCurrency: '', quoteCurrency: 'USDT', price: null, quantity: null, total: null, fee: null, date: new Date().toISOString().substring(0, 10), note: '' });
 const editBalanceForm = reactive({ symbol: '', current: 0, newBalance: 0, date: new Date().toISOString().substring(0, 10) });
 const tempTargetRatio = ref(10);
 const saving = ref(false);
 const isEditAccountOpen = ref(false);
-
 const submitButtonText = computed(() => {
   if (currentTab.value === 'fiat') return form.type === 'deposit' ? '確認入金' : '確認出金';
   if (currentTab.value === 'trade') return form.type === 'buy' ? '確認買入' : '確認賣出';
@@ -405,502 +406,141 @@ const submitButtonText = computed(() => {
 });
 const uploadInput = ref(null);
 const isAnalyzing = ref(false);
-
 const isEditingTransaction = ref(false);
-const editingId = ref(null); // 用來記錄正在編輯哪一筆 ID
-
+const editingId = ref(null);
 const csvInput = ref(null);
 
-function triggerCsvUpload() {
-    // 模擬使用者點擊那個隱藏的 input
-    if (csvInput.value) {
-        csvInput.value.click();
-    } else {
-        console.error("找不到 CSV Input 元件");
-    }
-}
-
+function triggerCsvUpload() { if (csvInput.value) csvInput.value.click(); else console.error("找不到 CSV Input 元件"); }
 async function handleCsvUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
-
-    if (!confirm(`確定要匯入 ${file.name} 嗎？\n這將使用 AI 自動分析表頭規則並批次匯入。`)) {
-        csvInput.value.value = ''; // 清空
-        return;
-    }
-
+    if (!confirm(`確定要匯入 ${file.name} 嗎？\n這將使用 AI 自動分析表頭規則並批次匯入。`)) { csvInput.value.value = ''; return; }
     isAnalyzing.value = true;
-
     try {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        // 呼叫新的 API action
-        const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=import_crypto_csv`, {
-            method: 'POST',
-            body: formData
-        });
-
+        const formData = new FormData(); formData.append('file', file);
+        const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=import_crypto_csv`, { method: 'POST', body: formData });
         if (response && response.ok) {
             const res = await response.json();
             if (res.status === 'success') {
                 alert(`匯入成功！\n共新增 ${res.data.count} 筆交易。\n規則來源: ${res.data.exchange_guess || 'AI 自動判斷'}`);
-                fetchCryptoData();        // 重新整理資產
-                fetchRecentTransactions(); // 重新整理列表
-            } else {
-                alert('匯入失敗: ' + res.message);
-            }
-        } else {
-            alert('上傳發生錯誤');
-        }
-    } catch (e) {
-        console.error(e);
-        alert('系統錯誤');
-    } finally {
-        isAnalyzing.value = false;
-        csvInput.value.value = ''; // 重置 input
-    }
+                fetchCryptoData(); fetchRecentTransactions();
+            } else { alert('匯入失敗: ' + res.message); }
+        } else { alert('上傳發生錯誤'); }
+    } catch (e) { console.error(e); alert('系統錯誤'); } finally { isAnalyzing.value = false; csvInput.value.value = ''; }
 }
-
-function triggerUpload() {
-  uploadInput.value.click();
-}
-
+function triggerUpload() { uploadInput.value.click(); }
 async function handleImageUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
+  const file = event.target.files[0]; if (!file) return;
   isAnalyzing.value = true;
-  
   try {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('mode', 'crypto'); // ★ 指定為加密貨幣模式
-
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_file`, {
-      method: 'POST',
-      body: formData
-    });
-
+    const formData = new FormData(); formData.append('file', file); formData.append('mode', 'crypto');
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=analyze_file`, { method: 'POST', body: formData });
     if (response && response.ok) {
       const res = await response.json();
       if (res.status === 'success' && res.data && res.data.length > 0) {
-        // ★ 這裡不同：不直接寫入，而是填入表單讓用戶確認
-        populateAndOpenModal(res.data[0]);
-        alert(`AI 辨識完成！\n識別為: ${res.data[0].type.toUpperCase()} ${res.data[0].baseCurrency}`);
-      } else {
-        alert('辨識失敗或無資料: ' + res.message);
-      }
-    } else {
-      alert('上傳失敗');
-    }
-  } catch (e) {
-    console.error(e);
-    alert('發生錯誤');
-  } finally {
-    isAnalyzing.value = false;
-    if (uploadInput.value) uploadInput.value.value = '';
-  }
+        populateAndOpenModal(res.data[0]); alert(`AI 辨識完成！\n識別為: ${res.data[0].type.toUpperCase()} ${res.data[0].baseCurrency}`);
+      } else { alert('辨識失敗或無資料: ' + res.message); }
+    } else { alert('上傳失敗'); }
+  } catch (e) { console.error(e); alert('發生錯誤'); } finally { isAnalyzing.value = false; if (uploadInput.value) uploadInput.value.value = ''; }
 }
-
-// 🟢 [新增] 填表邏輯
 function populateAndOpenModal(data) {
-  // 重置並填入資料
   isEditingTransaction.value = false;
-  // ... (這裡填入 form 的邏輯，參考上一則回應的詳細代碼) ...
-  // 簡單範例：
   form.type = data.type === 'income' ? 'earn' : (data.type === 'expense' ? 'loss' : data.type);
-  form.baseCurrency = data.baseCurrency || '';
-  form.quantity = parseFloat(data.quantity) || 0;
-  // ... 其他欄位 ...
-  
-  isModalOpen.value = true; // 打開視窗
+  form.baseCurrency = data.baseCurrency || ''; form.quantity = parseFloat(data.quantity) || 0;
+  isModalOpen.value = true;
 }
-
-// 🟢 [補上] 2. 刪除交易函式
 async function deleteTx(id) {
     if (!confirm("確定要刪除這筆交易紀錄嗎？\n刪除後將重新計算持倉，無法復原。")) return;
-    
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_crypto_transaction`, {
-        method: 'POST',
-        body: JSON.stringify({ id })
-    });
-
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=delete_crypto_transaction`, { method: 'POST', body: JSON.stringify({ id }) });
     if (response && response.ok) {
-        const res = await response.json();
-        if (res.status === 'success') {
-            fetchCryptoData();
-            fetchRecentTransactions();
-            alert("刪除成功");
-        } else {
-            alert(res.message);
-        }
+        const res = await response.json(); if (res.status === 'success') { fetchCryptoData(); fetchRecentTransactions(); alert("刪除成功"); } else { alert(res.message); }
     }
 }
-
-// 🟢 [補上] 3. 開啟編輯 Modal 函式 (點擊編輯按鈕時觸發)
 function openEditTxModal(tx) {
-    isEditingTransaction.value = true;
-    editingId.value = tx.id;
-    
-    // 將交易資料填回表單
-    form.type = tx.type;
-    form.baseCurrency = tx.base_currency;
-    form.quoteCurrency = tx.quote_currency || 'USDT';
-    form.price = parseFloat(tx.price);
-    form.quantity = parseFloat(tx.quantity);
-    form.total = parseFloat(tx.total);
-    form.fee = parseFloat(tx.fee);
-    form.date = tx.transaction_date.substring(0, 10);
-    form.note = tx.note;
-
-    // 自動切換到對應的 Tab
-    if (['deposit', 'withdraw'].includes(tx.type)) {
-        currentTab.value = 'fiat';
-    } else if (['buy', 'sell'].includes(tx.type)) {
-        currentTab.value = 'trade';
-    } else {
-        currentTab.value = 'earn';
-    }
-    
+    isEditingTransaction.value = true; editingId.value = tx.id;
+    form.type = tx.type; form.baseCurrency = tx.base_currency; form.quoteCurrency = tx.quote_currency || 'USDT';
+    form.price = parseFloat(tx.price); form.quantity = parseFloat(tx.quantity); form.total = parseFloat(tx.total);
+    form.fee = parseFloat(tx.fee); form.date = tx.transaction_date.substring(0, 10); form.note = tx.note;
+    if (['deposit', 'withdraw'].includes(tx.type)) currentTab.value = 'fiat'; else if (['buy', 'sell'].includes(tx.type)) currentTab.value = 'trade'; else currentTab.value = 'earn';
     isModalOpen.value = true;
 }
-
 function switchView(target) {
     view.value = target;
-    if (target === 'portfolio') {
-        fetchCryptoData();
-        fetchRecentTransactions(); // 切換回來時刷新列表
-        setTimeout(() => fetchHistory(historyRange.value), 100);
-    } else if (target === 'rebalance') {
-        fetchRebalance();
-    } else if (target === 'futures') {
-        fetchFutures();
-    }
+    if (target === 'portfolio') { fetchCryptoData(); fetchRecentTransactions(); setTimeout(() => fetchHistory(historyRange.value), 100); }
+    else if (target === 'rebalance') { fetchRebalance(); }
+    else if (target === 'futures') { fetchFutures(); }
 }
-
 async function fetchCryptoData() {
-  loading.value = true;
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_summary`);
+  loading.value = true; const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_summary`);
   if (response && response.ok) {
-    const result = await response.json();
-    if (result.status === 'success') {
-      dashboard.value = result.data.dashboard;
-      holdings.value = result.data.holdings;
-      if (result.data.usdTwdRate) usdTwdRate.value = result.data.usdTwdRate;
+    const result = await response.json(); if (result.status === 'success') {
+      dashboard.value = result.data.dashboard; holdings.value = result.data.holdings; if (result.data.usdTwdRate) usdTwdRate.value = result.data.usdTwdRate;
     }
-  }
-  loading.value = false;
+  } loading.value = false;
 }
-
-// 撈取最近交易
 async function fetchRecentTransactions() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_transactions&limit=20`);
-    if (response && response.ok) {
-        const res = await response.json();
-        if (res.status === 'success') {
-            recentTransactions.value = res.data;
-        }
-    }
+    if (response && response.ok) { const res = await response.json(); if (res.status === 'success') recentTransactions.value = res.data; }
 }
-
 async function fetchHistory(range = '1y') {
-    historyRange.value = range;
-    if (!historyChartCanvas.value) return; 
-    
+    historyRange.value = range; if (!historyChartCanvas.value) return;
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_history&range=${range}`);
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') {
-            renderChart(result.data);
-        }
-    }
+    if (response && response.ok) { const result = await response.json(); if (result.status === 'success') renderChart(result.data); }
 }
-
-// 🟢 [新增] 輔助函式：取得交易類型名稱
-function getTxTypeName(type) {
-    const map = {
-        'buy': '買入', 'sell': '賣出',
-        'deposit': '入金', 'withdraw': '出金',
-        'earn': '收益', 'adjustment': '調整'
-    };
-    return map[type] || type;
-}
-
-// 🟢 [新增] 輔助函式：取得標籤樣式 class
-function getTxBadgeClass(type) {
-    if (['buy', 'deposit', 'earn'].includes(type)) return 'badge-success';
-    if (['sell', 'withdraw'].includes(type)) return 'badge-danger';
-    return 'badge-neutral';
-}
-
+function getTxTypeName(type) { const map = { 'buy': '買入', 'sell': '賣出', 'deposit': '入金', 'withdraw': '出金', 'earn': '收益', 'adjustment': '調整' }; return map[type] || type; }
+function getTxBadgeClass(type) { if (['buy', 'deposit', 'earn'].includes(type)) return 'badge-success'; if (['sell', 'withdraw'].includes(type)) return 'badge-danger'; return 'badge-neutral'; }
 function renderChart(chartData) {
-    if (historyChart) historyChart.destroy();
-    if (!historyChartCanvas.value) return;
-
-    const ctx = historyChartCanvas.value.getContext('2d');
-    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-    const primaryColor = '#2A9D8F'; 
-    gradient.addColorStop(0, primaryColor + '4D'); 
-    gradient.addColorStop(1, primaryColor + '00'); 
-
+    if (historyChart) historyChart.destroy(); if (!historyChartCanvas.value) return;
+    const ctx = historyChartCanvas.value.getContext('2d'); const gradient = ctx.createLinearGradient(0, 0, 0, 400); const primaryColor = '#2A9D8F'; gradient.addColorStop(0, primaryColor + '4D'); gradient.addColorStop(1, primaryColor + '00');
     historyChart = new Chart(historyChartCanvas.value, {
         type: 'line',
-        data: {
-            labels: chartData.labels,
-            datasets: [{
-                label: '總資產 (USD)',
-                data: chartData.data,
-                borderColor: primaryColor, 
-                backgroundColor: gradient,
-                borderWidth: 2,
-                fill: true,
-                pointRadius: 3, // 保持點點顯示
-                pointHoverRadius: 6, // 滑鼠移上去時點點變大
-                pointBackgroundColor: '#ffffff', // 點點中間白色
-                pointBorderColor: primaryColor,  // 點點邊框顏色
-                tension: 0.4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            // 🟢 [新增] 互動模式設定：讓滑鼠不用精準指到點也能觸發
-            interaction: {
-                mode: 'index',   // 只要滑鼠在該 X 軸的區間內就觸發
-                intersect: false, // 不需要游標真的碰到點
-            },
-            plugins: { 
-                legend: { display: false },
-                // 🟢 [關鍵修改] 關閉原本印在圖上的數字
-                datalabels: { 
-                    display: false 
-                },
-                // 🟢 [優化] Tooltip 提示框設定
-                tooltip: { 
-                    enabled: true,
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)', // 背景改白
-                    titleColor: '#333', // 標題深色
-                    bodyColor: '#2A9D8F', // 數值顏色
-                    borderColor: '#ddd',
-                    borderWidth: 1,
-                    padding: 10,
-                    displayColors: false, // 不顯示前面的小色塊
-                    callbacks: { 
-                        // 設定標題顯示日期
-                        title: (tooltipItems) => {
-                            return tooltipItems[0].label;
-                        },
-                        // 設定數值格式 (保留 1 位小數)
-                        label: (ctx) => {
-                            return `USD $ ${numberFormat(ctx.raw, 1)}`; 
-                        } 
-                    } 
-                },
-            },
-            scales: {
-                x: { 
-                    grid: { display: false }, 
-                    ticks: { maxTicksLimit: 6 } 
-                },
-                y: { 
-                    beginAtZero: false, 
-                    grid: { color: '#f0f0f0' }, 
-                    ticks: { callback: (val) => '$' + numberFormat(val, 1) } 
-                }
-            }
-        }
+        data: { labels: chartData.labels, datasets: [{ label: '總資產 (USD)', data: chartData.data, borderColor: primaryColor, backgroundColor: gradient, borderWidth: 2, fill: true, pointRadius: 3, pointHoverRadius: 6, pointBackgroundColor: '#ffffff', pointBorderColor: primaryColor, tension: 0.4 }] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, datalabels: { display: false }, tooltip: { enabled: true, backgroundColor: 'rgba(255, 255, 255, 0.9)', titleColor: '#333', bodyColor: '#2A9D8F', borderColor: '#ddd', borderWidth: 1, padding: 10, displayColors: false, callbacks: { title: (tooltipItems) => tooltipItems[0].label, label: (ctx) => `USD $ ${numberFormat(ctx.raw, 1)}` } } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } }, y: { beginAtZero: false, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => '$' + numberFormat(val, 1) } } } }
     });
 }
-
 async function fetchRebalance() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_rebalancing_advice`);
-    
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') {
-            // 更新再平衡資料
-            rebalanceData.value = {
-                currentUsdtRatio: parseFloat(result.data.current_usdt_ratio || 0),
-                targetRatio: parseFloat(result.data.target_ratio || 10), // 注意：若後端沒回傳值，這裡會變回 10
-                action: result.data.action || 'HOLD',
-                message: result.data.message || '目前配置平衡。'
-            };
-        }
-    }
+    if (response && response.ok) { const result = await response.json(); if (result.status === 'success') { rebalanceData.value = { currentUsdtRatio: parseFloat(result.data.current_usdt_ratio || 0), targetRatio: parseFloat(result.data.target_ratio || 10), action: result.data.action || 'HOLD', message: result.data.message || '目前配置平衡。' }; } }
 }
-
 async function fetchFutures() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_futures_stats`);
-    if (response && response.ok) {
-        const result = await response.json();
-        if (result.status === 'success') {
-            futuresStats.value = result.data;
-        }
-    }
+    if (response && response.ok) { const result = await response.json(); if (result.status === 'success') futuresStats.value = result.data; }
 }
-
-function openTargetModal() {
-    tempTargetRatio.value = rebalanceData.value.targetRatio;
-    isTargetModalOpen.value = true;
-}
-
-// 🟢 [修正] 儲存目標比例後，前端先更新變數 (Optimistic Update)
+function openTargetModal() { tempTargetRatio.value = rebalanceData.value.targetRatio; isTargetModalOpen.value = true; }
 async function saveTargetRatio() {
-    if (tempTargetRatio.value < 0 || tempTargetRatio.value > 100) {
-        alert("比例必須在 0 ~ 100 之間");
-        return;
-    }
+    if (tempTargetRatio.value < 0 || tempTargetRatio.value > 100) { alert("比例必須在 0 ~ 100 之間"); return; }
     saving.value = true;
-    
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=update_crypto_target`, {
-        method: 'POST',
-        body: JSON.stringify({ ratio: tempTargetRatio.value })
-    });
-
-    if (response && response.ok) {
-        const res = await response.json();
-        if (res.status === 'success') {
-            // 🟢 這裡：先直接更新前端顯示，不要等 fetchRebalance
-            rebalanceData.value.targetRatio = tempTargetRatio.value; 
-            
-            isTargetModalOpen.value = false;
-            fetchRebalance(); // 背景再去抓最新的 (作為雙重確認)
-            alert("設定已更新");
-        } else {
-            alert(res.message);
-        }
-    }
-    saving.value = false;
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=update_crypto_target`, { method: 'POST', body: JSON.stringify({ ratio: tempTargetRatio.value }) });
+    if (response && response.ok) { const res = await response.json(); if (res.status === 'success') { rebalanceData.value.targetRatio = tempTargetRatio.value; isTargetModalOpen.value = false; fetchRebalance(); alert("設定已更新"); } else { alert(res.message); } } saving.value = false;
 }
-
-// 🟢 [修正] 4. 修改原本的 openTransactionModal (確保按新增時是乾淨的狀態)
-function openTransactionModal() {
-    if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
-    resetForm(); 
-    isEditingTransaction.value = false; // 確保不是編輯模式
-    editingId.value = null;
-    isModalOpen.value = true; 
-}
+function openTransactionModal() { if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; } resetForm(); isEditingTransaction.value = false; editingId.value = null; isModalOpen.value = true; }
 function closeModal() { isModalOpen.value = false; }
-function switchTab(tabId) { 
-    currentTab.value = tabId; resetForm(); 
-    if (tabId === 'fiat') { form.type = 'deposit'; form.baseCurrency = 'USDT'; form.quoteCurrency = 'TWD'; }
-    else if (tabId === 'trade') { form.type = 'buy'; form.baseCurrency = ''; form.quoteCurrency = 'USDT'; }
-    else { form.type = 'earn'; }
-}
+function switchTab(tabId) { currentTab.value = tabId; resetForm(); if (tabId === 'fiat') { form.type = 'deposit'; form.baseCurrency = 'USDT'; form.quoteCurrency = 'TWD'; } else if (tabId === 'trade') { form.type = 'buy'; form.baseCurrency = ''; form.quoteCurrency = 'USDT'; } else { form.type = 'earn'; } }
 function resetForm() { form.price = null; form.quantity = null; form.total = null; form.fee = null; form.note = ''; form.date = new Date().toISOString().substring(0, 10); }
 function calcTotal() { if (form.price && form.quantity) form.total = parseFloat((form.price * form.quantity).toFixed(4)); }
 function calcQuantity() { if (form.total && form.price > 0) form.quantity = parseFloat((form.total / form.price).toFixed(6)); }
-function alert(msg) { window.alert(msg); } 
-
-function openEditBalanceModal(coin) {
-    editBalanceForm.symbol = coin.symbol;
-    editBalanceForm.current = coin.balance;
-    editBalanceForm.newBalance = coin.balance; 
-    editBalanceForm.date = new Date().toISOString().substring(0, 10); 
-    
-    // 辨識來源
-    editBalanceForm.type = coin.type; 
-    editBalanceForm.name = coin.name; // 用於 API 識別
-
-    isEditBalanceOpen.value = true;
-}
-
+function alert(msg) { window.alert(msg); }
+function openEditBalanceModal(coin) { editBalanceForm.symbol = coin.symbol; editBalanceForm.current = coin.balance; editBalanceForm.newBalance = coin.balance; editBalanceForm.date = new Date().toISOString().substring(0, 10); editBalanceForm.type = coin.type; editBalanceForm.name = coin.name; isEditBalanceOpen.value = true; }
 function closeEditModal() { isEditBalanceOpen.value = false; }
-
 async function submitBalanceAdjustment() {
-    // 1. 處理靜態帳戶 (type === 'account')
     if (editBalanceForm.type === 'account') {
         if (!confirm(`確定要更新帳戶 [${editBalanceForm.name}] 的餘額為 ${editBalanceForm.newBalance} 嗎？`)) return;
-        
-        // 呼叫 save_account API (復用 AccountManagerView 的邏輯)
-        const payload = {
-            name: editBalanceForm.name,
-            balance: editBalanceForm.newBalance,
-            type: 'Investment', // 或根據幣種自動判斷
-            currency: editBalanceForm.symbol,
-            date: editBalanceForm.date,
-            ledger_id: props.ledgerId // 確保帶上當前帳本 ID
-        };
-
-        const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok) {
-            const res = await response.json();
-            if (res.status === 'success') {
-                closeEditModal();
-                fetchCryptoData(); // 重新整理列表
-                alert('帳戶快照已更新！');
-            } else { alert('失敗：' + res.message); }
-        }
-        return;
+        const payload = { name: editBalanceForm.name, balance: editBalanceForm.newBalance, type: 'Investment', currency: editBalanceForm.symbol, date: editBalanceForm.date, ledger_id: props.ledgerId }; // 注意：props.ledgerId 需確認來源
+        const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { method: 'POST', body: JSON.stringify(payload) });
+        if (response && response.ok) { const res = await response.json(); if (res.status === 'success') { closeEditModal(); fetchCryptoData(); alert('帳戶快照已更新！'); } else { alert('失敗：' + res.message); } } return;
     }
-
-    // 2. 處理交易推算帳戶 (type === 'trade') - 維持原有補差額邏輯
     if (!confirm(`確定要校正 ${editBalanceForm.symbol} (Trading) 的餘額嗎？系統將自動新增一筆校正交易。`)) return;
-    
-    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=adjust_crypto_balance`, {
-        method: 'POST',
-        body: JSON.stringify({ 
-            symbol: editBalanceForm.symbol, 
-            new_balance: parseFloat(editBalanceForm.newBalance),
-            date: editBalanceForm.date
-        })
-    });
-    if (response && response.ok) {
-        const res = await response.json();
-        if (res.status === 'success') {
-            closeEditModal();
-            fetchCryptoData(); 
-            fetchHistory(historyRange.value); 
-            fetchRecentTransactions(); 
-            alert('快照已更新！');
-        } else { alert('失敗：' + res.message); }
-    }
+    const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=adjust_crypto_balance`, { method: 'POST', body: JSON.stringify({ symbol: editBalanceForm.symbol, new_balance: parseFloat(editBalanceForm.newBalance), date: editBalanceForm.date }) });
+    if (response && response.ok) { const res = await response.json(); if (res.status === 'success') { closeEditModal(); fetchCryptoData(); fetchHistory(historyRange.value); fetchRecentTransactions(); alert('快照已更新！'); } else { alert('失敗：' + res.message); } }
 }
-
 async function submitTransaction() {
   const payload = { ...form };
-  
-  // 自動計算邏輯 (輔助)
-  if (currentTab.value === 'fiat') {
-    if (!payload.price && payload.quantity > 0) payload.price = (payload.total / payload.quantity);
-    payload.baseCurrency = 'USDT'; payload.quoteCurrency = 'TWD';
-  } else if (currentTab.value === 'trade') {
-    payload.baseCurrency = form.baseCurrency.toUpperCase(); payload.quoteCurrency = form.quoteCurrency.toUpperCase();
-  } else { 
-    payload.baseCurrency = form.baseCurrency.toUpperCase(); 
-  }
-
-  // 判斷是新增還是更新
-  let url = `${window.API_BASE_URL}?action=add_crypto_transaction`;
-  if (isEditingTransaction.value) {
-      url = `${window.API_BASE_URL}?action=update_crypto_transaction`;
-      payload.id = editingId.value; // 帶上 ID
-  }
-
+  if (currentTab.value === 'fiat') { if (!payload.price && payload.quantity > 0) payload.price = (payload.total / payload.quantity); payload.baseCurrency = 'USDT'; payload.quoteCurrency = 'TWD'; } else if (currentTab.value === 'trade') { payload.baseCurrency = form.baseCurrency.toUpperCase(); payload.quoteCurrency = form.quoteCurrency.toUpperCase(); } else { payload.baseCurrency = form.baseCurrency.toUpperCase(); }
+  let url = `${window.API_BASE_URL}?action=add_crypto_transaction`; if (isEditingTransaction.value) { url = `${window.API_BASE_URL}?action=update_crypto_transaction`; payload.id = editingId.value; }
   const response = await fetchWithLiffToken(url, { method: 'POST', body: JSON.stringify(payload) });
-  if (response && response.ok) {
-    const res = await response.json();
-    if (res.status === 'success') {
-        closeModal(); 
-        fetchCryptoData(); 
-        fetchHistory(historyRange.value); 
-        fetchRecentTransactions(); 
-        alert(isEditingTransaction.value ? '更新成功' : '紀錄成功');
-    } else { alert('失敗：' + res.message); }
-  } else { alert('網路錯誤'); }
+  if (response && response.ok) { const res = await response.json(); if (res.status === 'success') { closeModal(); fetchCryptoData(); fetchHistory(historyRange.value); fetchRecentTransactions(); alert(isEditingTransaction.value ? '更新成功' : '紀錄成功'); } else { alert('失敗：' + res.message); } } else { alert('網路錯誤'); }
 }
-
-onMounted(() => { 
-    fetchCryptoData();
-    setTimeout(() => fetchHistory(), 100);
-    fetchRecentTransactions();
-});
+onMounted(() => { fetchCryptoData(); setTimeout(() => fetchHistory(), 100); fetchRecentTransactions(); });
 </script>
 
 <style scoped>
@@ -984,7 +624,6 @@ onMounted(() => {
 .section-header h3 { font-size: 1.1rem; color: #555; margin: 0; }
 .add-btn { background: #d4a373; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; box-shadow: 0 2px 6px rgba(212, 163, 115, 0.3); cursor: pointer; }
 
-/* 🟢 [修改] 列表卡片樣式優化，統一風格 */
 .coin-list { display: flex; flex-direction: column; gap: 12px; }
 
 .account-card-style {
@@ -1001,7 +640,6 @@ onMounted(() => {
 
 .card-left { display: flex; flex-direction: column; gap: 6px; }
 
-/* 🟢 [修改] 標題字體加大 */
 .acc-name {
     font-size: 1.1rem; 
     font-weight: 700; 
@@ -1011,7 +649,6 @@ onMounted(() => {
 
 .acc-meta { display: flex; align-items: center; gap: 8px; }
 
-/* 🟢 [修改] 標籤樣式調整 */
 .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; font-weight: 600; }
 
 /* 交易類型標籤配色 */
@@ -1038,7 +675,6 @@ onMounted(() => {
 
 .acc-balance { font-weight: 700; font-size: 1rem; text-align: right; }
 
-/* 🟢 [新增] 大字號金額樣式 */
 .large-balance {
     font-size: 1.2rem;
     font-weight: 800;
@@ -1049,14 +685,12 @@ onMounted(() => {
 .pill-btn { font-size: 0.75rem; padding: 4px 10px; border-radius: 10px; border: none; cursor: pointer; margin-top: 4px; }
 .pill-btn.update-crypto { background: #f0f0f0; color: #666; }
 
-/* 🟢 [新增] 文字按鈕區塊 */
 .action-buttons-text {
     display: flex;
     gap: 12px; /* 按鈕間距 */
     margin-top: 4px;
 }
 
-/* 🟢 [新增] 文字連結按鈕樣式 */
 .text-link {
     background: none;
     border: none;
@@ -1123,5 +757,117 @@ onMounted(() => {
   background: white; border: 1px solid #ddd; border-radius: 50%;
   width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; font-size: 1.1rem;
+}
+
+/* --- 🟢 1. 已實現損益微型膠囊樣式 --- */
+.pnl-capsule-row {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.pnl-capsule {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08); /* 半透明背景 */
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem; /* 字體縮小 */
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cap-label {
+  color: #888;
+  margin-right: 4px;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.cap-val {
+  font-weight: 600;
+}
+
+/* 微型字體顏色 */
+.text-profit-xs { color: #2ecc71; }
+.text-loss-xs { color: #e74c3c; }
+
+
+/* --- 🟢 2. 再平衡 (Rebalance) 統一風格樣式 --- */
+.text-neutral { color: #aaa; }
+
+.rebalance-visual-box {
+  padding: 10px 5px;
+}
+
+.progress-bar-group {
+  position: relative;
+  margin-bottom: 20px;
+  margin-top: 10px;
+}
+
+.progress-bar-container {
+  height: 20px; /* 稍微變細，更精緻 */
+  background-color: #2c3e50;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.bar-fill {
+  height: 100%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.bg-low { background-color: #e74c3c; } /* 現金太少 (紅) -> 該賣幣 */
+.bg-high { background-color: #2ecc71; } /* 現金太多 (綠) -> 該買幣 (或反之，視您邏輯) */
+.bg-normal { background-color: #3498db; } /* 正常 */
+
+.target-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: #f1c40f; /* 亮黃色目標線 */
+  z-index: 10;
+  box-shadow: 0 0 8px rgba(241, 196, 15, 0.6);
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: #666;
+  position: relative;
+  height: 15px;
+}
+
+.p-target {
+  position: absolute;
+  transform: translateX(-50%);
+  color: #f1c40f;
+  font-weight: bold;
+}
+
+.advice-card {
+  background-color: rgba(44, 62, 80, 0.5);
+  border-radius: 8px;
+  padding: 12px;
+  border-left: 3px solid #3498db;
+}
+
+.advice-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.advice-msg {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #eee;
+  line-height: 1.4;
 }
 </style>
