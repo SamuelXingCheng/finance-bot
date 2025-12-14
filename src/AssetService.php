@@ -38,106 +38,92 @@ class AssetService {
      * 修正重點 1: 解決 SQL 參數重複錯誤 (ledgerId1, ledgerId2)
      * 修正重點 2: 確保新帳戶即使是補登過去日期的資料，也會被建立
      */
+    // src/AssetService.php
+
     public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null, ?int $ledgerId = null, ?float $customRate = null): bool {
+        
+        // Debug Log (這行留著幫你除錯)
         error_log("🔍 Debug AssetService: Name={$name}, RateInput=" . var_export($customRate, true));
+        
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d');
-        
         $currentTime = date('Y-m-d H:i:s');
     
-        try {
+        // 🟢 【關鍵修正】智慧判斷：如果外面已經開了交易，我就不開！
+        $shouldStartTransaction = !$this->pdo->inTransaction();
+
+        if ($shouldStartTransaction) {
             $this->pdo->beginTransaction();
+        }
     
-            // 🟢 1. [新增] 查詢該帳戶目前歷史紀錄中「最新的日期」
-            // 用途：判斷是否需要更新主列表的餘額 (只有當 日期 >= 最新歷史紀錄 時才更新)
+        try {
+            // ... (中間的邏輯省略，你可以保留原本的內容，或複製下面的完整版) ...
+            // 為了確保你複製正確，我把中間省略的邏輯補齊在下面：
+
+            // 1. 查詢最新日期
             $maxDateSql = "SELECT MAX(snapshot_date) FROM account_balance_history WHERE user_id = :userId AND account_name = :name";
             $stmtMax = $this->pdo->prepare($maxDateSql);
             $stmtMax->execute([':userId' => $userId, ':name' => $name]);
-            // 如果沒有歷史紀錄，預設為 '0000-00-00'
             $latestHistoryDate = $stmtMax->fetchColumn() ?: '0000-00-00';
-    
             $shouldUpdateMainAccount = ($date >= $latestHistoryDate);
     
-            // 🟢 2. [補回遺失的段落] 檢查帳戶是否存在
+            // 2. 檢查帳戶並更新 accounts 表
             $checkSql = "SELECT id FROM accounts WHERE user_id = :userId AND name = :name";
-            $stmtCheck = $this->pdo->prepare($checkSql); // <--- 這行之前可能漏了
-            $stmtCheck->execute([':userId' => $userId, ':name' => $name]); // <--- 這行之前可能漏了
+            $stmtCheck = $this->pdo->prepare($checkSql);
+            $stmtCheck->execute([':userId' => $userId, ':name' => $name]);
             $existingId = $stmtCheck->fetchColumn();
     
             if (!$existingId) {
-                // 新帳戶：直接新增 (Insert)
                 $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
                               VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :time)";
                 $stmtInsert = $this->pdo->prepare($insertSql);
                 $stmtInsert->execute([
-                    ':userId' => $userId,
-                    ':ledgerId' => $ledgerId,
-                    ':name' => $name,
-                    ':type' => $assetType,
-                    ':balance' => $balance,
-                    ':unit' => strtoupper($currencyUnit),
-                    ':time' => $currentTime
+                    ':userId' => $userId, ':ledgerId' => $ledgerId, ':name' => $name,
+                    ':type' => $assetType, ':balance' => $balance, ':unit' => strtoupper($currencyUnit), ':time' => $currentTime
                 ]);
             } else {
-                // 舊帳戶：只有當這筆資料是「最新」的時候，才更新主表 (Update)
                 if ($shouldUpdateMainAccount) {
-                    $updateSql = "UPDATE accounts SET 
-                                  ledger_id = :ledgerId, 
-                                  type = :type, 
-                                  balance = :balance, 
-                                  currency_unit = :unit, 
-                                  last_updated_at = :time 
-                                  WHERE id = :id";
+                    $updateSql = "UPDATE accounts SET ledger_id = :ledgerId, type = :type, balance = :balance, 
+                                  currency_unit = :unit, last_updated_at = :time WHERE id = :id";
                     $stmtUpdate = $this->pdo->prepare($updateSql);
                     $stmtUpdate->execute([
-                        ':ledgerId' => $ledgerId,
-                        ':type' => $assetType,
-                        ':balance' => $balance,
-                        ':unit' => strtoupper($currencyUnit),
-                        ':time' => $currentTime,
-                        ':id' => $existingId
+                        ':ledgerId' => $ledgerId, ':type' => $assetType, ':balance' => $balance,
+                        ':unit' => strtoupper($currencyUnit), ':time' => $currentTime, ':id' => $existingId
                     ]);
                 }
             }
     
-            // 3. 寫入歷史紀錄 (這部分保持原本的邏輯)
-            
-            // 先刪除當天舊紀錄，避免重複
-            $sqlDelHistory = "DELETE FROM account_balance_history  
-                              WHERE user_id = :userId 
-                              AND account_name = :name 
-                              AND snapshot_date = :date 
-                              AND (ledger_id = :ledgerId1 OR (ledger_id IS NULL AND :ledgerId2 IS NULL))";
-            
+            // 3. 寫入 account_balance_history
+            $sqlDelHistory = "DELETE FROM account_balance_history WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date AND (ledger_id = :ledgerId1 OR (ledger_id IS NULL AND :ledgerId2 IS NULL))";
             $stmtDel = $this->pdo->prepare($sqlDelHistory);
-            $stmtDel->execute([
-                ':userId' => $userId, 
-                ':name' => $name, 
-                ':date' => $date, 
-                ':ledgerId1' => $ledgerId,
-                ':ledgerId2' => $ledgerId
-            ]);
+            $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date, ':ledgerId1' => $ledgerId, ':ledgerId2' => $ledgerId]);
     
-            // 插入新紀錄
             $sqlHistory = "INSERT INTO account_balance_history (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, snapshot_date)
                            VALUES (:userId, :ledgerId, :name, :balance, :unit, :rate, :date)";
             $stmtHist = $this->pdo->prepare($sqlHistory);
             $stmtHist->execute([
-                ':userId' => $userId,
-                ':ledgerId' => $ledgerId,
-                ':name' => $name,
-                ':balance' => $balance,
-                ':unit' => strtoupper($currencyUnit),
-                ':rate' => $customRate,
-                ':date' => $date
+                ':userId' => $userId, ':ledgerId' => $ledgerId, ':name' => $name,
+                ':balance' => $balance, ':unit' => strtoupper($currencyUnit), ':rate' => $customRate, ':date' => $date
             ]);
     
-            $this->pdo->commit();
+            // 🟢 【關鍵修正】只有「我自己開的」交易，我才 Commit
+            if ($shouldStartTransaction) {
+                $this->pdo->commit();
+            }
             return true;
     
         } catch (PDOException $e) {
-            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            // 🟢 【關鍵修正】只有「我自己開的」交易，我才 Rollback
+            if ($shouldStartTransaction) {
+                if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            }
+            
             error_log("AssetService UPSERT failed: " . $e->getMessage());
+            
+            // 🔥 重要：如果是被外部呼叫，必須把錯誤丟出去，讓外面的人知道失敗了！
+            if (!$shouldStartTransaction) {
+                throw $e; 
+            }
             return false;
         }
     }

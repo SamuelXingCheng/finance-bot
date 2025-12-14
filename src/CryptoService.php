@@ -147,15 +147,15 @@ class CryptoService {
 
     /**
      * 🟢 [核心] 處理交易並更新庫存狀態 (WAC 平均成本法)
-     * 這會取代原本單純的 insert，加入邏輯運算
+     * 包含完整的交易鎖定 (Locking) 與 SQL 參數修正
      */
     public function addTransaction(int $userId, array $data): bool {
-        // 1. 基本資料整理
-        $type = $data['type'] ?? ''; // buy, sell, deposit, withdraw
-        $base = strtoupper($data['baseCurrency'] ?? '');
+        // 1. 基本資料整理與防呆
+        $type = strtolower($data['type'] ?? ''); // buy, sell, deposit, withdraw
+        $base = strtoupper($data['baseCurrency'] ?? ''); // BTC, ETH
         $quote = strtoupper($data['quoteCurrency'] ?? 'USDT');
         $price = (float)($data['price'] ?? 0);
-        $qty = (float)($data['quantity'] ?? 0);
+        $qty = abs((float)($data['quantity'] ?? 0)); // 強制轉正數，避免負負得正
         $fee = (float)($data['fee'] ?? 0);
         $date = $data['date'] ?? date('Y-m-d H:i:s');
         $note = $data['note'] ?? '';
@@ -163,19 +163,27 @@ class CryptoService {
         // 匯率處理 (若非 USDT 交易，需換算成 USD 成本)
         $exchangeRateUsd = array_key_exists('exchange_rate_usd', $data) ? (float)$data['exchange_rate_usd'] : 1.0;
         
-        // 計算總金額 (Total)
+        // 計算總金額 (Total) - 如果前端沒傳 total，就自己算
         $total = (float)($data['total'] ?? ($price * $qty));
 
-        // 防重複檢查 (保留你原本的邏輯)
-        if ($this->checkDuplicate($userId, $type, $base, $quote, $qty, $date)) {
-            return true;
+        // 簡單防呆
+        if ($qty <= 0) {
+            error_log("Transaction Error: Quantity must be greater than 0");
+            return false;
         }
 
         try {
+            // 🔥 開啟交易 (Transaction Start)
             $this->pdo->beginTransaction();
 
-            // 2. 獲取當前持倉狀態 (Inventory)
-            $holding = $this->getHolding($userId, $base);
+            // 2. 獲取當前持倉狀態 (Inventory) 
+            // 🔥 關鍵修正：加上 FOR UPDATE 鎖定這行資料，防止併發寫入時算錯
+            $sqlGet = "SELECT quantity, avg_cost FROM crypto_holdings 
+                       WHERE user_id = :uid AND currency = :base FOR UPDATE";
+            $stmtGet = $this->pdo->prepare($sqlGet);
+            $stmtGet->execute([':uid' => $userId, ':base' => $base]);
+            $holding = $stmtGet->fetch(PDO::FETCH_ASSOC);
+
             $currentQty = (float)($holding['quantity'] ?? 0);
             $currentAvgCost = (float)($holding['avg_cost'] ?? 0);
 
@@ -184,7 +192,8 @@ class CryptoService {
             $newAvgCost = $currentAvgCost;
 
             // 3. 根據類型執行 FIFO/WAC 邏輯
-            $costBasisUsd = ($total * $exchangeRateUsd); // 這次交易的總成本 (USD)
+            // 計算這次交易的「美金總成本/價值」
+            $costBasisUsd = ($total * $exchangeRateUsd); 
 
             switch ($type) {
                 case 'buy':
@@ -198,29 +207,40 @@ class CryptoService {
                     break;
 
                 case 'sell':
-                    // === 賣出：計算損益，成本不變 ===
+                    // === 賣出：計算損益，成本單價不變 ===
+                    // 防呆：不能賣超過持有的數量
+                    if ($currentQty < $qty) {
+                        throw new Exception("Insufficient balance to sell. Have: $currentQty, Try to sell: $qty");
+                    }
+
                     $newQty = $currentQty - $qty;
                     
                     // 計算已實現損益 (USD)
-                    // 獲利 = (賣出總價USD - (賣出數量 * 平均成本))
-                    $revenueUsd = $costBasisUsd; // 這裡的 costBasis 其實是賣出的回收金額
+                    // 獲利 = (賣出總回收價值USD - (賣出數量 * 平均成本))
+                    $revenueUsd = $costBasisUsd; 
                     $costOfSold = $qty * $currentAvgCost;
                     $realizedPnl = $revenueUsd - $costOfSold;
                     
-                    // 賣出不影響剩餘幣的單位成本，只減少數量
+                    // 賣出不影響剩餘幣的「單位成本」，只減少數量
                     break;
 
                 case 'deposit':
                     // === 入金/轉入 ===
-                    // 若是法幣(TWD/USD)，不影響 crypto_holdings，只影響淨入金計算
-                    // 若是加密貨幣轉入 (如從冷錢包)，視為庫存增加
+                    // 排除法幣 (TWD/USD)，只處理加密貨幣庫存
                     if ($base && $base !== 'TWD' && $base !== 'USD') {
                         $newQty = $currentQty + $qty;
-                        // 策略 A：冷錢包轉入視為成本不變 (稀釋均價? 還是繼承?)
-                        // 這裡採用簡單做法：若使用者有輸入 Price，則視為買入更新成本；若 Price=0，則僅增加數量 (均價會被稀釋，類似空投)
+                        
+                        // 若使用者有輸入 Price (例如從別處買入轉過來)，則更新成本
+                        // 若 Price=0 (例如空投)，則只加數量，平均成本會被稀釋
                         if ($costBasisUsd > 0) {
                             $oldTotalCost = $currentQty * $currentAvgCost;
                             $newAvgCost = ($oldTotalCost + $costBasisUsd) / $newQty;
+                        } else {
+                            // 成本不變，數量變多 -> 均價下降 (稀釋)
+                            if ($newQty > 0) {
+                                $oldTotalCost = $currentQty * $currentAvgCost;
+                                $newAvgCost = $oldTotalCost / $newQty;
+                            }
                         }
                     }
                     break;
@@ -228,36 +248,76 @@ class CryptoService {
                 case 'withdraw':
                     // === 提領/轉出 ===
                     if ($base && $base !== 'TWD' && $base !== 'USD') {
+                        // 檢查餘額
+                        if ($currentQty < $qty) {
+                             // 這裡看你要報錯還是允許變成負數，通常建議報錯
+                             // throw new Exception("Insufficient balance to withdraw");
+                        }
                         $newQty = $currentQty - $qty;
-                        // 轉出視為資產移動，不產生損益，成本維持不變
+                        // 轉出視為資產移動，不產生損益，單位成本維持不變
                     }
                     break;
             }
 
-            // 4. 寫入交易紀錄 (包含算好的 realized_pnl)
+            // 4. 寫入交易紀錄 (crypto_transactions)
+            // 🔥 修正：SQL 參數與 Execute 陣列完全對應
             $sqlTx = "INSERT INTO crypto_transactions 
                       (user_id, type, base_currency, quote_currency, price, quantity, total, fee, realized_pnl, transaction_date, note, exchange_rate_usd, created_at)
-                      VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :pnl, :note, :rate, NOW())";
+                      VALUES (:uid, :type, :base, :quote, :price, :qty, :total, :fee, :pnl, :date, :note, :rate, NOW())";
             
             $stmtTx = $this->pdo->prepare($sqlTx);
             $stmtTx->execute([
-                ':uid' => $userId, ':type' => $type, ':base' => $base, ':quote' => $quote,
-                ':price' => $price, ':qty' => $qty, ':total' => $total, ':fee' => $fee,
-                ':pnl' => $realizedPnl, ':note' => $note, ':rate' => $exchangeRateUsd
+                ':uid' => $userId, 
+                ':type' => $type, 
+                ':base' => $base, 
+                ':quote' => $quote,
+                ':price' => $price, 
+                ':qty' => $qty, 
+                ':total' => $total, 
+                ':fee' => $fee,
+                ':pnl' => $realizedPnl,
+                ':date' => $date, // 修正：這裡對應 SQL 的 :transaction_date (變數名改 :date 比較一致)
+                ':note' => $note, 
+                ':rate' => $exchangeRateUsd
             ]);
 
-            // 5. 更新持倉表 (Upsert)
+            // 5. 更新持倉表 (Upsert: 有就更新，沒有就新增)
+            // 排除法幣，確保只更新 Crypto 資產
             if ($base && $base !== 'TWD' && $base !== 'USD') {
-                $this->updateHolding($userId, $base, $newQty, $newAvgCost);
+                // 如果賣光了 (數量接近 0)，為了美觀可以把成本歸零，或者刪除該行
+                if ($newQty <= 0.00000001) {
+                    $newQty = 0;
+                    $newAvgCost = 0;
+                }
+
+                $sqlUpsert = "INSERT INTO crypto_holdings (user_id, currency, quantity, avg_cost, updated_at)
+                              VALUES (:uid, :base, :qty, :cost, NOW())
+                              ON DUPLICATE KEY UPDATE 
+                              quantity = VALUES(quantity), 
+                              avg_cost = VALUES(avg_cost), 
+                              updated_at = NOW()";
+                
+                $stmtUpsert = $this->pdo->prepare($sqlUpsert);
+                $stmtUpsert->execute([
+                    ':uid' => $userId,
+                    ':base' => $base,
+                    ':qty' => $newQty,
+                    ':cost' => $newAvgCost
+                ]);
             }
 
+            // 全部成功，提交！
             $this->pdo->commit();
+            $this->captureSnapshot($userId);
             return true;
 
         } catch (Exception $e) {
+            // 發生錯誤，回滾所有操作
             if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             error_log("Add Transaction Failed: " . $e->getMessage());
-            return false;
+            // 建議：開發階段可以 throw $e 出來看詳細錯誤，上線後再 return false
+             throw $e; 
+            // return false;
         }
     }
 
@@ -410,25 +470,21 @@ class CryptoService {
     }
 
     /**
-     * 🟢 [新增] 執行資產快照 (Capture Snapshot)
-     * 將當下的總資產價值、投入成本、損益存入 crypto_snapshots 表
+     * 🟢 [核心修正] 執行資產快照 (Capture Snapshot)
+     * 同時寫入 crypto_snapshots (總覽) 與 account_balance_history (明細)
      */
     public function captureSnapshot(int $userId): bool {
         // 1. 取得當前儀表板數據 (這是最準確的當下狀態)
         $data = $this->getDashboardData($userId);
         
         $dashboard = $data['dashboard'];
-        $usdTwdRate = $data['usdTwdRate']; // 匯率
+        $holdings = $data['holdings']; // 🟢 取得持倉明細
+        $usdTwdRate = $data['usdTwdRate'];
         
-        // 2. 數據整理 (統一換算成 TWD 儲存，方便畫圖)
-        // 注意：getDashboardData 回傳的 totalUsd 是美金，totalInvestedTwd 是台幣
+        // 2. 數據整理 (總覽部分)
         $totalValueUsd = $dashboard['totalUsd'];
-        $totalCostTwd = $dashboard['totalInvestedTwd'];
-        
-        // 換算總市值為 TWD
+        $totalCostTwd = $dashboard['netInvestedTwd']; // 建議用淨投入 (Net Invested)
         $totalValueTwd = $totalValueUsd * $usdTwdRate;
-        
-        // 計算 TWD 損益
         $pnlTwd = $totalValueTwd - $totalCostTwd;
 
         // 準備明細 JSON (備查用)
@@ -441,29 +497,61 @@ class CryptoService {
                     'qty' => $h['balance'],
                     'value_usd' => $h['valueUsd']
                 ];
-            }, $data['holdings'])
+            }, $holdings)
         ];
 
-        // 3. 寫入資料庫
-        $sql = "INSERT INTO crypto_snapshots 
-                (user_id, total_value_twd, total_cost_twd, pnl, details_json, created_at)
-                VALUES (:uid, :val, :cost, :pnl, :json, NOW())";
-        
         try {
+            $this->pdo->beginTransaction(); // 🟢 開啟交易，確保兩邊寫入一致
+
+            // A. 寫入 crypto_snapshots (總資產快照表 - 保持原有機制)
+            $sql = "INSERT INTO crypto_snapshots 
+                    (user_id, total_value_twd, total_cost_twd, pnl, details_json, created_at)
+                    VALUES (:uid, :val, :cost, :pnl, :json, NOW())";
+            
             $stmt = $this->pdo->prepare($sql);
-            return $stmt->execute([
+            $stmt->execute([
                 ':uid' => $userId,
                 ':val' => $totalValueTwd,
                 ':cost' => $totalCostTwd,
                 ':pnl' => $pnlTwd,
                 ':json' => json_encode($details, JSON_UNESCAPED_UNICODE)
             ]);
+
+            // B. 🔥 [新增] 同步寫入 account_balance_history (通用資產歷史表)
+            // 讓 CryptoService::getHistoryChartData 有資料可讀
+            
+            require_once __DIR__ . '/AssetService.php'; // 確保載入
+            $assetService = new AssetService($this->pdo);
+            $snapshotDate = date('Y-m-d');
+
+            foreach ($holdings as $h) {
+                // 只記錄有餘額的幣種
+                if ($h['balance'] > 0) {
+                    // 呼叫 AssetService 的標準存檔功能
+                    // 這裡我們傳入 USD 現價作為 custom_rate，以便 CryptoService 畫圖時能還原成 USD 價值
+                    $assetService->upsertAccountBalance(
+                        $userId,
+                        "Crypto-" . $h['symbol'],  // 帳戶名稱 (如: Crypto-BTC)
+                        (float)$h['balance'],      // 餘額 (顆數)
+                        'Investment',              // 類型
+                        $h['symbol'],              // 幣別 (BTC, ETH...)
+                        $snapshotDate,             // 日期
+                        null,                      // ledger_id (個人資產通常為 null)
+                        (float)$h['currentPrice']  // 🟢 關鍵：傳入當下 USD 匯率
+                    );
+                }
+            }
+
+            $this->pdo->commit();
+            return true;
+
         } catch (PDOException $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             error_log("Snapshot Failed: " . $e->getMessage());
             return false;
         }
     }
-    
+
     // --- 輔助函式 ---
 
     private function getHolding($userId, $currency) {

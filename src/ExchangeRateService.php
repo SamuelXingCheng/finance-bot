@@ -192,7 +192,7 @@ class ExchangeRateService {
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
         
         // 模擬瀏覽器 User Agent 避免被擋
-        $headers[] = 'User-Agent: Finbot/2.0';
+        $headers[] = 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
         $response = curl_exec($ch);
