@@ -2,6 +2,7 @@
 // src/CryptoService.php
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/ExchangeRateService.php';
+require_once __DIR__ . '/AssetService.php'; // 確保載入 AssetService
 
 class CryptoService {
     private $pdo;
@@ -283,28 +284,28 @@ class CryptoService {
 
             // 5. 更新持倉表 (Upsert: 有就更新，沒有就新增)
             // 排除法幣，確保只更新 Crypto 資產
-            if ($base && $base !== 'TWD' && $base !== 'USD') {
-                // 如果賣光了 (數量接近 0)，為了美觀可以把成本歸零，或者刪除該行
-                if ($newQty <= 0.00000001) {
-                    $newQty = 0;
-                    $newAvgCost = 0;
-                }
+            // if ($base && $base !== 'TWD' && $base !== 'USD') {
+            //     // 如果賣光了 (數量接近 0)，為了美觀可以把成本歸零，或者刪除該行
+            //     if ($newQty <= 0.00000001) {
+            //         $newQty = 0;
+            //         $newAvgCost = 0;
+            //     }
 
-                $sqlUpsert = "INSERT INTO crypto_holdings (user_id, currency, quantity, avg_cost, updated_at)
-                              VALUES (:uid, :base, :qty, :cost, NOW())
-                              ON DUPLICATE KEY UPDATE 
-                              quantity = VALUES(quantity), 
-                              avg_cost = VALUES(avg_cost), 
-                              updated_at = NOW()";
+            //     $sqlUpsert = "INSERT INTO crypto_holdings (user_id, currency, quantity, avg_cost, updated_at)
+            //                   VALUES (:uid, :base, :qty, :cost, NOW())
+            //                   ON DUPLICATE KEY UPDATE 
+            //                   quantity = VALUES(quantity), 
+            //                   avg_cost = VALUES(avg_cost), 
+            //                   updated_at = NOW()";
                 
-                $stmtUpsert = $this->pdo->prepare($sqlUpsert);
-                $stmtUpsert->execute([
-                    ':uid' => $userId,
-                    ':base' => $base,
-                    ':qty' => $newQty,
-                    ':cost' => $newAvgCost
-                ]);
-            }
+            //     $stmtUpsert = $this->pdo->prepare($sqlUpsert);
+            //     $stmtUpsert->execute([
+            //         ':uid' => $userId,
+            //         ':base' => $base,
+            //         ':qty' => $newQty,
+            //         ':cost' => $newAvgCost
+            //     ]);
+            // }
 
             // 全部成功，提交！
             $this->pdo->commit();
@@ -322,81 +323,176 @@ class CryptoService {
     }
 
     /**
-     * 🟢 [新版] 極速儀表板 (直接讀取狀態表)
+     * 🟢 [最終隔離版] 儀表板數據：
+     * 1. 交易績效 (Trading PnL): 純粹依賴 BUY/SELL 交易紀錄 (淨流出法)。
+     * 2. 資產盈餘 (Asset Surplus): 純粹依賴 Holdings 餘額快照 (與交易獨立)。
      */
     public function getDashboardData(int $userId): array {
-        // 1. 取得所有持倉 (來自 crypto_holdings)
+        
+        error_log("🚀 [Debug] 開始計算使用者 {$userId} 的 Dashboard 數據 (資產/交易隔離模式)...");
+
+        // ==========================================
+        // 1. [資產面] 取得持倉 (用於計算總現值)
+        //    (此數據來自快照，而非交易自動更新)
+        // ==========================================
         $sqlHoldings = "SELECT * FROM crypto_holdings WHERE user_id = :uid AND quantity > 0";
         $stmt = $this->pdo->prepare($sqlHoldings);
         $stmt->execute([':uid' => $userId]);
         $holdings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // 2. 取得統計數據 (總入金、總已實現損益) - 這邊改用 SQL 聚合查詢，飛快！
-        $sqlStats = "SELECT 
+        // ==========================================
+        // 2. [資金面] 取得淨入金 (用於計算資產盈餘)
+        // ==========================================
+        $sqlNetInvest = "SELECT 
             SUM(CASE WHEN type = 'deposit' AND base_currency = 'TWD' THEN quantity ELSE 0 END) -
-            SUM(CASE WHEN type = 'withdraw' AND base_currency = 'TWD' THEN quantity ELSE 0 END) as net_twd_invested,
-            SUM(realized_pnl) as total_realized_pnl
+            SUM(CASE WHEN type = 'withdraw' AND base_currency = 'TWD' THEN quantity ELSE 0 END) as net_twd_invested
             FROM crypto_transactions WHERE user_id = :uid";
         
-        $stmtStats = $this->pdo->prepare($sqlStats);
-        $stmtStats->execute([':uid' => $userId]);
-        $stats = $stmtStats->fetch(PDO::FETCH_ASSOC);
-
-        $netInvestedTwd = (float)($stats['net_twd_invested'] ?? 0);
-        $totalRealizedPnlUsd = (float)($stats['total_realized_pnl'] ?? 0);
+        $stmtInvest = $this->pdo->prepare($sqlNetInvest);
+        $stmtInvest->execute([':uid' => $userId]);
+        $netInvestedTwd = (float)($stmtInvest->fetchColumn() ?? 0);
         
         $usdTwdRate = $this->rateService->getUsdTwdRate();
         $netInvestedUsd = ($usdTwdRate > 0) ? ($netInvestedTwd / $usdTwdRate) : 0;
 
-        $portfolio = [];
-        $totalAssetsUsd = 0;
+        error_log("💰 [資金] 淨入金(TWD): " . number_format($netInvestedTwd) . " / (USD): " . number_format($netInvestedUsd));
 
-        // 3. 組合數據
-        foreach ($holdings as $h) {
-            $sym = $h['currency'];
-            $qty = (float)$h['quantity'];
-            $avgCost = (float)$h['avg_cost']; // 平均成本 (USD)
+        // ==========================================
+        // 3. [交易面] 取得交易流水統計 (用於計算交易績效)
+        //    *** 修改點: 僅計算以法幣/穩定幣報價的交易 (假設為 USDT/USD) ***
+        // ==========================================
+        
+        // 註：若您的交易紀錄中，以 TWD 報價的 total 也是您希望計入績效的，
+        // 則應包含 'TWD'，並在 SQL 或 PHP 中將其轉換為 USD。
+        // 為簡化，我們只假設 USDT/USD 報價的 total 已是 USD 單位或匯率為 1。
+        $legalTenderQuotes = ['USDT', 'USD']; 
+        $legalTenderQuotesStr = implode("','", $legalTenderQuotes);
 
-            // 取得現價
-            $currentPrice = ($sym === 'USDT') ? 1.0 : $this->rateService->getRateToUSD($sym);
+        $sqlTradeStats = "SELECT 
+            base_currency,
+            SUM(CASE WHEN type = 'buy' THEN quantity ELSE 0 END) as buy_qty,
+            SUM(CASE WHEN type = 'sell' THEN quantity ELSE 0 END) as sell_qty,
+            /* 由於我們篩選了 quote_currency = USDT/USD，total 即為 USD 計價成本/收入 */
+            SUM(CASE WHEN type = 'buy' THEN total ELSE 0 END) as buy_cost, 
+            SUM(CASE WHEN type = 'sell' THEN total ELSE 0 END) as sell_revenue
+            FROM crypto_transactions 
+            WHERE user_id = :uid 
+              AND type IN ('buy', 'sell')
+              AND quote_currency IN ('{$legalTenderQuotesStr}') /* <<<=== 關鍵修改：排除幣本位交易 */
+            GROUP BY base_currency";
             
-            $marketValue = $qty * $currentPrice;
-            $totalCost = $qty * $avgCost;
-            $unrealizedPnl = $marketValue - $totalCost;
-            $roi = ($totalCost > 0) ? ($unrealizedPnl / $totalCost) * 100 : 0;
-
-            $totalAssetsUsd += $marketValue;
-
-            $portfolio[] = [
-                'symbol' => $sym,
-                'balance' => $qty,
-                'avgPrice' => $avgCost,
-                'currentPrice' => $currentPrice,
-                'valueUsd' => $marketValue,
-                'costUsd' => $totalCost,
-                'pnl' => $unrealizedPnl, // 未實現
-                'pnlPercent' => $roi
-            ];
+        $stmtTrade = $this->pdo->prepare($sqlTradeStats);
+        $stmtTrade->execute([':uid' => $userId]);
+        $tradeRows = $stmtTrade->fetchAll(PDO::FETCH_ASSOC);
+        
+        $tradeStats = [];
+        foreach ($tradeRows as $r) {
+            $tradeStats[$r['base_currency']] = $r;
         }
 
-        // 4. 計算總績效
-        // 總損益 = (總資產現值 + 總已實現損益) - 總投入本金
-        // 或者更直觀：總資產現值 - 淨投入(還留在場內的錢)
-        // 這裡採用: 帳戶總權益 (Equity) = 現值
-        // 總ROI計算: (總現值 + 已提領現金) - 總投入現金 ? 
-        // 簡單版: (現值 - 淨投入)
+        // ==========================================
+        // 4. 迴圈計算 (資產與交易績效)
+        // ==========================================
+        $portfolio = [];
+        $totalAssetsUsd = 0;
+        $totalTradingPnL = 0; 
         
-        $totalProfit = $totalAssetsUsd - $netInvestedUsd;
-        $totalRoi = ($netInvestedUsd > 0) ? ($totalProfit / $netInvestedUsd) * 100 : 0;
+        // 為了確保交易績效涵蓋所有交易過的幣種，即使已經賣光
+        $allSymbols = array_unique(array_merge(
+            array_column($holdings, 'currency'), 
+            array_keys($tradeStats)
+        ));
+
+        error_log("--------------------------------------------------");
+        error_log("📊 [交易] 開始逐幣計算 PnL (交易現金流法):");
+
+        foreach ($allSymbols as $sym) {
+            
+            $currentPrice = ($sym === 'USDT') ? 1.0 : $this->rateService->getRateToUSD($sym);
+
+            // A. 資產面數據 (僅用於計算總現值和 portfolio 列表)
+            $hKey = array_search($sym, array_column($holdings, 'currency'));
+            $holdingQty = ($hKey !== false) ? (float)$holdings[$hKey]['quantity'] : 0;
+            $avgCost = ($hKey !== false) ? (float)$holdings[$hKey]['avg_cost'] : 0; // 庫存成本
+
+            // 資產現值
+            $marketValue = $holdingQty * $currentPrice;
+            $totalAssetsUsd += $marketValue;
+
+            // 🟢 [Debug Log] 印出資產計算細節 (僅針對持倉)
+            // if ($holdingQty > 0) {
+            //     error_log("   💎 資產: [$sym]");
+            //     error_log("      數量(快照): $holdingQty | 現價: $currentPrice");
+            //     error_log("      市值: " . number_format($marketValue, 2) . " (累計總資產: " . number_format($totalAssetsUsd, 2) . ")");
+            // }
+
+            // B. 交易面數據 (用於計算 Trading PnL)
+            $tStats = $tradeStats[$sym] ?? ['buy_qty'=>0, 'sell_qty'=>0, 'buy_cost'=>0, 'sell_revenue'=>0];
+            $netTradeQty = (float)$tStats['buy_qty'] - (float)$tStats['sell_qty'];
+            $buyCost = (float)$tStats['buy_cost'];
+            $sellRevenue = (float)$tStats['sell_revenue'];
+            $netTradeFlow = $buyCost - $sellRevenue; // 淨流出資金
+            
+            // 交易績效公式：(交易留下的幣 * 現價) - (交易淨流出)
+            $thisTradingPnL = ($netTradeQty * $currentPrice) - $netTradeFlow;
+            $totalTradingPnL += $thisTradingPnL;
+
+            // 🔥 寫入 Log (只要有交易紀錄就印出)
+            // if ($buyCost > 0 || $sellRevenue > 0) {
+            //     error_log("   🔹 幣種: [$sym] (交易計算)");
+            //     error_log("      買入總額: $buyCost | 賣出總額: $sellRevenue | 淨流出資金: $netTradeFlow");
+            //     error_log("      淨買入量: $netTradeQty | 當前市價: $currentPrice | 庫存價值(交易): " . number_format($netTradeQty * $currentPrice, 2));
+            //     error_log("      👉 該幣交易損益: " . number_format($thisTradingPnL, 2));
+            // }
+            
+            // 列表顯示用的個別數據 (仍然使用資產面數據，因為它反映快照)
+            if ($holdingQty > 0) { 
+                $totalCost = $holdingQty * $avgCost;
+                $unrealizedPnl = $marketValue - $totalCost; 
+                $roi = ($totalCost > 0) ? ($unrealizedPnl / $totalCost) * 100 : 0;
+
+                $portfolio[] = [
+                    'symbol' => $sym,
+                    'name' => $sym,
+                    'type' => 'trade',
+                    'balance' => $holdingQty,
+                    'avgPrice' => $avgCost,
+                    'currentPrice' => $currentPrice,
+                    'valueUsd' => $marketValue,
+                    'costUsd' => $totalCost,
+                    'pnl' => $unrealizedPnl, // 這是資產快照的浮動損益
+                    'pnlPercent' => $roi
+                ];
+            }
+        }
+        error_log("--------------------------------------------------");
+        error_log("🏁 交易總績效 (Sum): " . number_format($totalTradingPnL, 2));
+        error_log("🏁 資產總現值 (Asset): " . number_format($totalAssetsUsd, 2));
+
+        // ==========================================
+        // 5. 最終指標 (完全獨立)
+        // ==========================================
+        
+        $assetSurplus = $totalAssetsUsd - $netInvestedUsd;
+        $tradingPnl = $totalTradingPnL; // 純交易紀錄計算
+        $totalRoi = ($netInvestedUsd > 0) ? ($assetSurplus / $netInvestedUsd) * 100 : 0;
 
         return [
             'dashboard' => [
                 'totalUsd' => $totalAssetsUsd,
                 'netInvestedTwd' => $netInvestedTwd,
                 'netInvestedUsd' => $netInvestedUsd,
-                'totalPnl' => $totalProfit, // 包含未實現+已實現(因為現值已經反映了獲利保留)
-                'realizedPnl' => $totalRealizedPnlUsd, // 參考用
-                'pnlPercent' => $totalRoi
+                
+                // 🟢 兩個獨立指標
+                'assetSurplus' => $assetSurplus, 
+                'tradingPnl' => $tradingPnl,     
+                
+                // 為了兼容前端舊欄位，這裡用 Trading PnL 代替
+                'unrealizedPnl' => $tradingPnl, 
+                'realizedPnl' => $tradingPnl, 
+                'pnlPercent' => $totalRoi,
+                
+                'breakdown' => ['realizedSpot' => $tradingPnl, 'realizedCoin' => 0]
             ],
             'holdings' => $portfolio,
             'usdTwdRate' => $usdTwdRate
@@ -806,8 +902,16 @@ class CryptoService {
 
             // 數值校正
             if ($type === 'deposit' || $type === 'withdraw') { 
-                $price = 0; $total = $qty; 
+                $price = 0; 
+                
+                // 🟢 [修正] 如果 Quantity 沒抓到 (0)，但 Total 有值，把 Total 當作 Quantity
+                if ($qty == 0 && $total > 0) {
+                    $qty = $total;
+                }
+                
+                $total = $qty; // 兩者同步
             } else { 
+                // 一般買賣：如果沒 Total，自己算
                 if ($total == 0 && $price > 0 && $qty > 0) $total = $price * $qty; 
             }
 

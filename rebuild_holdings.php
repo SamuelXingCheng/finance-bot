@@ -11,8 +11,8 @@ $pdo = Database::getInstance()->getConnection();
 echo "--- 開始從資產歷史同步持倉 ---\n";
 
 // 1. 清空目前的持倉表 (重置狀態)
-$pdo->exec("TRUNCATE TABLE crypto_holdings");
-echo "✅ 已清空 crypto_holdings\n";
+// $pdo->exec("TRUNCATE TABLE crypto_holdings");
+// echo "✅ 已清空 crypto_holdings\n";
 
 // 2. 找出每個用戶、每個幣種的「最新」餘額
 // 邏輯：利用子查詢找出每個 (user_id, currency_unit) 最大的 id

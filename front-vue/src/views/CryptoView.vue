@@ -18,20 +18,33 @@
           </div>
           
           <div class="stats-row three-col">
-            <div class="stat-item">
-              <span class="label">未實現損益 (Unrealized)</span>
-              <span class="value" :class="dashboard.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'">
-                {{ dashboard.unrealizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.unrealizedPnl, 2) }}
-              </span>
+            <div class="stat-item double-row">
+              <span class="label">損益分析 (P&L)</span>
+              
+              <div class="pnl-row">
+                <span class="pnl-tag">資金盈餘</span>
+                <span class="value-md" :class="dashboard.assetSurplus >= 0 ? 'text-profit' : 'text-loss'">
+                  {{ dashboard.assetSurplus >= 0 ? '+' : '' }}{{ numberFormat(dashboard.assetSurplus, 2) }}
+                </span>
+              </div>
+
+              <div class="pnl-row mt-1">
+                <span class="pnl-tag">交易操作</span>
+                <span class="value-md" :class="dashboard.tradingPnl >= 0 ? 'text-profit' : 'text-loss'">
+                  {{ dashboard.tradingPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.tradingPnl, 2) }}
+                </span>
+              </div>
             </div>
             
             <div class="vertical-line"></div>
             
             <div class="stat-item">
-              <span class="label">已實現損益 (Realized)</span>
-              <span class="value" :class="dashboard.realizedPnl >= 0 ? 'text-profit' : 'text-loss'">
-                {{ dashboard.realizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.realizedPnl, 2) }}
-              </span>
+                <span class="label">未實現損益 (Unrealized)</span> 
+                
+                <span class="value" :class="dashboard.assetSurplus >= 0 ? 'text-profit' : 'text-loss'">
+                    {{ dashboard.assetSurplus >= 0 ? '+' : '' }}{{ numberFormat(dashboard.assetSurplus, 2) }}
+                </span>
+            
               
               <div class="pnl-capsule-row" v-if="dashboard.breakdown">
                   <div class="pnl-capsule">
@@ -40,19 +53,13 @@
                       {{ numberFormat(dashboard.breakdown.realizedSpot, 0) }}
                     </span>
                   </div>
-                  <div class="pnl-capsule">
-                    <span class="cap-label">幣本位</span>
-                    <span class="cap-val" :class="dashboard.breakdown.realizedCoin >= 0 ? 'text-profit-xs' : 'text-loss-xs'">
-                      {{ numberFormat(dashboard.breakdown.realizedCoin, 0) }}
-                    </span>
-                  </div>
               </div>
             </div>
 
             <div class="vertical-line"></div>
             
             <div class="stat-item">
-              <span class="label">未實現 ROI</span>
+              <span class="label">總投報率 (ROI)</span>
               <span class="value" :class="dashboard.pnlPercent >= 0 ? 'text-profit' : 'text-loss'">
                 {{ numberFormat(dashboard.pnlPercent, 2) }}%
               </span>
@@ -193,191 +200,64 @@
              </span>
           </div>
       </div>
-
       <div class="card-section mt-4">
-        <div class="section-header">
-            <h3>資金水位監控</h3>
-            <button class="pill-btn update-crypto" @click="openTargetModal">⚙️ 設定</button>
-        </div>
-        
+        <div class="section-header"><h3>資金水位監控</h3><button class="pill-btn update-crypto" @click="openTargetModal">⚙️ 設定</button></div>
         <div class="rebalance-visual-box">
             <div class="progress-bar-group">
                 <div class="progress-bar-container">
-                   <div class="bar-fill" :class="rebalanceData.action === 'BUY' ? 'bg-low' : (rebalanceData.action === 'SELL' ? 'bg-high' : 'bg-normal')" 
-                        :style="{width: Math.min(rebalanceData.currentUsdtRatio, 100) + '%'}">
-                   </div>
+                   <div class="bar-fill" :class="rebalanceData.action === 'BUY' ? 'bg-low' : (rebalanceData.action === 'SELL' ? 'bg-high' : 'bg-normal')" :style="{width: Math.min(rebalanceData.currentUsdtRatio, 100) + '%'}"></div>
                    <div class="target-line" :style="{left: rebalanceData.targetRatio + '%'}"></div>
                 </div>
-                
                 <div class="progress-labels">
-                    <span class="p-min">0%</span>
-                    <span class="p-target" :style="{left: rebalanceData.targetRatio + '%'}">Target</span>
-                    <span class="p-max">100%</span>
+                    <span class="p-min">0%</span><span class="p-target" :style="{left: rebalanceData.targetRatio + '%'}">Target</span><span class="p-max">100%</span>
                 </div>
             </div>
-
             <div class="advice-card">
-                <div class="advice-content">
-                    <span class="advice-icon">
-                        {{ rebalanceData.action === 'BUY' ? '🟢' : (rebalanceData.action === 'SELL' ? '🔴' : '⚪') }}
-                    </span>
-                    <p class="advice-msg">{{ rebalanceData.message }}</p>
-                </div>
+                <div class="advice-content"><span class="advice-icon">{{ rebalanceData.action === 'BUY' ? '🟢' : (rebalanceData.action === 'SELL' ? '🔴' : '⚪') }}</span><p class="advice-msg">{{ rebalanceData.message }}</p></div>
             </div>
         </div>
       </div>
     </div>
 
     <div v-if="view === 'futures'" class="futures-panel fade-in">
-       <div class="stats-grid">
-          <div class="stat-box">
-             <span class="label">勝率 (Win Rate)</span>
-             <span class="val win-rate">{{ futuresStats.win_rate }}%</span>
-          </div>
-          <div class="stat-box">
-             <span class="label">總損益 (PnL)</span>
-             <span class="val" :class="futuresStats.total_pnl > 0 ? 'text-profit' : 'text-loss'">
-                ${{ numberFormat(futuresStats.total_pnl, 2) }}
-             </span>
-          </div>
-          <div class="stat-box">
-             <span class="label">平均 ROI</span>
-             <span class="val" :class="futuresStats.avg_roi > 0 ? 'text-profit' : 'text-loss'">
-                {{ numberFormat(futuresStats.avg_roi, 2) }}%
-             </span>
-          </div>
-          <div class="stat-box">
-             <span class="label">總交易次數</span>
-             <span class="val">{{ futuresStats.total_trades }}</span>
-          </div>
-       </div>
-
+       <div class="stats-grid"><div class="stat-box"><span class="label">勝率 (Win Rate)</span><span class="val win-rate">{{ futuresStats.win_rate }}%</span></div><div class="stat-box"><span class="label">總損益 (PnL)</span><span class="val" :class="futuresStats.total_pnl > 0 ? 'text-profit' : 'text-loss'">${{ numberFormat(futuresStats.total_pnl, 2) }}</span></div><div class="stat-box"><span class="label">平均 ROI</span><span class="val" :class="futuresStats.avg_roi > 0 ? 'text-profit' : 'text-loss'">{{ numberFormat(futuresStats.avg_roi, 2) }}%</span></div><div class="stat-box"><span class="label">總交易次數</span><span class="val">{{ futuresStats.total_trades }}</span></div></div>
        <div class="list-section">
-          <div class="section-header">
-            <h3>近期交易</h3>
-            <button class="add-btn" @click="alert('功能開發中，請期待下個版本！')"><span>+</span> 記一筆</button>
-          </div>
-          <div v-if="!futuresStats.history || futuresStats.history.length === 0" class="empty-state">
-             <p>尚無合約交易紀錄</p>
-          </div>
+          <div class="section-header"><h3>近期交易</h3><button class="add-btn" @click="alert('功能開發中，請期待下個版本！')"><span>+</span> 記一筆</button></div>
+          <div v-if="!futuresStats.history || futuresStats.history.length === 0" class="empty-state"><p>尚無合約交易紀錄</p></div>
           <div v-else class="coin-list">
              <div v-for="trade in futuresStats.history" :key="trade.id" class="account-card-style">
-                <div class="card-left">
-                   <div class="acc-name">{{ trade.symbol }} <span class="leverage">x{{ trade.leverage }}</span></div>
-                   <div class="acc-meta">
-                      <span class="badge" :class="trade.side === 'LONG' ? 'badge-long' : 'badge-short'">{{ trade.side }}</span>
-                      <span class="currency">{{ trade.close_date ? trade.close_date.substring(5,10) : 'Open' }}</span>
-                   </div>
-                </div>
-                <div class="card-right">
-                   <div class="acc-balance" :class="trade.pnl > 0 ? 'text-profit' : 'text-loss'">
-                      {{ trade.pnl > 0 ? '+' : '' }}{{ numberFormat(trade.pnl, 2) }}
-                   </div>
-                   <div class="pnl-text-sm" :class="trade.roi_percent > 0 ? 'text-profit-sm' : 'text-loss-sm'">
-                      {{ trade.roi_percent }}%
-                   </div>
-                </div>
+                <div class="card-left"><div class="acc-name">{{ trade.symbol }} <span class="leverage">x{{ trade.leverage }}</span></div><div class="acc-meta"><span class="badge" :class="trade.side === 'LONG' ? 'badge-long' : 'badge-short'">{{ trade.side }}</span><span class="currency">{{ trade.close_date ? trade.close_date.substring(5,10) : 'Open' }}</span></div></div>
+                <div class="card-right"><div class="acc-balance" :class="trade.pnl > 0 ? 'text-profit' : 'text-loss'">{{ trade.pnl > 0 ? '+' : '' }}{{ numberFormat(trade.pnl, 2) }}</div><div class="pnl-text-sm" :class="trade.roi_percent > 0 ? 'text-profit-sm' : 'text-loss-sm'">{{ trade.roi_percent }}%</div></div>
              </div>
           </div>
        </div>
     </div>
 
-    <div v-if="isTargetModalOpen" class="modal-overlay" @click.self="isTargetModalOpen = false">
-        <div class="modal-content small-modal">
-            <div class="modal-header">
-                <h3>設定現金目標比例</h3>
-                <button class="close-btn" @click="isTargetModalOpen = false">×</button>
-            </div>
-            <div class="modal-body">
-                <p class="hint-text">請設定您希望保留的 USDT 現金比例 (0% - 100%)。</p>
-                <div class="input-with-suffix">
-                    <input type="number" v-model.number="tempTargetRatio" class="input-std" min="0" max="100">
-                    <span class="suffix">%</span>
-                </div>
-                <div class="slider-wrapper">
-                    <input type="range" v-model.number="tempTargetRatio" min="0" max="100" class="range-slider">
-                </div>
-                <button class="save-btn main-action" @click="saveTargetRatio" :disabled="saving">
-                    {{ saving ? '儲存中...' : '儲存設定' }}
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3>
-          <button class="close-btn" @click="closeModal">×</button>
-        </div>
-
-        <div class="tabs" v-if="!isEditingTransaction">
-          <button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button>
-        </div>
-
-        <form @submit.prevent="submitTransaction" class="tx-form">
-          <div v-if="currentTab === 'fiat'">
-            <div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div>
-            <div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div>
-          </div>
-          <div v-if="currentTab === 'trade'">
-            <div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div>
-            <div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div>
-            <div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div>
-            <div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div>
-          </div>
-          <div v-if="currentTab === 'earn'">
-            <div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div>
-            <div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div>
-          </div>
-          <div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div>
-          
-          <button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button>
-        </form>
-      </div>
-    </div>
-
-    <div v-if="isEditBalanceOpen" class="modal-overlay" @click.self="closeEditModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>更新快照: {{ editBalanceForm.symbol }}</h3>
-                <button class="close-btn" @click="closeEditModal">×</button>
-            </div>
-            <p class="hint-text">請輸入該資產在指定日期的實際餘額，系統將自動補齊差額記錄。</p>
-            <form @submit.prevent="submitBalanceAdjustment">
-                <div class="form-group mt-4">
-                    <label>快照日期</label>
-                    <input type="date" v-model="editBalanceForm.date" class="input-std" required>
-                </div>
-                <div class="form-group">
-                    <label>目前紀錄餘額: {{ numberFormat(editBalanceForm.current, 6) }}</label>
-                    <label class="mt-2" style="color:#2A9D8F; font-weight:bold;">實際正確餘額:</label>
-                    <input type="number" step="any" v-model.number="editBalanceForm.newBalance" class="input-std" required>
-                </div>
-                <button type="submit" class="save-btn update-crypto">確認更新</button>
-            </form>
-        </div>
-    </div>
+    <div v-if="isTargetModalOpen" class="modal-overlay" @click.self="isTargetModalOpen = false"><div class="modal-content small-modal"><div class="modal-header"><h3>設定現金目標比例</h3><button class="close-btn" @click="isTargetModalOpen = false">×</button></div><div class="modal-body"><p class="hint-text">請設定您希望保留的 USDT 現金比例 (0% - 100%)。</p><div class="input-with-suffix"><input type="number" v-model.number="tempTargetRatio" class="input-std" min="0" max="100"><span class="suffix">%</span></div><div class="slider-wrapper"><input type="range" v-model.number="tempTargetRatio" min="0" max="100" class="range-slider"></div><button class="save-btn main-action" @click="saveTargetRatio" :disabled="saving">{{ saving ? '儲存中...' : '儲存設定' }}</button></div></div></div>
+    
+    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal"><div class="modal-content"><div class="modal-header"><h3>{{ isEditingTransaction ? '編輯紀錄' : '新增現貨紀錄' }}</h3><button class="close-btn" @click="closeModal">×</button></div><div class="tabs" v-if="!isEditingTransaction"><button v-for="tab in tabs" :key="tab.id" class="tab-btn" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">{{ tab.name }}</button></div><form @submit.prevent="submitTransaction" class="tx-form"><div v-if="currentTab === 'fiat'"><div class="form-group"><label>動作方向</label><div class="radio-group"><label class="radio-label" :class="{ active: form.type === 'deposit' }"><input type="radio" v-model="form.type" value="deposit"> 入金 (TWD → U)</label><label class="radio-label" :class="{ active: form.type === 'withdraw' }"><input type="radio" v-model="form.type" value="withdraw"> 出金 (U → TWD)</label></div></div><div class="form-row"><div class="form-group half"><label>台幣金額 (TWD)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="例如 100000" required></div><div class="form-group half"><label>數量 (USDT)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="例如 3150" required></div></div></div><div v-if="currentTab === 'trade'"><div class="form-group"><label>交易對 (Pair)</label><div class="input-group"><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="BTC" style="flex:2" required><span class="separator">/</span><input type="text" v-model="form.quoteCurrency" class="input-std uppercase" placeholder="USDT" style="flex:1" readonly></div></div><div class="form-group"><label>動作</label><div class="radio-group"><label class="radio-label buy" :class="{ active: form.type === 'buy' }"><input type="radio" v-model="form.type" value="buy"> 買入 (Buy)</label><label class="radio-label sell" :class="{ active: form.type === 'sell' }"><input type="radio" v-model="form.type" value="sell"> 賣出 (Sell)</label></div></div><div class="form-row"><div class="form-group half"><label>成交價格 (Price)</label><input type="number" step="any" v-model.number="form.price" class="input-std" placeholder="單價" @input="calcTotal"></div><div class="form-group half"><label>數量 (Amount)</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="數量" @input="calcTotal"></div></div><div class="form-group"><label>總金額 (Total USDT)</label><input type="number" step="any" v-model.number="form.total" class="input-std" placeholder="系統自動計算" @input="calcQuantity"></div></div><div v-if="currentTab === 'earn'"><div class="form-group"><label>類型</label><select v-model="form.type" class="input-std"><option value="earn">理財收益 (Earn)</option><option value="adjustment">餘額調整 (Adjustment)</option></select></div><div class="form-group"><label>幣種</label><input type="text" v-model="form.baseCurrency" class="input-std uppercase" placeholder="例如: ETH"></div><div class="form-group"><label>數量</label><input type="number" step="any" v-model.number="form.quantity" class="input-std" placeholder="0.00"></div></div><div class="form-row mt-4"><div class="form-group half"><label>手續費 (Fee)</label><input type="number" step="any" v-model.number="form.fee" class="input-std" placeholder="0"></div><div class="form-group half"><label>日期</label><input type="date" v-model="form.date" class="input-std" required></div></div><button type="submit" class="save-btn main-action">{{ isEditingTransaction ? '儲存修改' : submitButtonText }}</button></form></div></div>
+    <div v-if="isEditBalanceOpen" class="modal-overlay" @click.self="closeEditModal"><div class="modal-content"><div class="modal-header"><h3>更新快照: {{ editBalanceForm.symbol }}</h3><button class="close-btn" @click="closeEditModal">×</button></div><p class="hint-text">請輸入該資產在指定日期的實際餘額，系統將自動補齊差額記錄。</p><form @submit.prevent="submitBalanceAdjustment"><div class="form-group mt-4"><label>快照日期</label><input type="date" v-model="editBalanceForm.date" class="input-std" required></div><div class="form-group"><label>目前紀錄餘額: {{ numberFormat(editBalanceForm.current, 6) }}</label><label class="mt-2" style="color:#2A9D8F; font-weight:bold;">實際正確餘額:</label><input type="number" step="any" v-model.number="editBalanceForm.newBalance" class="input-std" required></div><button type="submit" class="save-btn update-crypto">確認更新</button></form></div></div>
 
   </div>
 </template>
 
 <script setup>
-// ... (JavaScript 邏輯部分完全保持不變) ...
-// 🟢 重要提醒：請確認 dashboard 預設值有包含 breakdown
 import { ref, computed, reactive, onMounted } from 'vue';
 import { fetchWithLiffToken, numberFormat } from '@/utils/api';
 import Chart from 'chart.js/auto';
 import liff from '@line/liff';
 
 const view = ref('portfolio');
-// 🟢 確保 breakdown 有預設值
+// 🟢 [初始化] 加入 totalPnl 欄位，確保不報錯
 const dashboard = ref({ 
   totalUsd: 0, 
   totalInvestedTwd: 0, 
   unrealizedPnl: 0, 
   realizedPnl: 0, 
   pnlPercent: 0,
+  assetSurplus: 0,
+  tradingPnl: 0,
+  totalPnl: 0, // 新增：總資產盈餘
   breakdown: { realizedSpot: 0, realizedCoin: 0 } 
 });
 const holdings = ref([]);
@@ -398,7 +278,6 @@ const form = reactive({ type: 'buy', baseCurrency: '', quoteCurrency: 'USDT', pr
 const editBalanceForm = reactive({ symbol: '', current: 0, newBalance: 0, date: new Date().toISOString().substring(0, 10) });
 const tempTargetRatio = ref(10);
 const saving = ref(false);
-const isEditAccountOpen = ref(false);
 const submitButtonText = computed(() => {
   if (currentTab.value === 'fiat') return form.type === 'deposit' ? '確認入金' : '確認出金';
   if (currentTab.value === 'trade') return form.type === 'buy' ? '確認買入' : '確認賣出';
@@ -410,6 +289,21 @@ const isEditingTransaction = ref(false);
 const editingId = ref(null);
 const csvInput = ref(null);
 
+// ... (其餘 JS 邏輯完全保持原樣，僅需複製即可) ...
+// 為了版面簡潔，此處省略未修改的 JS 函數 (fetchCryptoData, openTransactionModal 等)
+// 請直接保留您原本的 JS 部分，只需確認 dashboard ref 定義有更新即可。
+
+// 以下僅列出必要的 fetch 邏輯供檢查
+async function fetchCryptoData() {
+  loading.value = true; const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_summary`);
+  if (response && response.ok) {
+    const result = await response.json(); if (result.status === 'success') {
+      dashboard.value = result.data.dashboard; holdings.value = result.data.holdings; if (result.data.usdTwdRate) usdTwdRate.value = result.data.usdTwdRate;
+    }
+  } loading.value = false;
+}
+// ...
+// ...
 function triggerCsvUpload() { if (csvInput.value) csvInput.value.click(); else console.error("找不到 CSV Input 元件"); }
 async function handleCsvUpload(event) {
     const file = event.target.files[0];
@@ -470,14 +364,6 @@ function switchView(target) {
     else if (target === 'rebalance') { fetchRebalance(); }
     else if (target === 'futures') { fetchFutures(); }
 }
-async function fetchCryptoData() {
-  loading.value = true; const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_summary`);
-  if (response && response.ok) {
-    const result = await response.json(); if (result.status === 'success') {
-      dashboard.value = result.data.dashboard; holdings.value = result.data.holdings; if (result.data.usdTwdRate) usdTwdRate.value = result.data.usdTwdRate;
-    }
-  } loading.value = false;
-}
 async function fetchRecentTransactions() {
     const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=get_crypto_transactions&limit=20`);
     if (response && response.ok) { const res = await response.json(); if (res.status === 'success') recentTransactions.value = res.data; }
@@ -525,7 +411,7 @@ function closeEditModal() { isEditBalanceOpen.value = false; }
 async function submitBalanceAdjustment() {
     if (editBalanceForm.type === 'account') {
         if (!confirm(`確定要更新帳戶 [${editBalanceForm.name}] 的餘額為 ${editBalanceForm.newBalance} 嗎？`)) return;
-        const payload = { name: editBalanceForm.name, balance: editBalanceForm.newBalance, type: 'Investment', currency: editBalanceForm.symbol, date: editBalanceForm.date, ledger_id: props.ledgerId }; // 注意：props.ledgerId 需確認來源
+        const payload = { name: editBalanceForm.name, balance: editBalanceForm.newBalance, type: 'Investment', currency: editBalanceForm.symbol, date: editBalanceForm.date };
         const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { method: 'POST', body: JSON.stringify(payload) });
         if (response && response.ok) { const res = await response.json(); if (res.status === 'success') { closeEditModal(); fetchCryptoData(); alert('帳戶快照已更新！'); } else { alert('失敗：' + res.message); } } return;
     }
@@ -544,7 +430,42 @@ onMounted(() => { fetchCryptoData(); setTimeout(() => fetchHistory(), 100); fetc
 </script>
 
 <style scoped>
-/* 樣式區 (保持不變) */
+/* 🟢 [新增] 雙行顯示專用樣式 */
+.stat-item.double-row {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 4px;
+}
+
+.pnl-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.2;
+  width: 100%;
+}
+
+.pnl-tag {
+  font-size: 0.7rem;
+  background-color: #f0f0f0;
+  color: #666;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.value-md {
+  font-size: 0.95rem; /* 比原本的 1.1rem 小一點，適合雙行 */
+  font-weight: 700;
+}
+
+.mt-1 { margin-top: 4px; }
+
+/* 樣式保持原樣 */
 :root { --text-primary: #5d5d5d; --color-primary: #d4a373; --color-teal: #2A9D8F; --color-danger: #e5989b; }
 
 .crypto-container {
@@ -870,4 +791,32 @@ onMounted(() => { fetchCryptoData(); setTimeout(() => fetchHistory(), 100); fetc
   color: #eee;
   line-height: 1.4;
 }
+/* 🟢 [新增] 上傳卡片樣式 */
+.upload-card {
+  padding: 0;
+  overflow: hidden;
+  border: 2px dashed #d4a373;
+  background-color: #fffbf5;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.upload-card:hover {
+  background-color: #fff8f0;
+  border-color: #b08d65;
+}
+.upload-area {
+  padding: 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+.hidden-input { display: none; }
+.icon { font-size: 2rem; margin-bottom: 8px; }
+.upload-content p { margin: 0; color: #5d5d5d; }
+.upload-content .sub { font-size: 0.8rem; color: #999; margin-top: 4px; }
+.analyzing { pointer-events: none; opacity: 0.7; }
+.loading-content { color: #d4a373; font-weight: bold; }
 </style>
