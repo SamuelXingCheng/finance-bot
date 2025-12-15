@@ -680,18 +680,46 @@ class CryptoService {
 
     /**
      * 🟢 [修正版] 執行資產快照 (Capture Snapshot)
-     * 修正 ArgumentCountError 並確保資料寫入正確
+     * 1. 修正 ledger_id 遺失問題：更新時會沿用舊帳戶的帳本 ID。
+     * 2. 參數改為可選：若未傳入參數，自動抓取當前數據 (防止內部呼叫報錯)。
      */
-    public function captureSnapshot(int $userId, array $holdingsSnapshot, float $usdTwdRate, float $totalCostTwd): bool {
+    public function captureSnapshot(int $userId, ?array $holdingsSnapshot = null, ?float $usdTwdRate = null, ?float $totalCostTwd = null): bool {
         
-        // 1. 數據計算 (總覽部分)
+        // 1. 自動補全數據 (如果內部呼叫沒傳參數，例如 addTransaction)
+        if ($holdingsSnapshot === null || $usdTwdRate === null) {
+            try {
+                // 呼叫自己的 getDashboardData 獲取當前最新狀態
+                $dashboardData = $this->getDashboardData($userId);
+                
+                $usdTwdRate = (float)$dashboardData['usdTwdRate'];
+                $dashboard = $dashboardData['dashboard'];
+                // 兼容不同版本的欄位名稱
+                $totalCostTwd = (float)($dashboard['netInvestedTwd'] ?? $dashboard['totalCostTwd'] ?? 0);
+                
+                // 轉換持倉格式
+                $holdingsSnapshot = [];
+                foreach ($dashboardData['holdings'] as $h) {
+                    $holdingsSnapshot[] = [
+                        'symbol' => $h['symbol'],
+                        'qty' => (float)$h['balance'],
+                        'price_usd' => (float)($h['currentPrice'] ?? 0),
+                        // price_twd 會在下方自動計算
+                    ];
+                }
+            } catch (Exception $e) {
+                error_log("Snapshot Auto-Fetch Failed: " . $e->getMessage());
+                return false;
+            }
+        }
+
+        // 2. 數據計算 (總覽部分)
         $totalValueUsd = 0.0;
         
         // 遍歷快照數據，計算總價值
         foreach ($holdingsSnapshot as &$h) {
             // 確保單價存在
             if (!isset($h['price_usd'])) {
-                $h['price_usd'] = 0.0; // 防止未定義錯誤
+                $h['price_usd'] = 0.0; 
             }
             
             // 如果沒有提供 TWD 價格，則自動換算
@@ -710,7 +738,7 @@ class CryptoService {
         $totalValueTwd = $totalValueUsd * $usdTwdRate; 
         $pnlTwd = $totalValueTwd - $totalCostTwd;
 
-        // 2. 準備明細 JSON (備查用)
+        // 3. 準備明細 JSON (備查用)
         $details = [
             'rate_usd_twd' => $usdTwdRate,
             'total_usd' => $totalValueUsd,
@@ -742,7 +770,6 @@ class CryptoService {
             ]);
 
             // B. 同步寫入 account_balance_history (通用資產歷史表)
-            // 確保這裡載入正確
             if (!class_exists('AssetService')) {
                 require_once __DIR__ . '/AssetService.php';
             }
@@ -752,23 +779,32 @@ class CryptoService {
             foreach ($holdingsSnapshot as $h) {
                 if ((float)$h['qty'] > 0) {
                     
-                    // 取得正確帳戶名稱
-                    $sqlAccount = "SELECT name FROM accounts WHERE user_id = :userId AND currency_unit = :symbol AND type = 'Investment' ORDER BY name LIMIT 1";
+                    // 🔥 [關鍵修正] 查詢該帳戶原本的 Ledger ID
+                    // 我們同時撈 name 和 ledger_id，確保更新時沿用舊設定
+                    $sqlAccount = "SELECT name, ledger_id FROM accounts 
+                                   WHERE user_id = :userId 
+                                     AND currency_unit = :symbol 
+                                     AND type IN ('Investment', 'Crypto') 
+                                   ORDER BY name LIMIT 1";
+                                   
                     $stmtAccount = $this->pdo->prepare($sqlAccount);
                     $stmtAccount->execute([':userId' => $userId, ':symbol' => $h['symbol']]);
-                    $existingAccountName = $stmtAccount->fetchColumn();
-                    $accountName = $existingAccountName ? $existingAccountName : "Crypto-" . $h['symbol'];
+                    $accountData = $stmtAccount->fetch(PDO::FETCH_ASSOC);
 
-                    // 🔥 [修正重點] 補上第 5 個參數 (symbol) 及第 8 個參數 (customRate)
+                    // 如果有舊帳戶，沿用舊名稱和 Ledger ID；如果是新的，就用預設名和 NULL
+                    $accountName = $accountData ? $accountData['name'] : "Crypto-" . $h['symbol'];
+                    $ledgerId = $accountData ? $accountData['ledger_id'] : null;
+
+                    // 呼叫更新 (帶入正確的 ledgerId)
                     $assetService->upsertAccountBalance(
                         $userId,
-                        $accountName,              // 2. 帳戶名稱
-                        (float)$h['qty'],          // 3. 餘額
-                        'Investment',              // 4. 類型
-                        $h['symbol'],              // 🟢 5. 幣別單位 (修正 ArgumentCountError)
-                        $snapshotDate,             // 6. 日期
-                        null,                      // 7. Ledger ID
-                        (float)$h['price_twd']     // 8. 自訂匯率 (傳入 TWD 單價，確保折線圖價值正確)
+                        $accountName,              
+                        (float)$h['qty'],          
+                        'Investment',              // 類型
+                        $h['symbol'],              // 幣別
+                        $snapshotDate,             
+                        $ledgerId,                 // 🟢 [修正] 傳入抓到的 ledger_id，不再是 null
+                        (float)$h['price_twd']     // 自訂匯率
                     );
                 }
             }
@@ -782,7 +818,6 @@ class CryptoService {
             return false;
         }
     }
-
     // --- 輔助函式 ---
 
     private function getHolding($userId, $currency) {
