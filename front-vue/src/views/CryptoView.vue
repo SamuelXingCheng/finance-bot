@@ -29,7 +29,7 @@
               </div>
 
               <div class="pnl-row mt-1">
-                <span class="pnl-tag">交易操作</span>
+                <span class="pnl-tag">純交易損益</span>
                 <span class="value-md" :class="dashboard.tradingPnl >= 0 ? 'text-profit' : 'text-loss'">
                   {{ dashboard.tradingPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.tradingPnl, 2) }}
                 </span>
@@ -39,21 +39,26 @@
             <div class="vertical-line"></div>
             
             <div class="stat-item">
-                <span class="label">未實現損益 (Unrealized)</span>
+                <span class="label">U本位損益</span>
                 
-                <span class="value" :class="dashboard.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'">
+                <!-- <span class="value" :class="dashboard.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'">
                     {{ dashboard.unrealizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.unrealizedPnl, 2) }}
-                </span>
-            
-              
-              <div class="pnl-capsule-row" v-if="dashboard.breakdown">
-                  <div class="pnl-capsule">
-                    <span class="cap-label">U本位</span>
-                    <span class="cap-val" :class="dashboard.breakdown.realizedSpot >= 0 ? 'text-profit-xs' : 'text-loss-xs'">
-                      {{ numberFormat(dashboard.breakdown.realizedSpot, 0) }}
+                </span> -->
+
+
+                <div class="pnl-row mt-1" v-if="dashboard.unrealizedPnl !== undefined">
+                    <span class="pnl-tag">未實現損益</span>
+                    <span class="value-md" :class="dashboard.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'">
+                        {{ dashboard.unrealizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.unrealizedPnl, 2) }}
                     </span>
-                  </div>
-              </div>
+                </div>
+
+                <div class="pnl-row mt-1" v-if="dashboard.realizedPnl !== undefined">
+                    <span class="pnl-tag">已實現損益</span>
+                    <span class="value-md" :class="dashboard.realizedPnl >= 0 ? 'text-profit' : 'text-loss'">
+                        {{ dashboard.realizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.realizedPnl, 2) }}
+                    </span>
+                </div>
             </div>
 
             <div class="vertical-line"></div>
