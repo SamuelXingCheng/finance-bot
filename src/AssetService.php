@@ -94,9 +94,9 @@ class AssetService {
             }
     
             // 3. 寫入 account_balance_history
-            $sqlDelHistory = "DELETE FROM account_balance_history WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date AND (ledger_id = :ledgerId1 OR (ledger_id IS NULL AND :ledgerId2 IS NULL))";
-            $stmtDel = $this->pdo->prepare($sqlDelHistory);
-            $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date, ':ledgerId1' => $ledgerId, ':ledgerId2' => $ledgerId]);
+            // $sqlDelHistory = "DELETE FROM account_balance_history WHERE user_id = :userId AND account_name = :name AND snapshot_date = :date AND (ledger_id = :ledgerId1 OR (ledger_id IS NULL AND :ledgerId2 IS NULL))";
+            // $stmtDel = $this->pdo->prepare($sqlDelHistory);
+            // $stmtDel->execute([':userId' => $userId, ':name' => $name, ':date' => $date, ':ledgerId1' => $ledgerId, ':ledgerId2' => $ledgerId]);
     
             $sqlHistory = "INSERT INTO account_balance_history (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, snapshot_date)
                            VALUES (:userId, :ledgerId, :name, :balance, :unit, :rate, :date)";
@@ -148,7 +148,8 @@ class AssetService {
         // 2. 撈取歷史紀錄
         $sql = "SELECT snapshot_date, account_name, balance, currency_unit, exchange_rate 
                 FROM account_balance_history 
-                WHERE user_id = :userId ";
+                WHERE user_id = :userId 
+                  AND account_name NOT LIKE 'Crypto-%' "; // 🚨 關鍵修正 2: 排除所有以 Crypto- 開頭的彙總性標籤
         
         $params = [':userId' => $userId];
         if ($ledgerId) {

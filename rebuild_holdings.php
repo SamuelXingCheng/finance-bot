@@ -34,7 +34,11 @@ $balances = $stmt->fetchAll(PDO::FETCH_ASSOC);
 echo "🔍 找到 " . count($balances) . " 筆加密貨幣資產紀錄...\n";
 
 // 3. 寫入 crypto_holdings
-$insertSql = "INSERT INTO crypto_holdings (user_id, currency, quantity, avg_cost, updated_at) VALUES (?, ?, ?, ?, NOW())";
+$insertSql = "INSERT INTO crypto_holdings (user_id, currency, quantity, avg_cost, updated_at) 
+              VALUES (?, ?, ?, ?, NOW())
+              ON DUPLICATE KEY UPDATE 
+              quantity = VALUES(quantity), 
+              updated_at = NOW()";
 $insertStmt = $pdo->prepare($insertSql);
 
 $count = 0;

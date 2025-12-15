@@ -66,9 +66,11 @@ class CryptoService {
 
         // 3. 從「帳戶歷史快照表」撈取資料
         $sql = "SELECT snapshot_date, account_name, balance, currency_unit, exchange_rate 
-                FROM account_balance_history 
-                WHERE user_id = :uid AND snapshot_date >= :start
-                ORDER BY snapshot_date ASC, id ASC";
+            FROM account_balance_history 
+            WHERE user_id = :uid AND snapshot_date >= :start 
+            -- 🔥 新增的條件：只選擇 CryptoService 寫入的明細帳戶
+            AND account_name LIKE 'Crypto-%' 
+            ORDER BY snapshot_date ASC, id ASC";
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':uid' => $userId, ':start' => $startDate]);
@@ -645,40 +647,55 @@ class CryptoService {
     }
 
     /**
-     * 🟢 [核心修正] 執行資產快照 (Capture Snapshot)
-     * 同時寫入 crypto_snapshots (總覽) 與 account_balance_history (明細)
+     * 🟢 [修正版] 執行資產快照 (Capture Snapshot)
+     * 修正 ArgumentCountError 並確保資料寫入正確
      */
-    public function captureSnapshot(int $userId): bool {
-        // 1. 取得當前儀表板數據 (這是最準確的當下狀態)
-        $data = $this->getDashboardData($userId);
+    public function captureSnapshot(int $userId, array $holdingsSnapshot, float $usdTwdRate, float $totalCostTwd): bool {
         
-        $dashboard = $data['dashboard'];
-        $holdings = $data['holdings']; // 🟢 取得持倉明細
-        $usdTwdRate = $data['usdTwdRate'];
+        // 1. 數據計算 (總覽部分)
+        $totalValueUsd = 0.0;
         
-        // 2. 數據整理 (總覽部分)
-        $totalValueUsd = $dashboard['totalUsd'];
-        $totalCostTwd = $dashboard['netInvestedTwd']; // 建議用淨投入 (Net Invested)
-        $totalValueTwd = $totalValueUsd * $usdTwdRate;
+        // 遍歷快照數據，計算總價值
+        foreach ($holdingsSnapshot as &$h) {
+            // 確保單價存在
+            if (!isset($h['price_usd'])) {
+                $h['price_usd'] = 0.0; // 防止未定義錯誤
+            }
+            
+            // 如果沒有提供 TWD 價格，則自動換算
+            if (!isset($h['price_twd'])) {
+                $h['price_twd'] = (float)$h['price_usd'] * $usdTwdRate;
+            }
+
+            $h['value_usd'] = (float)$h['qty'] * (float)$h['price_usd'];
+            $h['value_twd'] = (float)$h['qty'] * (float)$h['price_twd'];
+            
+            $totalValueUsd += $h['value_usd'];
+        }
+        unset($h); 
+
+        // 總價值 (TWD)
+        $totalValueTwd = $totalValueUsd * $usdTwdRate; 
         $pnlTwd = $totalValueTwd - $totalCostTwd;
 
-        // 準備明細 JSON (備查用)
+        // 2. 準備明細 JSON (備查用)
         $details = [
             'rate_usd_twd' => $usdTwdRate,
             'total_usd' => $totalValueUsd,
             'holdings' => array_map(function($h) {
                 return [
                     'symbol' => $h['symbol'],
-                    'qty' => $h['balance'],
-                    'value_usd' => $h['valueUsd']
+                    'qty' => $h['qty'],
+                    'price_usd' => $h['price_usd'],
+                    'value_usd' => $h['value_usd']
                 ];
-            }, $holdings)
+            }, $holdingsSnapshot)
         ];
 
         try {
-            $this->pdo->beginTransaction(); // 🟢 開啟交易，確保兩邊寫入一致
+            $this->pdo->beginTransaction(); 
 
-            // A. 寫入 crypto_snapshots (總資產快照表 - 保持原有機制)
+            // A. 寫入 crypto_snapshots (總資產快照表)
             $sql = "INSERT INTO crypto_snapshots 
                     (user_id, total_value_twd, total_cost_twd, pnl, details_json, created_at)
                     VALUES (:uid, :val, :cost, :pnl, :json, NOW())";
@@ -692,27 +709,34 @@ class CryptoService {
                 ':json' => json_encode($details, JSON_UNESCAPED_UNICODE)
             ]);
 
-            // B. 🔥 [新增] 同步寫入 account_balance_history (通用資產歷史表)
-            // 讓 CryptoService::getHistoryChartData 有資料可讀
-            
-            require_once __DIR__ . '/AssetService.php'; // 確保載入
+            // B. 同步寫入 account_balance_history (通用資產歷史表)
+            // 確保這裡載入正確
+            if (!class_exists('AssetService')) {
+                require_once __DIR__ . '/AssetService.php';
+            }
             $assetService = new AssetService($this->pdo);
             $snapshotDate = date('Y-m-d');
 
-            foreach ($holdings as $h) {
-                // 只記錄有餘額的幣種
-                if ($h['balance'] > 0) {
-                    // 呼叫 AssetService 的標準存檔功能
-                    // 這裡我們傳入 USD 現價作為 custom_rate，以便 CryptoService 畫圖時能還原成 USD 價值
+            foreach ($holdingsSnapshot as $h) {
+                if ((float)$h['qty'] > 0) {
+                    
+                    // 取得正確帳戶名稱
+                    $sqlAccount = "SELECT name FROM accounts WHERE user_id = :userId AND currency_unit = :symbol AND type = 'Investment' ORDER BY name LIMIT 1";
+                    $stmtAccount = $this->pdo->prepare($sqlAccount);
+                    $stmtAccount->execute([':userId' => $userId, ':symbol' => $h['symbol']]);
+                    $existingAccountName = $stmtAccount->fetchColumn();
+                    $accountName = $existingAccountName ? $existingAccountName : "Crypto-" . $h['symbol'];
+
+                    // 🔥 [修正重點] 補上第 5 個參數 (symbol) 及第 8 個參數 (customRate)
                     $assetService->upsertAccountBalance(
                         $userId,
-                        "Crypto-" . $h['symbol'],  // 帳戶名稱 (如: Crypto-BTC)
-                        (float)$h['balance'],      // 餘額 (顆數)
-                        'Investment',              // 類型
-                        $h['symbol'],              // 幣別 (BTC, ETH...)
-                        $snapshotDate,             // 日期
-                        null,                      // ledger_id (個人資產通常為 null)
-                        (float)$h['currentPrice']  // 🟢 關鍵：傳入當下 USD 匯率
+                        $accountName,              // 2. 帳戶名稱
+                        (float)$h['qty'],          // 3. 餘額
+                        'Investment',              // 4. 類型
+                        $h['symbol'],              // 🟢 5. 幣別單位 (修正 ArgumentCountError)
+                        $snapshotDate,             // 6. 日期
+                        null,                      // 7. Ledger ID
+                        (float)$h['price_twd']     // 8. 自訂匯率 (傳入 TWD 單價，確保折線圖價值正確)
                     );
                 }
             }
@@ -1025,5 +1049,36 @@ class CryptoService {
         
         return ['count' => $count, 'message' => '已加入排程佇列，系統將在背景陸續處理。'];
     }
+    /**
+     * 🟢 [新增] 主動更新市場價格和匯率
+     * 呼叫 ExchangeRateService 邏輯，強制 API 更新並存入 exchange_rates 表格。
+     */
+    public function updateMarketPrices(): bool {
+        // 1. 更新加密貨幣價格 (BTC, ETH, ...)
+        $updatedCryptoCount = 0;
+        // 遍歷 ExchangeRateService 中定義的所有追蹤幣種
+        foreach (ExchangeRateService::COIN_ID_MAP as $symbol => $id) {
+            // 呼叫 getRateToUSD 會觸發 ExchangeRateService 內部邏輯：
+            // 嘗試從 API 獲取最新價格，並自動存入 exchange_rates 表格 (saveToDb)。
+            $rate = $this->rateService->getRateToUSD($symbol);
+            if ($rate > 0) {
+                $updatedCryptoCount++;
+            }
+        }
+        
+        // 2. 更新法幣匯率 (主要目標是 TWD/USD)
+        // 呼叫 getRateToUSD('TWD') 會觸發 getFiatRate，它會一次性更新 ExchangeRateService::FIAT_LIST 內所有法幣到 DB。
+        $twdRate = $this->rateService->getRateToUSD('TWD');
+        
+        // 簡單檢查
+        if ($updatedCryptoCount > 0 || $twdRate > 0) {
+            error_log("Price Update Success. Crypto: {$updatedCryptoCount} coins, TWD Rate: " . (1/$twdRate));
+            return true;
+        }
+
+        error_log("Price Update Failed: No rates updated.");
+        return false;
+    }
+
 }
 ?>
