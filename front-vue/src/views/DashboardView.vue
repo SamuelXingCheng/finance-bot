@@ -5,10 +5,10 @@
       <div class="data-box premium-box">
         <div class="premium-content">
           <div class="premium-header">
-            <h2 class="premium-title">升級 Premium 會員</h2>
+            <h2 class="premium-title">請一杯咖啡，升級 Premium 會員</h2>
             <span class="premium-badge">PRO</span>
           </div>
-          <div class="premium-price">每月僅需 <span class="price-tag">$3 USD</span> (約 NT$95)</div>
+          <div class="premium-price">僅需 <span class="price-tag">$3 USD</span> (約 NT$95)</div>
           <p class="premium-desc">訂閱會員可立即解鎖無限制 AI 服務與進階報表。</p>
           <div class="payment-buttons">
             <button class="btn-pay btn-bmc" @click="openPaymentModal('bmc')">Apple Pay / 信用卡 / BMC</button>
