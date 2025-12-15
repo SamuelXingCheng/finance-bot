@@ -60,35 +60,43 @@ class CryptoService {
         $startDate = date('Y-m-d', strtotime($interval));
         $endDate = date('Y-m-d'); // 今天
 
-        // 2. 準備加密貨幣白名單
+        // 2. 準備加密貨幣白名單 (只畫這些幣)
         $cryptoList = array_keys(ExchangeRateService::COIN_ID_MAP);
         $cryptoList[] = 'USDT'; 
 
-        // 3. 從「帳戶歷史快照表」撈取資料
+        // 3. 撈取資料 (SQL 確保按插入順序排序)
+        // 🟢 [修正] 移除名稱限制，只靠幣種白名單過濾
         $sql = "SELECT snapshot_date, account_name, balance, currency_unit, exchange_rate 
             FROM account_balance_history 
             WHERE user_id = :uid AND snapshot_date >= :start 
-            -- 🔥 新增的條件：只選擇 CryptoService 寫入的明細帳戶
-            AND account_name LIKE 'Crypto-%' 
-            ORDER BY snapshot_date ASC, id ASC";
+            ORDER BY snapshot_date ASC, id ASC"; // id ASC 確保後面的紀錄是較新的
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':uid' => $userId, ':start' => $startDate]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // 4. 資料整理
+        // 4. 資料整理 (關鍵修正：解決當天多筆問題)
         $historyByDate = [];
         $firstDateInData = null;
         
         foreach ($rows as $row) {
+            // 只處理白名單內的幣種
             if (in_array(strtoupper($row['currency_unit']), $cryptoList)) {
-                $d = $row['snapshot_date'];
+                
+                // 🟢 [關鍵修正] 強制格式化日期為 Y-m-d (忽略時間)
+                // 這樣同一天如果有兩筆 (e.g. 10:00 和 14:00)，都會被歸類到同一個 Key
+                $d = date('Y-m-d', strtotime($row['snapshot_date']));
+                
                 if (!$firstDateInData) $firstDateInData = $d;
+                
+                // 將資料放入該日期的陣列中
+                // 因為我們之後會用 foreach 跑這個陣列，且 SQL 已排序，
+                // 所以同一帳戶後面的資料會覆蓋前面的，確保只取「最新」。
                 $historyByDate[$d][] = $row;
             }
         }
 
-        // 5. 每日重播
+        // 5. 每日重播 (Replay) 計算總資產
         $replayStart = $firstDateInData ? min($firstDateInData, $startDate) : $startDate;
         
         $period = new DatePeriod(
@@ -101,6 +109,7 @@ class CryptoService {
         $chartLabels = [];
         $chartData = [];
 
+        // 取得即時價格 (為了畫今天那個點)
         $currentRates = [];
         foreach ($cryptoList as $sym) {
             $currentRates[$sym] = $this->rateService->getRateToUSD($sym);
@@ -110,9 +119,14 @@ class CryptoService {
         foreach ($period as $dt) {
             $currentDate = $dt->format('Y-m-d');
             $dayOfMonth = $dt->format('d');
-            $isSnapshotDay = isset($historyByDate[$currentDate]);
+            $isToday = ($currentDate === date('Y-m-d'));
 
-            if ($isSnapshotDay) {
+            // 檢查這一天有沒有歷史快照
+            if (isset($historyByDate[$currentDate])) {
+                // 有快照 -> 更新餘額
+                // 這裡會遍歷該日期的所有紀錄。因為是按 id 排序，
+                // 同一個 account_name 如果出現兩次，第二次的 balance 會覆蓋第一次的。
+                // 這就完美解決了「當天多筆」的問題！
                 foreach ($historyByDate[$currentDate] as $record) {
                     $accName = $record['account_name'];
                     $currentBalances[$accName] = [
@@ -123,10 +137,13 @@ class CryptoService {
                 }
             }
 
+            // 產生圖表數據
             if ($currentDate >= $startDate) {
+                // 決定是否紀錄該日 (減少點數密度，優化效能)
                 $shouldRecord = true;
                 if ($range !== '1m') {
-                    $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $endDate || $isSnapshotDay);
+                    // 如果不是看 1 個月，則只取 每月1號、15號、有快照那天、以及今天
+                    $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $endDate || isset($historyByDate[$currentDate]));
                 }
 
                 if ($shouldRecord) {
@@ -134,10 +151,25 @@ class CryptoService {
                     foreach ($currentBalances as $acc) {
                         $bal = $acc['balance'];
                         $unit = $acc['unit'];
+                        
+                        // 🟢 [修正] 價格選擇邏輯：今天用即時價，過去用歷史價
                         $rate = 0;
-                        if ($unit === 'USDT') $rate = 1.0;
-                        elseif ($acc['hist_rate']) $rate = $acc['hist_rate'];
-                        else $rate = $currentRates[$unit] ?? 0;
+                        if ($unit === 'USDT') {
+                            $rate = 1.0;
+                        } 
+                        elseif ($isToday && isset($currentRates[$unit])) {
+                            // 如果是今天，優先用 API 抓到的最新即時價 (圖表最右邊會跳動)
+                            $rate = $currentRates[$unit];
+                        }
+                        elseif (!empty($acc['hist_rate'])) {
+                            // 過去日期，使用當時快照存下來的價格
+                            $rate = $acc['hist_rate'];
+                        }
+                        else {
+                            // 萬一沒有歷史價格，只好用現在價格回推 (備案)
+                            $rate = $currentRates[$unit] ?? 0;
+                        }
+
                         $dailyTotalUsd += ($bal * $rate);
                     }
                     $chartLabels[] = $currentDate;
