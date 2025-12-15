@@ -971,6 +971,36 @@ try {
                     $isProcessed = true;
                 }
             }
+            // ====================================================
+            // 🟢 [新增] CASE B-2: 處理圖片訊息 (發票/收據辨識)
+            // ====================================================
+            elseif ($event['type'] === 'message' && $msgType === 'image') {
+                
+                // 1. 下載圖片檔案
+                $imageData = $lineService->getMessageContent($lineMsgId);
+                
+                if ($imageData) {
+                    // 2. 確保 temp 目錄存在
+                    $tempDir = __DIR__ . '/temp';
+                    if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
+                    
+                    // 3. 存檔 (LINE 圖片通常是 jpg)
+                    $fileName = "image_{$lineMsgId}.jpg";
+                    $filePath = $tempDir . '/' . $fileName;
+                    
+                    if (file_put_contents($filePath, $imageData) !== false) {
+                        // 標記任務內容為檔案路徑，讓後端 process_queue.php 去處理
+                        $taskContent = "FILE:{$filePath}";
+                        $taskType = 'image'; // 標記為圖片任務
+                    } else {
+                        $lineService->replyMessage($replyToken, "❌ 系統錯誤：無法儲存圖片檔案。");
+                        $isProcessed = true;
+                    }
+                } else {
+                    $lineService->replyMessage($replyToken, "❌ 下載圖片失敗，請再試一次。");
+                    $isProcessed = true;
+                }
+            }
 
             
             // ====================================================
@@ -1037,6 +1067,21 @@ try {
                             ]
                         ];
                         $lineService->replyFlexMessage($replyToken, "收到語音記帳", $flexPayload);
+                    
+                    } elseif ($taskType === 'image') { // 🟢 [新增] 圖片回覆
+                        $flexPayload = [
+                            'type' => 'bubble',
+                            'size' => 'kilo',
+                            'body' => [
+                                'type' => 'box', 'layout' => 'vertical',
+                                'contents' => [
+                                    ['type' => 'text', 'text' => '收到圖片', 'weight' => 'bold', 'color' => '#1DB446', 'size' => 'md'],
+                                    ['type' => 'text', 'text' => 'AI 正在辨識收據內容，請稍候...', 'margin' => 'md', 'size' => 'sm', 'color' => '#555555', 'wrap' => true],
+                                ]
+                            ]
+                        ];
+                        $lineService->replyFlexMessage($replyToken, "收到圖片記帳", $flexPayload);
+
                     } else {
                         // 🟢 [修改]：統一風格 - 記帳已送出 (加上 Header 背景色)
                         $flexPayload = [
