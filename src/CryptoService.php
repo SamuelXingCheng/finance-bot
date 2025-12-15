@@ -326,6 +326,8 @@ class CryptoService {
      * 🟢 [最終隔離版] 儀表板數據：
      * 1. 交易績效 (Trading PnL): 純粹依賴 BUY/SELL 交易紀錄 (淨流出法)。
      * 2. 資產盈餘 (Asset Surplus): 純粹依賴 Holdings 餘額快照 (與交易獨立)。
+     *
+     * *** 此版本新增 FIFO 成本核算，以計算精確的 Realized/Unrealized PnL ***
      */
     public function getDashboardData(int $userId): array {
         
@@ -333,7 +335,6 @@ class CryptoService {
 
         // ==========================================
         // 1. [資產面] 取得持倉 (用於計算總現值)
-        //    (此數據來自快照，而非交易自動更新)
         // ==========================================
         $sqlHoldings = "SELECT * FROM crypto_holdings WHERE user_id = :uid AND quantity > 0";
         $stmt = $this->pdo->prepare($sqlHoldings);
@@ -343,6 +344,7 @@ class CryptoService {
         // ==========================================
         // 2. [資金面] 取得淨入金 (用於計算資產盈餘)
         // ==========================================
+        // ... (保持不變)
         $sqlNetInvest = "SELECT 
             SUM(CASE WHEN type = 'deposit' AND base_currency = 'TWD' THEN quantity ELSE 0 END) -
             SUM(CASE WHEN type = 'withdraw' AND base_currency = 'TWD' THEN quantity ELSE 0 END) as net_twd_invested
@@ -358,96 +360,168 @@ class CryptoService {
         error_log("💰 [資金] 淨入金(TWD): " . number_format($netInvestedTwd) . " / (USD): " . number_format($netInvestedUsd));
 
         // ==========================================
-        // 3. [交易面] 取得交易流水統計 (用於計算交易績效)
-        //    *** 修改點: 僅計算以法幣/穩定幣報價的交易 (假設為 USDT/USD) ***
+        // 3. [交易面] 取得交易流水 (用於 PHP 進行 FIFO 計算)
+        //    *** 只取得 BUY/SELL 交易，並依時間排序 (FIFO) ***
         // ==========================================
-        
-        // 註：若您的交易紀錄中，以 TWD 報價的 total 也是您希望計入績效的，
-        // 則應包含 'TWD'，並在 SQL 或 PHP 中將其轉換為 USD。
-        // 為簡化，我們只假設 USDT/USD 報價的 total 已是 USD 單位或匯率為 1。
-        $legalTenderQuotes = ['USDT', 'USD']; 
-        $legalTenderQuotesStr = implode("','", $legalTenderQuotes);
-
-        $sqlTradeStats = "SELECT 
-            base_currency,
-            SUM(CASE WHEN type = 'buy' THEN quantity ELSE 0 END) as buy_qty,
-            SUM(CASE WHEN type = 'sell' THEN quantity ELSE 0 END) as sell_qty,
-            /* 由於我們篩選了 quote_currency = USDT/USD，total 即為 USD 計價成本/收入 */
-            SUM(CASE WHEN type = 'buy' THEN total ELSE 0 END) as buy_cost, 
-            SUM(CASE WHEN type = 'sell' THEN total ELSE 0 END) as sell_revenue
+        $sqlTradeDetails = "SELECT 
+            base_currency, 
+            quote_currency,
+            type, 
+            quantity, 
+            price, 
+            total,
+            created_at 
             FROM crypto_transactions 
             WHERE user_id = :uid 
               AND type IN ('buy', 'sell')
-              AND quote_currency IN ('{$legalTenderQuotesStr}') /* <<<=== 關鍵修改：排除幣本位交易 */
-            GROUP BY base_currency";
+            ORDER BY created_at ASC"; // 確保是 FIFO 順序
             
-        $stmtTrade = $this->pdo->prepare($sqlTradeStats);
+        $stmtTrade = $this->pdo->prepare($sqlTradeDetails);
         $stmtTrade->execute([':uid' => $userId]);
-        $tradeRows = $stmtTrade->fetchAll(PDO::FETCH_ASSOC);
-        
-        $tradeStats = [];
-        foreach ($tradeRows as $r) {
-            $tradeStats[$r['base_currency']] = $r;
+        $transactions = $stmtTrade->fetchAll(PDO::FETCH_ASSOC);
+
+        // ==========================================
+        // 3.1. [PHP 成本核算] 執行 FIFO 成本法計算 PnL
+        // ==========================================
+        $totalRealizedPnL = 0; // 追蹤已實現損益
+        $inventory = [];       // 庫存堆疊，key 為 base_currency，value 為 FIFO 成本紀錄
+        $legalTenderQuotes = ['USDT', 'USD', 'TWD']; // 法幣/穩定幣報價
+
+        foreach ($transactions as $tx) {
+            $base = $tx['base_currency'];
+            $type = $tx['type'];
+            $qty = (float)$tx['quantity'];
+            $total = (float)$tx['total'];
+            $quote = $tx['quote_currency'];
+            
+            // ⭐️ 僅處理法幣/穩定幣報價的交易 (排除幣本位)
+            if (!in_array($quote, $legalTenderQuotes)) {
+                continue; 
+            }
+
+            // 將 total 轉換為 USD (假設 USDT/USD 為 1:1)
+            $cost_usd_or_revenue_usd = $total;
+            if ($quote === 'TWD' && $usdTwdRate > 0) {
+                $cost_usd_or_revenue_usd = $total / $usdTwdRate;
+            }
+            
+            if ($type === 'buy') {
+                // 買入：將新庫存推入堆疊
+                if (!isset($inventory[$base])) {
+                    $inventory[$base] = [];
+                }
+                $unit_cost_usd = ($qty > 0) ? $cost_usd_or_revenue_usd / $qty : 0; 
+                // 儲存 [數量, 單位成本(USD)]
+                $inventory[$base][] = ['qty' => $qty, 'cost' => $unit_cost_usd];
+
+            } elseif ($type === 'sell') {
+                // 賣出：從堆疊中執行 FIFO 清算
+                $remaining_qty = $qty;
+                $revenue_usd = $cost_usd_or_revenue_usd;
+                $cost_of_goods_sold = 0;
+                
+                if (isset($inventory[$base])) {
+                    // FIFO 邏輯：從最舊的庫存開始消耗
+                    foreach ($inventory[$base] as $i => &$stock) {
+                        if ($remaining_qty <= 0) break;
+
+                        $use_qty = min($remaining_qty, $stock['qty']);
+                        
+                        $cost_of_goods_sold += $use_qty * $stock['cost']; // 計算賣出部分的成本
+                        
+                        $stock['qty'] -= $use_qty;
+                        $remaining_qty -= $use_qty;
+
+                        // PHP：如果庫存用完，標記為移除，但直到迴圈結束才真正移除 (避免索引問題)
+                        if ($stock['qty'] < 1e-8) { // 使用微小數字避免浮點數誤差
+                            $stock['qty'] = 0;
+                        }
+                    }
+                    // 清除數量為 0 的庫存
+                    $inventory[$base] = array_filter($inventory[$base], function($stock) {
+                        return $stock['qty'] > 1e-8;
+                    });
+                    $inventory[$base] = array_values($inventory[$base]);
+                }
+                
+                // 計算並累加已實現損益 (Realized PnL)
+                $realized_pnl = $revenue_usd - $cost_of_goods_sold;
+                $totalRealizedPnL += $realized_pnl;
+            }
         }
 
         // ==========================================
-        // 4. 迴圈計算 (資產與交易績效)
+        // 3.2. [結果計算] 根據 FIFO 庫存計算總未實現損益
+        // ==========================================
+        $totalUnrealizedPnL = 0;
+        $fifoInventoryStats = [];
+        
+        foreach ($inventory as $sym => $stocks) {
+            $total_qty = 0;
+            $total_cost_usd = 0;
+            
+            // 計算剩餘庫存的總數量和總成本 (USD)
+            foreach ($stocks as $stock) {
+                $total_qty += $stock['qty'];
+                $total_cost_usd += $stock['qty'] * $stock['cost'];
+            }
+
+            $currentPrice = ($sym === 'USDT') ? 1.0 : $this->rateService->getRateToUSD($sym);
+            $marketValue = $total_qty * $currentPrice;
+            
+            // 未實現損益 = 市值 - FIFO 成本
+            $unrealized_pnl = $marketValue - $total_cost_usd;
+            $totalUnrealizedPnL += $unrealized_pnl;
+
+            $avgCostPerUnit = ($total_qty > 0) ? $total_cost_usd / $total_qty : 0;
+            
+            // 儲存結果供後續迴圈使用
+            $fifoInventoryStats[$sym] = [
+                'net_qty' => $total_qty, 
+                'fifo_total_cost' => $total_cost_usd,
+                'fifo_avg_cost' => $avgCostPerUnit,
+            ];
+        }
+        
+        $totalTradingPnL = $totalRealizedPnL + $totalUnrealizedPnL; // 總 PnL
+        
+        // ==========================================
+        // 4. 迴圈計算 (資產與 portfolio 列表)
+        //    *** PnL 部分使用 FIFO 計算結果 ***
         // ==========================================
         $portfolio = [];
         $totalAssetsUsd = 0;
-        $totalTradingPnL = 0; 
         
-        // 為了確保交易績效涵蓋所有交易過的幣種，即使已經賣光
+        // 確保涵蓋所有持倉和所有交易過的幣種
         $allSymbols = array_unique(array_merge(
             array_column($holdings, 'currency'), 
-            array_keys($tradeStats)
+            array_keys($fifoInventoryStats)
         ));
 
         error_log("--------------------------------------------------");
-        error_log("📊 [交易] 開始逐幣計算 PnL (交易現金流法):");
+        error_log("📊 [交易] 開始逐幣計算 PnL (FIFO 成本法):");
 
         foreach ($allSymbols as $sym) {
             
             $currentPrice = ($sym === 'USDT') ? 1.0 : $this->rateService->getRateToUSD($sym);
 
-            // A. 資產面數據 (僅用於計算總現值和 portfolio 列表)
+            // A. 資產面數據 (使用 Holdings 快照)
             $hKey = array_search($sym, array_column($holdings, 'currency'));
             $holdingQty = ($hKey !== false) ? (float)$holdings[$hKey]['quantity'] : 0;
-            $avgCost = ($hKey !== false) ? (float)$holdings[$hKey]['avg_cost'] : 0; // 庫存成本
-
+            
             // 資產現值
             $marketValue = $holdingQty * $currentPrice;
             $totalAssetsUsd += $marketValue;
 
-            // 🟢 [Debug Log] 印出資產計算細節 (僅針對持倉)
-            // if ($holdingQty > 0) {
-            //     error_log("   💎 資產: [$sym]");
-            //     error_log("      數量(快照): $holdingQty | 現價: $currentPrice");
-            //     error_log("      市值: " . number_format($marketValue, 2) . " (累計總資產: " . number_format($totalAssetsUsd, 2) . ")");
-            // }
+            // B. 從 FIFO 結果中獲取成本
+            $fifoStats = $fifoInventoryStats[$sym] ?? ['net_qty'=>0, 'fifo_total_cost'=>0, 'fifo_avg_cost'=>0];
+            $netTradeQty = (float)$fifoStats['net_qty'];
+            $fifoTotalCost = (float)$fifoStats['fifo_total_cost'];
+            $fifoAvgCost = (float)$fifoStats['fifo_avg_cost'];
 
-            // B. 交易面數據 (用於計算 Trading PnL)
-            $tStats = $tradeStats[$sym] ?? ['buy_qty'=>0, 'sell_qty'=>0, 'buy_cost'=>0, 'sell_revenue'=>0];
-            $netTradeQty = (float)$tStats['buy_qty'] - (float)$tStats['sell_qty'];
-            $buyCost = (float)$tStats['buy_cost'];
-            $sellRevenue = (float)$tStats['sell_revenue'];
-            $netTradeFlow = $buyCost - $sellRevenue; // 淨流出資金
-            
-            // 交易績效公式：(交易留下的幣 * 現價) - (交易淨流出)
-            $thisTradingPnL = ($netTradeQty * $currentPrice) - $netTradeFlow;
-            $totalTradingPnL += $thisTradingPnL;
-
-            // 🔥 寫入 Log (只要有交易紀錄就印出)
-            // if ($buyCost > 0 || $sellRevenue > 0) {
-            //     error_log("   🔹 幣種: [$sym] (交易計算)");
-            //     error_log("      買入總額: $buyCost | 賣出總額: $sellRevenue | 淨流出資金: $netTradeFlow");
-            //     error_log("      淨買入量: $netTradeQty | 當前市價: $currentPrice | 庫存價值(交易): " . number_format($netTradeQty * $currentPrice, 2));
-            //     error_log("      👉 該幣交易損益: " . number_format($thisTradingPnL, 2));
-            // }
-            
-            // 列表顯示用的個別數據 (仍然使用資產面數據，因為它反映快照)
+            // 列表顯示用的個別數據 (使用 Holdings 數量和 FIFO 平均成本)
             if ($holdingQty > 0) { 
-                $totalCost = $holdingQty * $avgCost;
+                $totalCost = $holdingQty * $fifoAvgCost; // 使用 FIFO 成本
                 $unrealizedPnl = $marketValue - $totalCost; 
                 $roi = ($totalCost > 0) ? ($unrealizedPnl / $totalCost) * 100 : 0;
 
@@ -456,25 +530,30 @@ class CryptoService {
                     'name' => $sym,
                     'type' => 'trade',
                     'balance' => $holdingQty,
-                    'avgPrice' => $avgCost,
+                    'avgPrice' => $fifoAvgCost, // 顯示 FIFO 平均成本
                     'currentPrice' => $currentPrice,
                     'valueUsd' => $marketValue,
                     'costUsd' => $totalCost,
-                    'pnl' => $unrealizedPnl, // 這是資產快照的浮動損益
+                    'pnl' => $unrealizedPnl,      // 該幣種的 FIFO 未實現損益
                     'pnlPercent' => $roi
                 ];
             }
         }
+        
         error_log("--------------------------------------------------");
-        error_log("🏁 交易總績效 (Sum): " . number_format($totalTradingPnL, 2));
+        error_log("🏁 交易總績效 (Trading PnL): " . number_format($totalTradingPnL, 2));
+        error_log("🏁 總已實現損益 (Realized PnL): " . number_format($totalRealizedPnL, 2));
+        error_log("🏁 總未實現損益 (Unrealized PnL): " . number_format($totalUnrealizedPnL, 2)); 
         error_log("🏁 資產總現值 (Asset): " . number_format($totalAssetsUsd, 2));
 
         // ==========================================
-        // 5. 最終指標 (完全獨立)
+        // 5. 最終指標 (完全獨立) - 使用 FIFO 結果
         // ==========================================
         
         $assetSurplus = $totalAssetsUsd - $netInvestedUsd;
-        $tradingPnl = $totalTradingPnL; // 純交易紀錄計算
+        $tradingPnl = $totalTradingPnL; 
+        $realizedPnl = $totalRealizedPnL;
+        $unrealizedPnl = $totalUnrealizedPnL;
         $totalRoi = ($netInvestedUsd > 0) ? ($assetSurplus / $netInvestedUsd) * 100 : 0;
 
         return [
@@ -485,14 +564,14 @@ class CryptoService {
                 
                 // 🟢 兩個獨立指標
                 'assetSurplus' => $assetSurplus, 
-                'tradingPnl' => $tradingPnl,     
+                'tradingPnl' => $tradingPnl,      
                 
-                // 為了兼容前端舊欄位，這裡用 Trading PnL 代替
-                'unrealizedPnl' => $tradingPnl, 
-                'realizedPnl' => $tradingPnl, 
+                // 返回精確的 FIFO 分離結果
+                'unrealizedPnl' => $unrealizedPnl, 
+                'realizedPnl' => $realizedPnl, 
                 'pnlPercent' => $totalRoi,
                 
-                'breakdown' => ['realizedSpot' => $tradingPnl, 'realizedCoin' => 0]
+                'breakdown' => ['realizedSpot' => $realizedPnl, 'realizedCoin' => 0]
             ],
             'holdings' => $portfolio,
             'usdTwdRate' => $usdTwdRate

@@ -39,10 +39,10 @@
             <div class="vertical-line"></div>
             
             <div class="stat-item">
-                <span class="label">未實現損益 (Unrealized)</span> 
+                <span class="label">未實現損益 (Unrealized)</span>
                 
-                <span class="value" :class="dashboard.assetSurplus >= 0 ? 'text-profit' : 'text-loss'">
-                    {{ dashboard.assetSurplus >= 0 ? '+' : '' }}{{ numberFormat(dashboard.assetSurplus, 2) }}
+                <span class="value" :class="dashboard.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'">
+                    {{ dashboard.unrealizedPnl >= 0 ? '+' : '' }}{{ numberFormat(dashboard.unrealizedPnl, 2) }}
                 </span>
             
               
