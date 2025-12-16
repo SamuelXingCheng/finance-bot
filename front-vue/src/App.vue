@@ -232,19 +232,22 @@ async function saveSettings() {
 function handleLogout() {
   if (!confirm('確定要登出嗎？')) return;
 
-  // 1. 清除 Google Token
+  // 1. 清除所有 LocalStorage
   localStorage.removeItem('google_id_token');
-  
-  // 2. 清除其他暫存資料 (避免下次登入誤判)
   localStorage.removeItem('pending_onboarding');
   localStorage.removeItem('pending_join_token');
 
-  // 3. 執行 LIFF 登出 (如果是 LINE 登入環境)
-  if (liff.isLoggedIn()) {
-    liff.logout();
+  // 2. 安全的 LIFF 登出
+  // 只有當 LIFF 真的有登入時才執行 logout，避免報錯
+  try {
+    if (liff && liff.isLoggedIn && liff.isLoggedIn()) {
+      liff.logout();
+    }
+  } catch (e) {
+    console.warn('LIFF Logout skipped');
   }
 
-  // 4. 重整頁面，讓 App 回到初始狀態
+  // 3. 重整頁面 -> 觸發 onMounted -> 進入登入畫面
   window.location.reload();
 }
 
@@ -558,28 +561,27 @@ onMounted(async () => {
     } else {
         // --- B. 如果沒有 Google Token，才執行 LIFF 初始化 ---
         if (!liff) {
-            liffState.error = 'LIFF SDK 未載入';
+            console.warn('LIFF SDK not loaded');
+            // ★ 修改點：不要設定 error，直接結束 loading，這樣就會顯示登入頁
             isLoading.value = false;
             return;
         }
 
         try {
-            await liff.init({ liffId: LIFF_ID });
+            // 嘗試初始化
+            await liff.init({ liffId: LIFF_ID || "" }); // 防止 undefined 報錯
             
             if (liff.isLoggedIn()) {
                 liffState.isLoggedIn = true;
-                try {
-                    liffState.profile = await liff.getProfile();
-                    await loadUserData(); // 執行後續資料載入
-                } catch (pErr) {
-                    console.warn('Init Data Error', pErr);
-                }
+                liffState.profile = await liff.getProfile();
+                await loadUserData();
             }
         } catch (err) {
-            console.error('LIFF Error:', err);
+          console.warn('LIFF Init Failed (可能為純網頁模式):', err);
             // 只有在非 Google 登入且 LIFF 也失敗時才顯示錯誤，避免嚇到網頁版用戶
             // liffState.error = '連線失敗'; 
         } finally {
+            // 不管 LIFF 成功還是失敗，都要把 Loading 關掉，讓用戶看到畫面
             isLoading.value = false;
         }
     }
