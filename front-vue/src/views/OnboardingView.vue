@@ -7,14 +7,35 @@
       </div>
 
       <div v-if="step === 1" class="step-content text-center">
-        <div class="logo-circle">Fin</div>
-        <h2>歡迎使用 FinBot！</h2>
-        <p class="desc">口語記帳 x 資產管理。<br>動動手、動動口，讓我們慢慢變富！</p>
-        <button class="btn-primary" @click="nextStep">開始體驗</button>
+  
+        <div v-if="!showLoginMode">
+          <div class="logo-circle">Fin</div>
+          <h2>歡迎使用 FinBot！</h2>
+          <p class="desc">口語記帳 x 資產管理。<br>動動手、動動口，讓我們慢慢變富！</p>
+          <button class="btn-primary" @click="nextStep">開始體驗</button>
 
-        <button class="btn-link mt-4" @click="emit('login-direct')">
-          我是老用戶，直接登入
-        </button>
+          <button class="btn-link mt-4" @click="showLoginMode = true">
+            我是老用戶，直接登入
+          </button>
+        </div>
+
+        <div v-else>
+          <h2>歡迎回來</h2>
+          <p class="desc">請選擇您的登入方式</p>
+
+          <button class="btn-primary btn-login" @click="emit('login-direct')">
+            LINE 登入
+          </button>
+
+          <div class="divider">或</div>
+
+          <div id="google-btn-step1" class="google-btn-container"></div>
+
+          <button class="btn-link mt-4" @click="showLoginMode = false">
+            &larr; 返回
+          </button>
+        </div>
+
       </div>
 
       <div v-else-if="step === 2" class="step-content">
@@ -57,10 +78,30 @@
       <div v-else-if="step === 4" class="step-content">
         <h2>設定每月預算</h2>
         <p class="desc">我們會幫您監控，避免超支。</p>
+        
+        <div class="quick-budget-options">
+          <button 
+            v-for="amount in [10000, 35000, 50000]" 
+            :key="amount"
+            type="button"
+            class="btn-outline-sm"
+            :class="{ active: form.budget === amount }"
+            @click="form.budget = amount"
+          >
+            ${{ amount.toLocaleString() }}
+          </button>
+        </div>
+
         <div class="input-wrapper">
           <span class="prefix">NT$</span>
-          <input type="number" v-model="form.budget" class="input-lg" placeholder="例如：30000">
+          <input 
+            type="number" 
+            v-model="form.budget" 
+            class="input-lg" 
+            placeholder="或手動輸入金額"
+          >
         </div>
+        
         <button class="btn-primary" :disabled="!form.budget" @click="nextStep">下一步</button>
       </div>
 
@@ -104,17 +145,19 @@
         <h2>恭喜完成！</h2>
         
         <div class="reward-card">
-            <p class="reward-label">獲得新手獎勵</p>
-            <p class="reward-amount">FinPoints 50 點</p>
-            <p class="reward-note">點數可折抵訂閱費，比特幣回饋即將上線！</p>
+            <p class="reward-label">新手專屬好禮</p>
+            <p class="reward-amount">7 天 PRO 會員試用</p>
+            <p class="reward-sub">+ FinPoints 50 點 (可抵扣訂閱)</p>
         </div>
 
         <div class="unlock-info">
-            <p class="unlock-title">您已解鎖以下功能：</p>
+            <p class="unlock-title">試用期間您將擁有：</p>
             <ul class="unlock-list">
-            <li>AI 口語記帳與資產管理</li>
-            <li>每日免費 AI 額度 (每日更新)</li>
+              <li>無限次 AI 記帳與資產分析</li>
+              <li>解鎖完整財務報表</li>
+              <li>雲端自動備份</li>
             </ul>
+            <p class="unlock-note">試用結束後將自動轉為免費版，不會自動扣款。</p>
         </div>
         
         <div class="spacer"></div>
@@ -170,6 +213,7 @@
 import { ref, reactive } from 'vue';
 
 const emit = defineEmits(['trigger-login', 'login-direct', 'skip-login']);
+const showLoginMode = ref(false);
 
 const step = ref(1);
 const showTerms = ref(false);
@@ -188,33 +232,56 @@ const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0
 const selectedHour = ref('21');
 const selectedMinute = ref('00');
 
-// Google 登入回調函式
-function handleGoogleCredentialResponse(response) {
-    console.log("Google ID Token:", response.credential);
+function renderGoogleBtn(elementId) {
+  if (window.google) {
+    // 這裡記得填入您剛申請好的 Client ID
+    const clientId = "251064690633-qgktj8rrpjf3fiqbtqntou7hk32q9e8t.apps.googleusercontent.com"; 
+
+    window.google.accounts.id.initialize({
+      client_id: clientId,
+      callback: handleGoogleCredentialResponse
+    });
     
-    // 1. 將 Token 存入 localStorage
+    window.google.accounts.id.renderButton(
+      document.getElementById(elementId),
+      { theme: "outline", size: "large", width: "100%" }
+    );
+  }
+}
+
+function handleGoogleCredentialResponse(response) {
+    // 1. 存 Token
     localStorage.setItem('google_id_token', response.credential);
     
-    // 2. 觸發登入成功 (您可以直接重新整理，或 emit 事件讓 App.vue 處理)
-    // 這裡為了簡單，我們直接重整，讓 App.vue 重新抓取資料
-    window.location.reload();
+    // 2. ★★★ 關鍵修正：將目前的表單資料 (form) 存入 LocalStorage ★★★
+    // App.vue 重整後會讀取 'pending_onboarding' 這個欄位來提交資料
+    localStorage.setItem('pending_onboarding', JSON.stringify(form));
+    
+    // 3. 重新整理，觸發 App.vue 的初始化與資料提交
+    window.location.reload(); 
 }
 
 import { watch, nextTick } from 'vue';
 
+// 監聽 Step 1 的「老用戶登入」模式
+watch(showLoginMode, async (val) => {
+  if (val) {
+    await nextTick(); // 等待 DOM 出現
+    renderGoogleBtn("google-btn-step1");
+  }
+});
+
 watch(step, async (newVal) => {
-    if (newVal === 7) {
-        await nextTick(); // 等待 DOM 更新
+    if (newVal === 7) { // 或者是您放按鈕的那個步驟
+        await nextTick();
         if (window.google) {
             window.google.accounts.id.initialize({
-                // 請換成您的 Client ID
                 client_id: "251064690633-qgktj8rrpjf3fiqbtqntou7hk32q9e8t.apps.googleusercontent.com",
-                callback: handleGoogleCredentialResponse
+                callback: handleGoogleCredentialResponse // <--- 綁定這裡
             });
-            
             window.google.accounts.id.renderButton(
                 document.getElementById("google-btn-wrapper"),
-                { theme: "outline", size: "large", width: "300" } // 寬度可自訂
+                { theme: "outline", size: "large", width: "100%" }
             );
         }
     }
@@ -474,5 +541,61 @@ h2 { color: #8c7b75; margin: 0 0 12px 0; font-size: 1.4rem; }
 }
 .google-btn-container {
   display: flex; justify-content: center; margin-bottom: 10px;
+}
+
+.divider {
+  margin: 20px 0;
+  color: #aaa;
+  font-size: 0.9rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.divider::before, .divider::after {
+  content: ""; flex: 1; height: 1px; background: #eee; margin: 0 10px;
+}
+.google-btn-container {
+  min-height: 40px; /* 預留高度避免跳動 */
+  display: flex; justify-content: center;
+}
+
+/* 快速預算按鈕容器 */
+.quick-budget-options {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  justify-content: space-between;
+}
+
+/* 輕量級外框按鈕 */
+.btn-outline-sm {
+  flex: 1;
+  padding: 10px 5px;
+  border: 1px solid #d4a373;
+  border-radius: 10px;
+  background: white;
+  color: #d4a373;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-outline-sm:hover {
+  background: #fff8f0;
+}
+
+/* 被選中時的樣式 */
+.btn-outline-sm.active {
+  background: #d4a373;
+  color: white;
+  box-shadow: 0 4px 10px rgba(212, 163, 115, 0.3);
+}
+
+/* 調整原本的 input-wrapper 間距 */
+.input-wrapper {
+  margin-top: 10px;
+  display: flex; 
+  align-items: center; 
+  border-bottom: 2px solid #eee; 
+  padding: 5px; 
 }
 </style>

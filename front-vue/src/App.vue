@@ -127,6 +127,21 @@ const handleRefreshDashboard = () => {
     }
 };
 
+
+// 解析 JWT Token (取得 Google 用戶資訊)
+function parseJwt(token) {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    } catch (e) {
+        return null;
+    }
+}
+
 // --- 帳本操作邏輯 ---
 
 function toggleLedgerMenu() {
@@ -341,69 +356,112 @@ async function processPendingOnboarding() {
   }
 }
 
+// ★ 抽離共用的資料載入邏輯
+async function loadUserData() {
+    try {
+        // 獲取用戶狀態
+        const statusResponse = await fetchWithLiffToken(`${API_URL}?action=get_user_status`);
+        if (statusResponse && statusResponse.ok) {
+            const result = await statusResponse.json();
+            if (result.status === 'success') {
+                isOnboarded.value = Number(result.data.is_onboarded) === 1;
+            }
+        }
+
+        // 處理暫存的加入請求
+        const pendingToken = localStorage.getItem('pending_join_token');
+        if (pendingToken) {
+            localStorage.removeItem('pending_join_token');
+            await joinLedger(pendingToken);
+        }
+
+        // 獲取帳本列表
+        if (isOnboarded.value) {
+            await fetchLedgers();
+        }
+        
+        // 處理 Pending Onboarding (如果是剛註冊完)
+        await processPendingOnboarding();
+        
+    } catch (e) {
+        console.error("Load User Data Error:", e);
+    }
+}
+
 onMounted(async () => {
-    // 1. 檢查網址參數
+    // 1. 檢查網址參數 (保留原本邏輯)
     const urlParams = new URLSearchParams(window.location.search);
     const targetTab = urlParams.get('tab');
     if (targetTab && ['Dashboard', 'Accounts', 'Crypto'].includes(targetTab)) {
         currentTab.value = targetTab;
     }
 
-    // 偵測邀請連結參數
     const inviteAction = urlParams.get('action');
     const inviteToken = urlParams.get('token'); 
-    
     if (inviteAction === 'join_ledger' && inviteToken) {
         localStorage.setItem('pending_join_token', inviteToken);
         window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if (!liff) {
-        liffState.error = 'LIFF SDK 未載入';
-        isLoading.value = false;
-        return;
-    }
-
-    try {
-        await liff.init({ liffId: LIFF_ID });
-        
-        if (liff.isLoggedIn()) {
+    // ---------------------------------------------------------
+    // ★ 修改開始：統一登入檢查邏輯
+    // ---------------------------------------------------------
+    
+    // 2. 先檢查是否有 Google Token
+    const googleToken = localStorage.getItem('google_id_token');
+    
+    if (googleToken) {
+        // --- A. Google 登入流程 ---
+        const payload = parseJwt(googleToken);
+        if (payload) {
+            // 設定狀態為已登入
             liffState.isLoggedIn = true;
-            try {
-                liffState.profile = await liff.getProfile();
-
-                // 獲取用戶狀態
-                const statusResponse = await fetchWithLiffToken(`${API_URL}?action=get_user_status`);
-                if (statusResponse && statusResponse.ok) {
-                    const result = await statusResponse.json();
-                    if (result.status === 'success') {
-                        isOnboarded.value = Number(result.data.is_onboarded) === 1;
-                    }
-                }
-                
-                // 處理暫存的加入請求
-                const pendingToken = localStorage.getItem('pending_join_token');
-                if (pendingToken) {
-                    localStorage.removeItem('pending_join_token');
-                    await joinLedger(pendingToken);
-                }
-
-                // 獲取帳本列表
-                if (isOnboarded.value) {
-                    await fetchLedgers();
-                }
-
-            } catch (pErr) {
-                console.warn('Init Data Error', pErr);
-            }
             
-            await processPendingOnboarding();
-        } 
-    } catch (err) {
-        console.error('LIFF Error:', err);
-        liffState.error = '連線失敗，請檢查網路設定';
-    } finally {
+            // 模擬 LIFF Profile 結構，讓畫面能顯示頭像
+            liffState.profile = {
+                userId: payload.sub,
+                displayName: payload.name,
+                pictureUrl: payload.picture,
+                email: payload.email
+            };
+
+            // 執行後續資料載入
+            await loadUserData(); 
+        } else {
+            // Token 格式錯誤或過期，清除它
+            localStorage.removeItem('google_id_token');
+        }
+        
+        // Google 登入處理完畢，停止 Loading
         isLoading.value = false;
+        
+    } else {
+        // --- B. 如果沒有 Google Token，才執行 LIFF 初始化 ---
+        if (!liff) {
+            liffState.error = 'LIFF SDK 未載入';
+            isLoading.value = false;
+            return;
+        }
+
+        try {
+            await liff.init({ liffId: LIFF_ID });
+            
+            if (liff.isLoggedIn()) {
+                liffState.isLoggedIn = true;
+                try {
+                    liffState.profile = await liff.getProfile();
+                    await loadUserData(); // 執行後續資料載入
+                } catch (pErr) {
+                    console.warn('Init Data Error', pErr);
+                }
+            }
+        } catch (err) {
+            console.error('LIFF Error:', err);
+            // 只有在非 Google 登入且 LIFF 也失敗時才顯示錯誤，避免嚇到網頁版用戶
+            // liffState.error = '連線失敗'; 
+        } finally {
+            isLoading.value = false;
+        }
     }
 });
 </script>
