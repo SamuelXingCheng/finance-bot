@@ -250,14 +250,22 @@ function renderGoogleBtn(elementId) {
 }
 
 function handleGoogleCredentialResponse(response) {
-    // 1. 存 Token
+    // 1. 存入 Google Token
     localStorage.setItem('google_id_token', response.credential);
     
-    // 2. ★★★ 關鍵修正：將目前的表單資料 (form) 存入 LocalStorage ★★★
-    // App.vue 重整後會讀取 'pending_onboarding' 這個欄位來提交資料
-    localStorage.setItem('pending_onboarding', JSON.stringify(form));
+    // 2. 判斷是「新手」還是「老手」
+    if (!showLoginMode.value) {
+        // [新手模式 - Step 7]
+        // 用戶剛填完問卷，我們要存檔，讓 App.vue 幫他送出
+        localStorage.setItem('pending_onboarding', JSON.stringify(form));
+    } else {
+        // [老手模式 - Step 1]
+        // ★★★ 關鍵修正：老用戶直接登入，絕對不要留任何引導資料！
+        // 強制移除可能殘留的舊暫存檔，避免 App.vue 誤判為「剛填完問卷」
+        localStorage.removeItem('pending_onboarding');
+    }
     
-    // 3. 重新整理，觸發 App.vue 的初始化與資料提交
+    // 3. 重新整理
     window.location.reload(); 
 }
 
