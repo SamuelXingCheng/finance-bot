@@ -881,6 +881,39 @@ try {
                     $response = ['status' => 'error', 'message' => '更新失敗'];
                 }
                 break;
+            // 🟢 [新增] 綁定 LINE 帳號
+            case 'link_line':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $lineToken = $input['line_token'] ?? '';
+
+                if (empty($lineToken)) {
+                    $response = ['status' => 'error', 'message' => '缺少 LINE Token'];
+                    break;
+                }
+
+                // 1. 驗證 LINE Token
+                $lineUserId = verifyLineIdToken($lineToken);
+                if (!$lineUserId) {
+                    $response = ['status' => 'error', 'message' => 'LINE Token 無效或過期'];
+                    break;
+                }
+
+                // 2. 檢查是否已被佔用
+                if ($userService->isLineIdTaken($lineUserId, $dbUserId)) {
+                    $response = ['status' => 'error', 'message' => '此 LINE 帳號已綁定其他 FinBot 帳號，無法重複綁定。'];
+                    break;
+                }
+
+                // 3. 執行綁定
+                if ($userService->linkLineUser($dbUserId, $lineUserId)) {
+                    $response = ['status' => 'success', 'message' => 'LINE 帳號綁定成功！'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '綁定失敗'];
+                }
+                break;
             default:
                 $response = ['status' => 'error', 'message' => 'Invalid action.'];
                 break;

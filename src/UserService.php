@@ -101,13 +101,18 @@ class UserService {
     }
 
     public function getUserStatus(int $userId): array {
-        // 🟢 [修改] 增加查詢 reminder_time
-        $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium, monthly_budget, reminder_time FROM users WHERE id = ?");
+        // 🟢 [修改] 多查 line_user_id
+        $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium, monthly_budget, reminder_time, line_user_id FROM users WHERE id = ?");
         $stmt->execute([$userId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         
-        // 設定預設值
-        return $result ?: ['is_onboarded' => 0, 'is_premium' => 0, 'monthly_budget' => 0, 'reminder_time' => '21:00'];
+        $data = $result ?: ['is_onboarded' => 0, 'is_premium' => 0, 'monthly_budget' => 0, 'reminder_time' => '21:00'];
+        
+        // 轉換為布林值傳給前端
+        $data['has_line_linked'] = !empty($data['line_user_id']);
+        unset($data['line_user_id']); // 隱藏原始 ID
+        
+        return $data;
     }
 
     public function updateUserProfile(int $userId, array $data): bool {
@@ -157,5 +162,18 @@ class UserService {
         $stmt = $this->pdo->prepare("UPDATE users SET active_ledger_id = ? WHERE id = ?");
         return $stmt->execute([$ledgerId, $userId]);
     }
+    // 🟢 [新增] 檢查 LINE ID 是否已被其他帳號使用 (排除自己)
+    public function isLineIdTaken(string $lineUserId, int $currentUserId): bool {
+        $stmt = $this->pdo->prepare("SELECT id FROM users WHERE line_user_id = ? AND id != ?");
+        $stmt->execute([$lineUserId, $currentUserId]);
+        return (bool)$stmt->fetch();
+    }
+
+    // 🟢 [新增] 將 LINE ID 綁定到指定用戶
+    public function linkLineUser(int $userId, string $lineUserId): bool {
+        $stmt = $this->pdo->prepare("UPDATE users SET line_user_id = ? WHERE id = ?");
+        return $stmt->execute([$lineUserId, $userId]);
+    }
+
 }
 ?>

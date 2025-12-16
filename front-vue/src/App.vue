@@ -88,6 +88,17 @@
             <div v-if="showSettingsModal" class="modal-overlay" @click.self="showSettingsModal = false">
               <div class="modal-card">
                 <h3>個人設定</h3>
+                <div class="form-group link-section">
+                  <label>帳號連結</label>
+                  
+                  <div v-if="isLineLinked" class="link-status connected">
+                      LINE 帳號已綁定
+                  </div>
+                  <button v-else class="btn-link-line" @click="handleLinkLine">
+                      綁定 LINE 帳號
+                  </button>
+                  <p v-if="!isLineLinked" class="link-hint">綁定後可使用 LINE 快速登入</p>
+              </div>
                 
                 <div class="form-group">
                   <label>每月預算 (NT$)</label>
@@ -142,7 +153,7 @@ import DashboardView from './views/DashboardView.vue';
 import AccountManagerView from './views/AccountManagerView.vue';
 import CryptoView from './views/CryptoView.vue'; 
 
-const LIFF_ID = import.meta.env.VITE_LIFF_ID;
+const LIFF_ID = import.meta.env.VITE_LIFF_ID || "2008601432-OmoVrl0l";
 const API_URL = import.meta.env.VITE_API_BASE_URL || window.API_BASE_URL;
 
 const currentTab = ref('Dashboard');
@@ -177,9 +188,11 @@ const handleRefreshDashboard = () => {
     }
 };
 
+const isLineLinked = ref(false);
+
 // ★ 新增：打開設定視窗 (並載入目前數值)
 async function openSettings() {
-  showUserMenu.value = false; // 關閉下拉選單
+  showUserMenu.value = false;
   isLoading.value = true;
   
   try {
@@ -188,8 +201,10 @@ async function openSettings() {
       const result = await response.json();
       if (result.status === 'success') {
         settingsForm.value.budget = result.data.monthly_budget;
-        // 如果後端沒回傳時間，預設 21:00
         settingsForm.value.reminder_time = result.data.reminder_time || '21:00';
+        
+        // 🟢 更新綁定狀態
+        isLineLinked.value = result.data.has_line_linked;
       }
     }
     showSettingsModal.value = true;
@@ -198,6 +213,65 @@ async function openSettings() {
   } finally {
     isLoading.value = false;
   }
+}
+
+// 🟢 [新增] 綁定 LINE 的處理函式
+async function handleLinkLine() {
+    // 1. ★ 修正：如果 LIFF 還沒初始化 (沒有 liff.id)，就現在初始化
+    if (!liff.id) {
+        try {
+            // 顯示載入中，避免用戶以為卡住
+            isLoading.value = true;
+            await liff.init({ liffId: LIFF_ID });
+        } catch (err) {
+            console.error("LIFF Init Error:", err);
+            alert("無法啟動 LINE 元件，請檢查網路或 LIFF ID 設定");
+            isLoading.value = false;
+            return;
+        } finally {
+            isLoading.value = false;
+        }
+    }
+
+    // 2. 如果沒登入 LINE，先登入
+    if (!liff.isLoggedIn()) {
+        if (!confirm("即將跳轉至 LINE 進行身分驗證，完成後請再次點擊「綁定」按鈕。")) return;
+        
+        // 這裡一定要用 redirectUri 跳回來原本頁面
+        liff.login({ redirectUri: window.location.href }); 
+        return;
+    }
+
+    // 3. 取得 LINE Token
+    const lineToken = liff.getIDToken();
+    if (!lineToken) {
+        alert("無法取得 LINE 驗證資訊 (Token 為空)");
+        return;
+    }
+
+    // 4. 發送綁定請求
+    if (!confirm("確定要綁定當前的 LINE 帳號嗎？")) return;
+
+    try {
+        isLoading.value = true; // 加個 loading 體驗更好
+        const response = await fetchWithLiffToken(`${API_URL}?action=link_line`, {
+            method: 'POST',
+            body: JSON.stringify({ line_token: lineToken })
+        });
+        
+        const result = await response.json();
+        if (result.status === 'success') {
+            alert("🎉 綁定成功！\n您現在可以用 LINE 登入此帳號了。");
+            isLineLinked.value = true;
+        } else {
+            alert("綁定失敗：" + result.message);
+        }
+    } catch (e) {
+        console.error(e);
+        alert("連線錯誤");
+    } finally {
+        isLoading.value = false;
+    }
 }
 
 // ★ 新增：儲存設定
@@ -787,5 +861,48 @@ onMounted(async () => {
 @keyframes slideUp {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+.link-section {
+    border-top: 1px dashed #eee;
+    padding-top: 16px;
+    margin-top: 16px;
+}
+
+.btn-link-line {
+    width: 100%;
+    background-color: #06C755; /* LINE Green */
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.2s;
+}
+.btn-link-line:hover {
+    background-color: #05b34c;
+}
+
+.link-status.connected {
+    background-color: #f0fdf4;
+    color: #15803d;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: center;
+    border: 1px solid #bbf7d0;
+}
+
+.link-hint {
+    font-size: 0.8rem;
+    color: #999;
+    margin-top: 6px;
+    text-align: center;
 }
 </style>
