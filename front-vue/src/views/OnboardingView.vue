@@ -299,6 +299,9 @@ function nextStep() {
 }
 
 function emitLogin() {
+  // ★ 新增：在發出事件前先存檔，雙重保險
+  localStorage.setItem('pending_onboarding', JSON.stringify(form));
+  
   emit('trigger-login', form);
 }
 </script>

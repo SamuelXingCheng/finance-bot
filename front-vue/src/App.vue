@@ -520,17 +520,26 @@ async function handleOnboardingLogin(data) {
   }
 }
 
+// front-vue/src/App.vue
+
 async function processPendingOnboarding() {
   const pendingData = localStorage.getItem('pending_onboarding');
+  
   if (pendingData) {
     try {
       const formData = JSON.parse(pendingData);
+      
       const response = await fetchWithLiffToken(`${API_URL}?action=submit_onboarding`, {
         method: 'POST',
         body: JSON.stringify(formData)
       });
 
+      // 只有在 API 回傳成功時才執行後續動作
       if (response && response.ok) {
+        
+        // 🔥 修正：確定成功後，才刪除暫存資料
+        localStorage.removeItem('pending_onboarding');
+        
         isOnboarded.value = true; 
         
         // 檢查是否有暫存的加入 Token
@@ -544,12 +553,15 @@ async function processPendingOnboarding() {
 
         await fetchLedgers(); 
         handleRefreshDashboard();
+      } else {
+        // 如果失敗，印出警告，且「不刪除」localStorage，讓用戶重整後有機會重試
+        console.warn('Onboarding API failed, keeping local data for retry.');
       }
     } catch (e) {
       console.error('Onboarding submission failed', e);
-    } finally {
-      localStorage.removeItem('pending_onboarding');
-    }
+      // 發生錯誤也不刪除
+    } 
+    // ❌ 移除 finally 區塊，避免無條件刪除
   }
 }
 
