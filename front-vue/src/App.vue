@@ -508,14 +508,21 @@ function handleSkipLogin() {
 }
 
 async function handleOnboardingLogin(data) {
+  // 1. 先存檔
   localStorage.setItem('pending_onboarding', JSON.stringify(data));
-  if (!liff.isLoggedIn()) {
-    // 使用乾淨網址登入
+  
+  // 2. ★ 修正：檢查是否已登入 (包含 Google 或 LINE)
+  const isGoogleLoggedIn = !!localStorage.getItem('google_id_token');
+  const isLineLoggedIn = liff.id && liff.isLoggedIn(); // 加 liff.id 檢查防止報錯
+
+  if (!isGoogleLoggedIn && !isLineLoggedIn) {
+    // 兩者都沒登入，才執行 LINE 登入跳轉
     const url = new URL(window.location.href);
     url.searchParams.delete('code');
     url.searchParams.delete('state');
     liff.login({ redirectUri: url.toString() });
   } else {
+    // 已經登入 (不管是哪種)，直接送出資料
     await processPendingOnboarding();
   }
 }
