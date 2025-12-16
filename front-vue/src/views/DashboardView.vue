@@ -185,7 +185,42 @@
       <div class="data-box tx-list-wrapper"> 
           <div class="list-controls-row">
             <div class="search-wrapper">
-              <input type="text" v-model="searchQuery" placeholder="🔍 搜尋備註、#標籤..." class="search-input">
+              <div class="filter-scroll-view">
+                <button 
+                  class="filter-chip" 
+                  :class="{ active: searchQuery === '' }" 
+                  @click="searchQuery = ''"
+                >
+                  全部
+                </button>
+
+                <button 
+                  class="filter-chip" 
+                  :class="{ active: searchQuery === 'TYPE_EXPENSE' }" 
+                  @click="searchQuery = 'TYPE_EXPENSE'"
+                >
+                  支出
+                </button>
+                <button 
+                  class="filter-chip" 
+                  :class="{ active: searchQuery === 'TYPE_INCOME' }" 
+                  @click="searchQuery = 'TYPE_INCOME'"
+                >
+                  收入
+                </button>
+
+                <div class="divider-vertical"></div>
+
+                <button 
+                  v-for="(name, key) in categoryMap" 
+                  :key="key" 
+                  class="filter-chip"
+                  :class="{ active: searchQuery === key }"
+                  @click="searchQuery = key"
+                >
+                  {{ name }}
+                </button>
+              </div>
             </div>
             
             <div class="controls-right">
@@ -390,18 +425,24 @@ const budgetBarColor = computed(() => {
   return 'bg-success';
 });
 
-// 2. 搜尋過濾
 const filteredTransactions = computed(() => {
-  if (!searchQuery.value) return transactions.value;
+  const query = searchQuery.value;
   
-  const query = searchQuery.value.toLowerCase();
-  return transactions.value.filter(tx => {
-    return (
-      tx.description.toLowerCase().includes(query) ||
-      (categoryMap[tx.category] || tx.category).toLowerCase().includes(query) ||
-      tx.amount.toString().includes(query)
-    );
-  });
+  // 1. 如果沒選 (或是選全部)，回傳所有資料
+  if (!query) return transactions.value;
+  
+  // 2. 篩選「僅顯示支出」
+  if (query === 'TYPE_EXPENSE') {
+    return transactions.value.filter(tx => tx.type === 'expense');
+  }
+  
+  // 3. 篩選「僅顯示收入」
+  if (query === 'TYPE_INCOME') {
+    return transactions.value.filter(tx => tx.type === 'income');
+  }
+
+  // 4. 篩選「特定分類」 (例如：Food, Transport...)
+  return transactions.value.filter(tx => tx.category === query);
 });
 
 // 3. 分組邏輯 (使用 filteredTransactions)
@@ -1269,5 +1310,69 @@ onMounted(() => {
   #chart-container {
     height: 350px; /* 電腦版高一點，看起來更舒適 */
   }
+}
+/* 針對下拉選單的優化 */
+.custom-select {
+  appearance: none; /* 移除預設醜醜的箭頭 (部分瀏覽器有效) */
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 32px; /* 預留空間給箭頭 */
+}
+
+/* 如果是深色模式或選取時，讓文字明顯一點 */
+.search-input option {
+  color: #333;
+  padding: 4px;
+  
+}
+
+/* 橫向捲動容器 */
+.filter-scroll-view {
+  display: flex;
+  flex-wrap: wrap; /* ★ 關鍵修改：允許換行 */
+  gap: 8px;        /* 按鈕之間的間距 */
+  padding: 4px 0;
+  /* 移除原本的橫向捲動相關設定 (overflow-x, scrollbar...) */
+}
+
+/* Chrome/Safari 隱藏捲軸 */
+/* .filter-scroll-view::-webkit-scrollbar {
+  display: none;
+} */
+
+/* 按鈕樣式 (Chip) */
+.filter-chip {
+  flex: 0 0 auto; /* 防止按鈕被壓縮 */
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #eee;
+  background-color: #fff;
+  color: #666;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap; /* 防止文字換行 */
+}
+
+.filter-chip:hover {
+  background-color: #f9f9f9;
+}
+
+/* 選中狀態 */
+.filter-chip.active {
+  background-color: #d4a373;
+  color: white;
+  border-color: #d4a373;
+  box-shadow: 0 2px 6px rgba(212, 163, 115, 0.4);
+  font-weight: bold;
+}
+
+/* 分隔線 */
+.divider-vertical {
+  display: none; /* 在換行模式下通常不需要分隔線 */
 }
 </style>

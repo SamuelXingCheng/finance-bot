@@ -71,3 +71,25 @@
     width: 100%;
     margin: 0 auto;
   }
+
+  button {
+    color: var(--text-primary); /* 預設為深灰色 */
+    font-family: inherit;       /* 繼承字體設定 */
+  }
+  
+  /* 2. 移除 iOS 點擊時出現的「灰色半透明背景」(Tap Highlight) */
+  /* 這會讓 App 操作起來更像原生應用程式，不會閃爍 */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* 3. 修正 iOS 輸入框與按鈕的預設圓角與立體感 */
+  input, button, textarea, select {
+    -webkit-appearance: none; /* 移除系統預設外觀 */
+    border-radius: 0;         /* 移除預設圓角 (由各 class 自行控制) */
+  }
+  
+  /* 4. 特殊處理：確保 Checkbox 與 Radio 仍保留基本樣式 (如果有的話) */
+  input[type="checkbox"], input[type="radio"] {
+    -webkit-appearance: auto; /* 或 checkbox / radio */
+  }
