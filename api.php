@@ -1,10 +1,10 @@
 <?php
 // api.php
 header('Content-Type: application/json; charset=utf-8');
-// 根據您的 LIFF 配置，可能需要修改允許的 Origin
 header('Access-Control-Allow-Origin: *'); 
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+// 🟢 [修正] 加入 X-Auth-Provider 以允許前端傳送此 Header
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Provider');
 
 // 處理 OPTIONS 請求
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -23,7 +23,6 @@ require_once 'src/TransactionService.php';
 require_once 'src/ExchangeRateService.php'; 
 require_once 'src/GeminiService.php';
 require_once 'src/CryptoService.php';
-require_once 'src/LedgerService.php';
 require_once 'src/LedgerService.php';
 
 /**
@@ -64,883 +63,813 @@ function verifyLineIdToken(string $idToken): ?string {
     return null;
 }
 
+/**
+ * 新增：Google Token 驗證函式 (使用 CURL)
+ */
+function verifyGoogleIdToken($idToken) {
+    // Google Token Info API
+    $url = "https://oauth2.googleapis.com/tokeninfo?id_token=" . $idToken;
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    // 若在本地開發遇到 SSL 錯誤，可暫時開啟下行，但正式環境建議關閉
+    // curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    
+    $rawResponse = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $data = json_decode($rawResponse, true);
+
+    // 檢查 HTTP 狀態碼與 aud 是否匹配
+    if ($httpCode === 200 && isset($data['aud']) && $data['aud'] === GOOGLE_CLIENT_ID && isset($data['sub'])) {
+        return $data; // 回傳包含 sub, email, name, picture 的陣列
+    }
+    
+    error_log("Google Token Verification Failed. Response: " . $rawResponse);
+    return null;
+}
+
 try {
     // ----------------------------------------------------
-    // 2. LIFF 身份驗證
+    // 2. 統一身份驗證 (支援 LINE 與 Google)
     // ----------------------------------------------------
     $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    // 讀取前端傳來的 Provider，預設為 line
+    $authProvider = $_SERVER['HTTP_X_AUTH_PROVIDER'] ?? 'line'; 
+    $dbUserId = 0;
+
     if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-        $idToken = $matches[1];
-    } else {
-        http_response_code(401);
-        echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Missing or invalid token format.'], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
+        $token = $matches[1];
 
-    $lineUserId = verifyLineIdToken($idToken);
-
-    if (!$lineUserId) {
-        http_response_code(401);
-        echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid ID Token.'], JSON_UNESCAPED_UNICODE); 
-        exit;
-    }
-
-    $userService = new UserService();
-    $dbUserId = $userService->findOrCreateUser($lineUserId);
-
-    // ----------------------------------------------------
-    // 3. 服務初始化
-    // ----------------------------------------------------
-    $db = Database::getInstance(); 
-    $assetService = new AssetService();
-    $transactionService = new TransactionService();
-    $ledgerService = new LedgerService();
-
-    // ----------------------------------------------------
-    // 4. API 路由與分發
-    // ----------------------------------------------------
-    $action = $_GET['action'] ?? '';
-    $response = ['status' => 'error', 'message' => 'Invalid action.'];
-
-    switch ($action) {
-        
-        case 'asset_summary':
-            // [修正] 接收 ledger_id
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+        if ($authProvider === 'google') {
+            // --- Google 登入流程 ---
+            $payload = verifyGoogleIdToken($token);
             
-            // 傳入 ledger_id 給 Service
-            $summary = $assetService->getNetWorthSummary($dbUserId, $targetLedgerId); 
-            
-            $summary['is_premium'] = $userService->isPremium($dbUserId);
-            $response = ['status' => 'success', 'data' => $summary];
-            break;
-
-        case 'get_accounts':
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            $accounts = $assetService->getAccounts($dbUserId, $targetLedgerId);
-            $response = ['status' => 'success', 'data' => $accounts];
-            break;
-
-        case 'delete_account':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405);
-                $response = ['status' => 'error', 'message' => 'Method not allowed'];
-                break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $name = $input['name'] ?? '';
-            
-            if (empty($name)) {
-                $response = ['status' => 'error', 'message' => '缺少帳戶名稱'];
-                break;
-            }
-
-            if ($assetService->deleteAccount($dbUserId, $name)) {
-                $response = ['status' => 'success', 'message' => "帳戶 [{$name}] 已刪除"];
+            if ($payload) {
+                $userService = new UserService();
+                // 使用 Google ID 查找或建立用戶
+                $dbUserId = $userService->findOrCreateUserByGoogle(
+                    $payload['sub'], 
+                    $payload['email'] ?? ''
+                );
             } else {
-                $response = ['status' => 'error', 'message' => '刪除失敗'];
+                http_response_code(401);
+                echo json_encode(['status' => 'error', 'message' => 'Invalid Google Token'], JSON_UNESCAPED_UNICODE);
+                exit;
             }
-            break;
-        
-        case 'asset_history':
-            $range = $_GET['range'] ?? '1y';
-            // [修正] 接收 ledger_id
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+
+        } else {
+            // --- LINE 登入流程 ---
+            // 🟢 [修正] 這裡原本錯誤使用了 $idToken，已修正為 $token
+            $lineUserId = verifyLineIdToken($token);
+
+            if (!$lineUserId) {
+                http_response_code(401);
+                echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid ID Token.'], JSON_UNESCAPED_UNICODE); 
+                exit;
+            }
+
+            $userService = new UserService();
+            $dbUserId = $userService->findOrCreateUser($lineUserId);
+        }
+
+        // ----------------------------------------------------
+        // 3. 服務初始化
+        // ----------------------------------------------------
+        $db = Database::getInstance(); 
+        $assetService = new AssetService();
+        $transactionService = new TransactionService();
+        $ledgerService = new LedgerService();
+
+        // ----------------------------------------------------
+        // 4. API 路由與分發
+        // ----------------------------------------------------
+        $action = $_GET['action'] ?? '';
+        $response = ['status' => 'error', 'message' => 'Invalid action.'];
+
+        switch ($action) {
             
-            // [修正] 傳入 ledgerId
-            $historyData = $assetService->getAssetHistory($dbUserId, $range, $targetLedgerId);
-            
-            $historyData['debug_info'] = [
-                'resolved_user_id' => $dbUserId,
-                'ledger_id' => $targetLedgerId, // Debug 用
-                'data_count' => count($historyData['labels'] ?? []),
-                'server_time' => date('Y-m-d H:i:s')
-            ];
-            
-            $response = ['status' => 'success', 'data' => $historyData];
-            break;
-            
-        case 'monthly_expense_breakdown':
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
-                $response = ['status' => 'error', 'message' => '無權存取'];
+            case 'asset_summary':
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                $summary = $assetService->getNetWorthSummary($dbUserId, $targetLedgerId); 
+                $summary['is_premium'] = $userService->isPremium($dbUserId);
+                $response = ['status' => 'success', 'data' => $summary];
                 break;
-            }
 
-            $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId, $targetLedgerId); 
-            $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId, $targetLedgerId);
-            $expenseBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense', $targetLedgerId); 
-            $incomeBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'income', $targetLedgerId);
+            case 'get_accounts':
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                $accounts = $assetService->getAccounts($dbUserId, $targetLedgerId);
+                $response = ['status' => 'success', 'data' => $accounts];
+                break;
 
-            $response = [
-                'status' => 'success', 
-                'data' => [
-                    'total_expense' => $totalExpense,
-                    'total_income' => $totalIncome,
-                    'breakdown' => $expenseBreakdown,
-                    'income_breakdown' => $incomeBreakdown
-                ]
-            ];
-            break;
-            
-        case 'add_transaction':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            
-            // [修正] 確保 input 中包含 ledger_id (DashboardView 已經會傳送它了)
-            // TransactionService::addTransaction 已經更新為會讀取 $input['ledger_id']
-
-            if ($transactionService->addTransaction($dbUserId, $input)) {
-                $response = ['status' => 'success', 'message' => '交易新增成功'];
-            } else {
-                $response = ['status' => 'error', 'message' => '交易新增失敗'];
-            }
-            break;
-        
-        case 'analyze_portfolio':
-            // 🔴 1. 權限檢查
-            $isPremium = $userService->isPremium($dbUserId);
-            
-            if (!$isPremium) {
-                // 免費會員檢查用量
-                $limit = defined('LIMIT_HEALTH_CHECK_MONTHLY') ? LIMIT_HEALTH_CHECK_MONTHLY : 2;
-                $monthlyUsage = $userService->getMonthlyHealthCheckUsage($dbUserId);
-                
-                if ($monthlyUsage >= $limit) {
-                    $response = [
-                        'status' => 'error', 
-                        'message' => "🔒 免費版每月僅限 {$limit} 次 AI 健檢。\n請升級會員以解鎖無限次數。"
-                    ];
-                    break; // 中斷執行
+            case 'delete_account':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405);
+                    $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                    break;
                 }
-            }
-
-            // 2. 執行分析
-            $assetData = $assetService->getNetWorthSummary($dbUserId);
-            $monthlyIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
-            $monthlyExpense = $transactionService->getTotalExpenseByMonth($dbUserId);
-            
-            $analysisData = [
-                'assets' => $assetData,
-                'flow' => [
-                    'income' => $monthlyIncome,
-                    'expense' => $monthlyExpense
-                ]
-            ];
-
-            $geminiService = new GeminiService();
-            $analysisText = $geminiService->analyzePortfolio($analysisData);
-            
-            // 🔴 3. 成功後記錄使用量
-            $userService->logApiUsage($dbUserId, 'health_check');
-
-            $response = ['status' => 'success', 'data' => $analysisText];
-            break;
-        
-        case 'trend_data':
-            $defaultStart = date('Y-m-01', strtotime('-1 year'));
-            $defaultEnd = date('Y-m-t');
-            $start = $_GET['start'] ?? $defaultStart;
-            $end = $_GET['end'] ?? $defaultEnd;
-            $mode = $_GET['mode'] ?? 'total';
-            
-            // [修正] 接收並傳遞 ledger_id
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
-                $response = ['status' => 'error', 'message' => '無權存取'];
-                break;
-            }
-
-            if ($mode === 'category') {
-                $trendData = $transactionService->getCategoryTrendData($dbUserId, $start, $end, $targetLedgerId);
-            } else {
-                $trendData = $transactionService->getTrendData($dbUserId, $start, $end, $targetLedgerId);
-            }
-            $response = ['status' => 'success', 'data' => $trendData];
-            break;
-
-        case 'get_transactions':
-            $month = $_GET['month'] ?? date('Y-m'); 
-            // [修正] 接收並傳遞 ledger_id
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-
-            if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
-                $response = ['status' => 'error', 'message' => '無權存取'];
-                break;
-            }
-
-            $list = $transactionService->getTransactions($dbUserId, $month, $targetLedgerId);
-            $response = ['status' => 'success', 'data' => $list];
-            break;
-        
-        case 'generate_invite_link':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            // 前端需在 URL 帶上 ?ledger_id=XXX
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            
-            if (!$targetLedgerId) {
-                $response = ['status' => 'error', 'message' => '未指定帳本'];
-                break;
-            }
-    
-            try {
-                $token = $ledgerService->createInvitation($dbUserId, $targetLedgerId);
+                $input = json_decode(file_get_contents('php://input'), true);
+                $name = $input['name'] ?? '';
                 
-                // 組合 LIFF 連結，這裡假設你的 LIFF URL 是透過 .env 設定的
-                // 格式：https://liff.line.me/{LIFF_ID}?action=join_ledger&token={TOKEN}
-                $liffBase = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://liff.line.me/YOUR_LIFF_ID';
-                // 確保 LIFF URL 乾淨
-                $liffBase = strtok($liffBase, '?'); 
-                
-                $inviteUrl = "{$liffBase}?action=join_ledger&token={$token}";
-                
-                $response = ['status' => 'success', 'data' => ['invite_url' => $inviteUrl]];
-            } catch (Exception $e) {
-                $response = ['status' => 'error', 'message' => $e->getMessage()];
-            }
-            break;
-    
-        case 'join_ledger':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $token = $input['token'] ?? '';
-    
-            if (empty($token)) {
-                $response = ['status' => 'error', 'message' => '缺少邀請碼'];
+                if (empty($name)) {
+                    $response = ['status' => 'error', 'message' => '缺少帳戶名稱'];
+                    break;
+                }
+
+                if ($assetService->deleteAccount($dbUserId, $name)) {
+                    $response = ['status' => 'success', 'message' => "帳戶 [{$name}] 已刪除"];
+                } else {
+                    $response = ['status' => 'error', 'message' => '刪除失敗'];
+                }
                 break;
-            }
-    
-            try {
-                $ledgerName = $ledgerService->processInvitation($dbUserId, $token);
-                $response = [
-                    'status' => 'success', 
-                    'message' => "成功加入帳本", 
-                    'data' => ['ledger_name' => $ledgerName]
+            
+            case 'asset_history':
+                $range = $_GET['range'] ?? '1y';
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                $historyData = $assetService->getAssetHistory($dbUserId, $range, $targetLedgerId);
+                
+                $historyData['debug_info'] = [
+                    'resolved_user_id' => $dbUserId,
+                    'ledger_id' => $targetLedgerId, 
+                    'data_count' => count($historyData['labels'] ?? []),
+                    'server_time' => date('Y-m-d H:i:s')
                 ];
-            } catch (Exception $e) {
-                $response = ['status' => 'error', 'message' => $e->getMessage()];
-            }
-            break;
-        case 'delete_transaction':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $id = (int)($input['id'] ?? 0);
-            
-            if ($transactionService->deleteTransaction($dbUserId, $id)) {
-                $response = ['status' => 'success', 'message' => '刪除成功'];
-            } else {
-                $response = ['status' => 'error', 'message' => '刪除失敗'];
-            }
-            break;
-
-        case 'update_transaction':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $id = (int)($input['id'] ?? 0);
-            
-            if ($transactionService->updateTransaction($dbUserId, $id, $input)) {
-                $response = ['status' => 'success', 'message' => '更新成功'];
-            } else {
-                $response = ['status' => 'error', 'message' => '更新失敗'];
-            }
-            break;
-        
-        case 'create_crypto_order':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $email = trim($input['email'] ?? '');
-            
-            // 1. 基本驗證
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $response = ['status' => 'error', 'message' => 'Email 格式不正確'];
+                
+                $response = ['status' => 'success', 'data' => $historyData];
                 break;
-            }
+                
+            case 'monthly_expense_breakdown':
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
+                    $response = ['status' => 'error', 'message' => '無權存取'];
+                    break;
+                }
 
-            // 2. 檢查 API Key (從 config.php / .env 載入)
-            $apiKey = defined('NOWPAYMENTS_API_KEY') ? NOWPAYMENTS_API_KEY : getenv('NOWPAYMENTS_API_KEY');
-            if (!$apiKey) {
-                error_log("❌ Error: NOWPAYMENTS_API_KEY not defined.");
-                $response = ['status' => 'error', 'message' => '系統配置錯誤 (Missing API Key)'];
-                break;
-            }
+                $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId, $targetLedgerId); 
+                $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId, $targetLedgerId);
+                $expenseBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense', $targetLedgerId); 
+                $incomeBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'income', $targetLedgerId);
 
-            // 3. 準備訂單參數
-            // 產生唯一訂單編號，避免重複
-            $orderId = 'PREMIUM_' . $dbUserId . '_' . time();
-            
-            // 設定 Webhook 回調網址 (請確認此網域是否正確指向您的伺服器)
-            $domain = 'https://finbot.tw'; // 🔴 請確認此網域
-            $webhookUrl = $domain . '/crypto_webhook.php';
-            $returnUrl = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me/';
-
-            $payload = [
-                'price_amount' => 3,        // 固定價格 3 USD
-                'price_currency' => 'usd',  // 計價單位
-                // 'pay_currency' => 'usdttrc20', // 可選：若不指定，使用者可在頁面上自選幣種 (推薦不指定)
-                'order_id' => $orderId,
-                'order_description' => $email, // 🔥 關鍵：將 Email 塞入訂單描述，Webhook 會回傳此欄位
-                'ipn_callback_url' => $webhookUrl,
-                'success_url' => $returnUrl,
-                'cancel_url' => $returnUrl
-            ];
-
-            // 4. 呼叫 NOWPayments Create Invoice API
-            $ch = curl_init('https://api.nowpayments.io/v1/invoice');
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'x-api-key: ' . $apiKey,
-                'Content-Type: application/json'
-            ]);
-            curl_setopt($ch, CURLOPT_POST, 1);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-            $apiResponse = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            $result = json_decode($apiResponse, true);
-
-            // 5. 處理回應
-            if ($httpCode === 200 && isset($result['invoice_url'])) {
                 $response = [
                     'status' => 'success', 
                     'data' => [
-                        'invoice_url' => $result['invoice_url'],
-                        'id' => $result['id']
+                        'total_expense' => $totalExpense,
+                        'total_income' => $totalIncome,
+                        'breakdown' => $expenseBreakdown,
+                        'income_breakdown' => $incomeBreakdown
                     ]
                 ];
-            } else {
-                error_log("❌ NOWPayments API Error: " . $apiResponse);
-                $response = ['status' => 'error', 'message' => '建立加密貨幣訂單失敗，請稍後再試'];
-            }
-            break;
-        case 'link_bmc':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $email = trim($input['email'] ?? '');
-            
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $response = ['status' => 'error', 'message' => 'Email 格式不正確'];
                 break;
-            }
-
-            if ($userService->linkBmcEmail($dbUserId, $email)) {
-                $response = ['status' => 'success', 'message' => '綁定成功，請前往付款'];
-            } else {
-                $response = ['status' => 'error', 'message' => '綁定失敗'];
-            }
-            break;
-        // 🟢 1. 獲取加密貨幣儀表板數據
-        case 'get_crypto_summary':
-            $cryptoService = new CryptoService();
-            $data = $cryptoService->getDashboardData($dbUserId);
-            $response = ['status' => 'success', 'data' => $data];
-            break;
-
-        // 🟢 2. 新增加密貨幣交易流水
-        case 'add_crypto_transaction':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405);
-                $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                
+            case 'add_transaction':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                
+                if ($transactionService->addTransaction($dbUserId, $input)) {
+                    $response = ['status' => 'success', 'message' => '交易新增成功'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '交易新增失敗'];
+                }
                 break;
-            }
             
-            $input = json_decode(file_get_contents('php://input'), true);
-            $cryptoService = new CryptoService();
+            case 'analyze_portfolio':
+                $isPremium = $userService->isPremium($dbUserId);
+                
+                if (!$isPremium) {
+                    $limit = defined('LIMIT_HEALTH_CHECK_MONTHLY') ? LIMIT_HEALTH_CHECK_MONTHLY : 2;
+                    $monthlyUsage = $userService->getMonthlyHealthCheckUsage($dbUserId);
+                    
+                    if ($monthlyUsage >= $limit) {
+                        $response = [
+                            'status' => 'error', 
+                            'message' => "🔒 免費版每月僅限 {$limit} 次 AI 健檢。\n請升級會員以解鎖無限次數。"
+                        ];
+                        break; 
+                    }
+                }
+
+                $assetData = $assetService->getNetWorthSummary($dbUserId);
+                $monthlyIncome = $transactionService->getTotalIncomeByMonth($dbUserId);
+                $monthlyExpense = $transactionService->getTotalExpenseByMonth($dbUserId);
+                
+                $analysisData = [
+                    'assets' => $assetData,
+                    'flow' => [
+                        'income' => $monthlyIncome,
+                        'expense' => $monthlyExpense
+                    ]
+                ];
+
+                $geminiService = new GeminiService();
+                $analysisText = $geminiService->analyzePortfolio($analysisData);
+                
+                $userService->logApiUsage($dbUserId, 'health_check');
+
+                $response = ['status' => 'success', 'data' => $analysisText];
+                break;
             
-            if ($cryptoService->addTransaction($dbUserId, $input)) {
-                $response = ['status' => 'success', 'message' => '交易紀錄已新增'];
-            } else {
-                $response = ['status' => 'error', 'message' => '新增失敗，請檢查欄位'];
-            }
-            break;
+            case 'trend_data':
+                $defaultStart = date('Y-m-01', strtotime('-1 year'));
+                $defaultEnd = date('Y-m-t');
+                $start = $_GET['start'] ?? $defaultStart;
+                $end = $_GET['end'] ?? $defaultEnd;
+                $mode = $_GET['mode'] ?? 'total';
+                
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
+                    $response = ['status' => 'error', 'message' => '無權存取'];
+                    break;
+                }
+
+                if ($mode === 'category') {
+                    $trendData = $transactionService->getCategoryTrendData($dbUserId, $start, $end, $targetLedgerId);
+                } else {
+                    $trendData = $transactionService->getTrendData($dbUserId, $start, $end, $targetLedgerId);
+                }
+                $response = ['status' => 'success', 'data' => $trendData];
+                break;
+
+            case 'get_transactions':
+                $month = $_GET['month'] ?? date('Y-m'); 
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+
+                if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
+                    $response = ['status' => 'error', 'message' => '無權存取'];
+                    break;
+                }
+
+                $list = $transactionService->getTransactions($dbUserId, $month, $targetLedgerId);
+                $response = ['status' => 'success', 'data' => $list];
+                break;
+            
+            case 'generate_invite_link':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                
+                if (!$targetLedgerId) {
+                    $response = ['status' => 'error', 'message' => '未指定帳本'];
+                    break;
+                }
         
-        case 'get_account_history':
-            $accountName = $_GET['name'] ?? '';
-            if (empty($accountName)) {
-                $response = ['status' => 'error', 'message' => '缺少帳戶名稱'];
+                try {
+                    $token = $ledgerService->createInvitation($dbUserId, $targetLedgerId);
+                    
+                    $liffBase = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://liff.line.me/YOUR_LIFF_ID';
+                    $liffBase = strtok($liffBase, '?'); 
+                    
+                    $inviteUrl = "{$liffBase}?action=join_ledger&token={$token}";
+                    
+                    $response = ['status' => 'success', 'data' => ['invite_url' => $inviteUrl]];
+                } catch (Exception $e) {
+                    $response = ['status' => 'error', 'message' => $e->getMessage()];
+                }
                 break;
-            }
-            $history = $assetService->getAccountSnapshots($dbUserId, $accountName);
-            $response = ['status' => 'success', 'data' => $history];
-            break;
         
-        case 'delete_snapshot':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $accountName = $input['account_name'] ?? '';
-            $snapshotDate = $input['snapshot_date'] ?? '';
-            
-            if (empty($accountName) || empty($snapshotDate)) {
-                $response = ['status' => 'error', 'message' => '缺少帳戶名稱或快照日期'];
+            case 'join_ledger':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $token = $input['token'] ?? '';
+        
+                if (empty($token)) {
+                    $response = ['status' => 'error', 'message' => '缺少邀請碼'];
+                    break;
+                }
+        
+                try {
+                    $ledgerName = $ledgerService->processInvitation($dbUserId, $token);
+                    $response = [
+                        'status' => 'success', 
+                        'message' => "成功加入帳本", 
+                        'data' => ['ledger_name' => $ledgerName]
+                    ];
+                } catch (Exception $e) {
+                    $response = ['status' => 'error', 'message' => $e->getMessage()];
+                }
                 break;
-            }
-            
-            if ($assetService->deleteSnapshot($dbUserId, $accountName, $snapshotDate)) {
-                $response = ['status' => 'success', 'message' => '歷史快照已刪除'];
-            } else {
-                $response = ['status' => 'error', 'message' => '刪除失敗'];
-            }
-            break;
 
-        // 🟢 3. 校正加密貨幣餘額
-        case 'adjust_crypto_balance':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $symbol = $input['symbol'] ?? '';
-            $newBalance = $input['new_balance'] ?? null;
-            $date = $input['date'] ?? date('Y-m-d H:i:s'); // 🟢 接收日期參數
-
-            if (empty($symbol) || $newBalance === null) {
-                $response = ['status' => 'error', 'message' => '參數錯誤'];
+            case 'delete_transaction':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $id = (int)($input['id'] ?? 0);
+                
+                if ($transactionService->deleteTransaction($dbUserId, $id)) {
+                    $response = ['status' => 'success', 'message' => '刪除成功'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '刪除失敗'];
+                }
                 break;
-            }
 
-            $cryptoService = new CryptoService();
-            // 🟢 傳入 date
-            if ($cryptoService->adjustBalance($dbUserId, $symbol, (float)$newBalance, $date)) {
-                $response = ['status' => 'success', 'message' => '快照已更新'];
-            } else {
-                $response = ['status' => 'error', 'message' => '更新失敗'];
-            }
-            break;
-
-        // 🟢 4. 獲取加密貨幣歷史趨勢
-        case 'get_crypto_history':
-            $range = isset($_GET['range']) ? $_GET['range'] : '1y';
+            case 'update_transaction':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $id = (int)($input['id'] ?? 0);
+                
+                if ($transactionService->updateTransaction($dbUserId, $id, $input)) {
+                    $response = ['status' => 'success', 'message' => '更新成功'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '更新失敗'];
+                }
+                break;
             
-            try {
+            case 'create_crypto_order':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $email = trim($input['email'] ?? '');
+                
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $response = ['status' => 'error', 'message' => 'Email 格式不正確'];
+                    break;
+                }
+
+                $apiKey = defined('NOWPAYMENTS_API_KEY') ? NOWPAYMENTS_API_KEY : getenv('NOWPAYMENTS_API_KEY');
+                if (!$apiKey) {
+                    error_log("❌ Error: NOWPAYMENTS_API_KEY not defined.");
+                    $response = ['status' => 'error', 'message' => '系統配置錯誤 (Missing API Key)'];
+                    break;
+                }
+
+                $orderId = 'PREMIUM_' . $dbUserId . '_' . time();
+                $domain = 'https://finbot.tw'; 
+                $webhookUrl = $domain . '/crypto_webhook.php';
+                $returnUrl = defined('LIFF_DASHBOARD_URL') ? LIFF_DASHBOARD_URL : 'https://line.me/';
+
+                $payload = [
+                    'price_amount' => 3,
+                    'price_currency' => 'usd',
+                    'order_id' => $orderId,
+                    'order_description' => $email,
+                    'ipn_callback_url' => $webhookUrl,
+                    'success_url' => $returnUrl,
+                    'cancel_url' => $returnUrl
+                ];
+
+                $ch = curl_init('https://api.nowpayments.io/v1/invoice');
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'x-api-key: ' . $apiKey,
+                    'Content-Type: application/json'
+                ]);
+                curl_setopt($ch, CURLOPT_POST, 1);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+                $apiResponse = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                $result = json_decode($apiResponse, true);
+
+                if ($httpCode === 200 && isset($result['invoice_url'])) {
+                    $response = [
+                        'status' => 'success', 
+                        'data' => [
+                            'invoice_url' => $result['invoice_url'],
+                            'id' => $result['id']
+                        ]
+                    ];
+                } else {
+                    error_log("❌ NOWPayments API Error: " . $apiResponse);
+                    $response = ['status' => 'error', 'message' => '建立加密貨幣訂單失敗，請稍後再試'];
+                }
+                break;
+
+            case 'link_bmc':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $email = trim($input['email'] ?? '');
+                
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $response = ['status' => 'error', 'message' => 'Email 格式不正確'];
+                    break;
+                }
+
+                if ($userService->linkBmcEmail($dbUserId, $email)) {
+                    $response = ['status' => 'success', 'message' => '綁定成功，請前往付款'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '綁定失敗'];
+                }
+                break;
+
+            case 'get_crypto_summary':
+                $cryptoService = new CryptoService();
+                $data = $cryptoService->getDashboardData($dbUserId);
+                $response = ['status' => 'success', 'data' => $data];
+                break;
+
+            case 'add_crypto_transaction':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405);
+                    $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                    break;
+                }
+                
+                $input = json_decode(file_get_contents('php://input'), true);
                 $cryptoService = new CryptoService();
                 
-                // ❌ 原本的寫法 (依賴快照表，導致沒資料)
-                // $chartData = $cryptoService->getHistoryData($dbUserId, $range);
-                
-                // ✅ 修改後 (依照交易紀錄即時計算)
-                $chartData = $cryptoService->getHistoryChartData($dbUserId, $range);
-                
-                $response = ['status' => 'success', 'data' => $chartData];
-            } catch (Exception $e) {
-                error_log("Get Crypto History Error: " . $e->getMessage());
-                // 發生錯誤時回傳空圖表數據，避免前端報錯
-                $response = [
-                    'status' => 'success', 
-                    'data' => ['labels' => [], 'data' => []]
-                ];
-            }
-            break;
-        
-        // 🟢 [新增] 刪除 Crypto 交易
-        case 'delete_crypto_transaction':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $id = (int)($input['id'] ?? 0);
-            
-            $cryptoService = new CryptoService();
-            if ($cryptoService->deleteTransaction($dbUserId, $id)) {
-                $response = ['status' => 'success', 'message' => '刪除成功'];
-            } else {
-                $response = ['status' => 'error', 'message' => '刪除失敗'];
-            }
-            break;
-            case 'analyze_file':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-    
-            // 1. 檔案處理 (驗證是否有上傳)
-            if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-                $code = isset($_FILES['file']) ? $_FILES['file']['error'] : 'No File';
-                $response = ['status' => 'error', 'message' => '檔案上傳失敗 (錯誤代碼: ' . $code . ')'];
-                break;
-            }
-            
-            // --- 🟢 [修復開始] 補上缺少的目錄檢查與檔名產生邏輯 ---
-            $tempDir = __DIR__ . '/temp';
-            if (!is_dir($tempDir)) {
-                mkdir($tempDir, 0777, true); // 確保 temp 資料夾存在
-            }
-
-            // 取得副檔名並產生唯一檔名，避免檔名衝突或中文亂碼
-            $ext = pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION);
-            // 若抓不到副檔名，預設為 jpg (或是根據 mime type 判斷，這裡先簡單處理)
-            if (empty($ext)) $ext = 'jpg'; 
-            
-            $fileName = uniqid('upload_') . '.' . $ext;
-            $tempPath = $tempDir . '/' . $fileName;
-            // --- 🟢 [修復結束] ---
-
-            // 移動檔案
-            if (!move_uploaded_file($_FILES['file']['tmp_name'], $tempPath)) {
-                $response = ['status' => 'error', 'message' => '系統錯誤: 無法儲存暫存檔'];
-                break;
-            }
-    
-            // 2. 🟢 核心分流邏輯
-            $mode = $_POST['mode'] ?? 'general'; // 預設為一般記帳
-            $geminiService = new GeminiService();
-            $resultData = [];
-    
-            if ($mode === 'crypto') {
-                // A. 加密貨幣模式 (CryptoView 呼叫)
-                $resultData = $geminiService->parseCryptoScreenshot($tempPath);
-                $message = "Crypto 截圖辨識成功";
-            } else {
-                // B. 一般記帳模式 (DashboardView 呼叫)
-                $resultData = $geminiService->parseTransaction("FILE:" . $tempPath);
-                
-                // --- 🟢 [新增] 自動寫入資料庫 (Transactions 表) ---
-                if (!empty($resultData) && is_array($resultData)) {
-                    $savedCount = 0;
-                    // 從 POST 接收 ledger_id (Dashboard 上傳時會帶)
-                    $targetLedgerId = $_POST['ledger_id'] ?? null;
-
-                    foreach ($resultData as $tx) {
-                        // 確保將這筆交易歸戶到正確的帳本
-                        if ($targetLedgerId) {
-                            $tx['ledger_id'] = $targetLedgerId;
-                        }
-                        
-                        // 呼叫 TransactionService 寫入 transactions 資料表
-                        if ($transactionService->addTransaction($dbUserId, $tx)) {
-                            $savedCount++;
-                        }
-                    }
-                    $message = "單據辨識成功，已自動新增 {$savedCount} 筆紀錄";
+                if ($cryptoService->addTransaction($dbUserId, $input)) {
+                    $response = ['status' => 'success', 'message' => '交易紀錄已新增'];
                 } else {
-                    $message = "單據辨識完成，但無有效資料";
+                    $response = ['status' => 'error', 'message' => '新增失敗，請檢查欄位'];
                 }
-                // --- 🟢 [新增結束] ---
-            }
-    
-            unlink($tempPath); // 刪除暫存檔
-    
-            if ($resultData) {
+                break;
+            
+            case 'get_account_history':
+                $accountName = $_GET['name'] ?? '';
+                if (empty($accountName)) {
+                    $response = ['status' => 'error', 'message' => '缺少帳戶名稱'];
+                    break;
+                }
+                $history = $assetService->getAccountSnapshots($dbUserId, $accountName);
+                $response = ['status' => 'success', 'data' => $history];
+                break;
+            
+            case 'delete_snapshot':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $accountName = $input['account_name'] ?? '';
+                $snapshotDate = $input['snapshot_date'] ?? '';
+                
+                if (empty($accountName) || empty($snapshotDate)) {
+                    $response = ['status' => 'error', 'message' => '缺少帳戶名稱或快照日期'];
+                    break;
+                }
+                
+                if ($assetService->deleteSnapshot($dbUserId, $accountName, $snapshotDate)) {
+                    $response = ['status' => 'success', 'message' => '歷史快照已刪除'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '刪除失敗'];
+                }
+                break;
+
+            case 'adjust_crypto_balance':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $symbol = $input['symbol'] ?? '';
+                $newBalance = $input['new_balance'] ?? null;
+                $date = $input['date'] ?? date('Y-m-d H:i:s'); 
+
+                if (empty($symbol) || $newBalance === null) {
+                    $response = ['status' => 'error', 'message' => '參數錯誤'];
+                    break;
+                }
+
+                $cryptoService = new CryptoService();
+                if ($cryptoService->adjustBalance($dbUserId, $symbol, (float)$newBalance, $date)) {
+                    $response = ['status' => 'success', 'message' => '快照已更新'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '更新失敗'];
+                }
+                break;
+
+            case 'get_crypto_history':
+                $range = isset($_GET['range']) ? $_GET['range'] : '1y';
+                
+                try {
+                    $cryptoService = new CryptoService();
+                    $chartData = $cryptoService->getHistoryChartData($dbUserId, $range);
+                    $response = ['status' => 'success', 'data' => $chartData];
+                } catch (Exception $e) {
+                    error_log("Get Crypto History Error: " . $e->getMessage());
+                    $response = [
+                        'status' => 'success', 
+                        'data' => ['labels' => [], 'data' => []]
+                    ];
+                }
+                break;
+            
+            case 'delete_crypto_transaction':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $id = (int)($input['id'] ?? 0);
+                
+                $cryptoService = new CryptoService();
+                if ($cryptoService->deleteTransaction($dbUserId, $id)) {
+                    $response = ['status' => 'success', 'message' => '刪除成功'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '刪除失敗'];
+                }
+                break;
+
+            case 'analyze_file':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+        
+                // 1. 檔案處理
+                if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+                    $code = isset($_FILES['file']) ? $_FILES['file']['error'] : 'No File';
+                    $response = ['status' => 'error', 'message' => '檔案上傳失敗 (錯誤代碼: ' . $code . ')'];
+                    break;
+                }
+                
+                // --- 目錄檢查與檔名產生 ---
+                $tempDir = __DIR__ . '/temp';
+                if (!is_dir($tempDir)) {
+                    mkdir($tempDir, 0777, true);
+                }
+
+                $ext = pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION);
+                if (empty($ext)) $ext = 'jpg'; 
+                
+                $fileName = uniqid('upload_') . '.' . $ext;
+                $tempPath = $tempDir . '/' . $fileName;
+
+                if (!move_uploaded_file($_FILES['file']['tmp_name'], $tempPath)) {
+                    $response = ['status' => 'error', 'message' => '系統錯誤: 無法儲存暫存檔'];
+                    break;
+                }
+        
+                // 2. 核心分流
+                $mode = $_POST['mode'] ?? 'general';
+                $geminiService = new GeminiService();
+                $resultData = [];
+        
+                if ($mode === 'crypto') {
+                    // A. 加密貨幣模式
+                    $resultData = $geminiService->parseCryptoScreenshot($tempPath);
+                    $message = "Crypto 截圖辨識成功";
+                } else {
+                    // B. 一般記帳模式
+                    $resultData = $geminiService->parseTransaction("FILE:" . $tempPath);
+                    
+                    // 自動寫入資料庫
+                    if (!empty($resultData) && is_array($resultData)) {
+                        $savedCount = 0;
+                        $targetLedgerId = $_POST['ledger_id'] ?? null;
+
+                        foreach ($resultData as $tx) {
+                            if ($targetLedgerId) {
+                                $tx['ledger_id'] = $targetLedgerId;
+                            }
+                            
+                            if ($transactionService->addTransaction($dbUserId, $tx)) {
+                                $savedCount++;
+                            }
+                        }
+                        $message = "單據辨識成功，已自動新增 {$savedCount} 筆紀錄";
+                    } else {
+                        $message = "單據辨識完成，但無有效資料";
+                    }
+                }
+        
+                unlink($tempPath); 
+        
+                if ($resultData) {
+                    $response = [
+                        'status' => 'success',
+                        'message' => $message,
+                        'data' => $resultData,
+                        'mode' => $mode
+                    ];
+                } else {
+                    $response = ['status' => 'error', 'message' => 'AI 無法辨識內容'];
+                }
+                break;
+                
+            case 'update_crypto_transaction':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $id = (int)($input['id'] ?? 0);
+                
+                $cryptoService = new CryptoService();
+                if ($cryptoService->updateTransaction($dbUserId, $id, $input)) {
+                    $response = ['status' => 'success', 'message' => '更新成功'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '更新失敗'];
+                }
+                break;
+
+            case 'get_user_status':
+                $status = $userService->getUserStatus($dbUserId);
+                $response = ['status' => 'success', 'data' => $status];
+                break;
+
+            case 'submit_onboarding':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); 
+                    $response = ['status' => 'error', 'message' => 'Method not allowed'];
+                    break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                
+                $userService->updateUserProfile($dbUserId, [
+                    'financial_goal' => $input['goal'] ?? '',
+                    'monthly_budget' => $input['budget'] ?? 0,
+                    'reminder_time'  => $input['reminder_time'] ?? null
+                ]);
+
+                $userService->activateTrial($dbUserId, 7);
+
+                $response = ['status' => 'success', 'message' => '歡迎加入 FinBot！試用已開通。'];
+                break;
+            
+            case 'get_ledgers':
+                $ledgers = $ledgerService->getUserLedgers($dbUserId);
+                $response = ['status' => 'success', 'data' => $ledgers];
+                break;
+
+            case 'create_ledger':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $name = trim($input['name'] ?? '');
+                if (empty($name)) {
+                    $response = ['status' => 'error', 'message' => '請輸入帳本名稱'];
+                    break;
+                }
+                $newId = $ledgerService->createLedger($dbUserId, $name, 'shared');
+                if ($newId) {
+                    $response = ['status' => 'success', 'message' => '帳本建立成功', 'data' => ['id' => $newId]];
+                } else {
+                    $response = ['status' => 'error', 'message' => '建立失敗'];
+                }
+                break;
+
+            case 'save_account':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $input = json_decode(file_get_contents('php://input'), true);
+                
+                $name = trim($input['name'] ?? '');
+                $type = $input['type'] ?? 'Cash';
+                $balance = (float)($input['balance'] ?? 0);
+                $currency = $input['currency'] ?? 'TWD';
+                $date = $input['date'] ?? date('Y-m-d'); 
+                $ledgerId = isset($input['ledger_id']) ? (int)$input['ledger_id'] : null;
+                
+                $customRate = isset($input['custom_rate']) && $input['custom_rate'] !== '' ? (float)$input['custom_rate'] : null;
+
+                if (empty($name)) {
+                    $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
+                    break;
+                }
+
+                $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date, $ledgerId, $customRate);
+
+                if ($success) {
+                    $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '儲存失敗'];
+                }
+                break;
+            
+            case 'get_subscriptions':
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
+                $rules = $transactionService->getRecurringRules($dbUserId, $targetLedgerId);
+                $response = ['status' => 'success', 'data' => $rules];
+                break;
+
+            case 'add_subscription':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $input = json_decode(file_get_contents('php://input'), true);
+                
+                $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : ($input['ledger_id'] ?? null);
+                $input['ledger_id'] = $targetLedgerId;
+
+                if ($transactionService->addRecurringRule($dbUserId, $input)) {
+                    $response = ['status' => 'success', 'message' => '訂閱已設定'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '設定失敗'];
+                }
+                break;
+
+            case 'delete_subscription':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $ruleId = (int)($input['id'] ?? 0);
+                
+                if ($transactionService->deleteRecurringRule($dbUserId, $ruleId)) {
+                    $response = ['status' => 'success', 'message' => '訂閱已刪除'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '刪除失敗'];
+                }
+                break;
+
+            case 'check_recurring':
+                $count = $transactionService->processRecurring($dbUserId);
+                $response = ['status' => 'success', 'processed_count' => $count];
+                break;
+
+            case 'update_crypto_target':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                $input = json_decode(file_get_contents('php://input'), true);
+                $ratio = isset($input['ratio']) ? (float)$input['ratio'] : null;
+
+                if ($ratio === null || $ratio < 0 || $ratio > 100) {
+                    $response = ['status' => 'error', 'message' => '比例必須在 0 ~ 100 之間'];
+                    break;
+                }
+
+                try {
+                    $conn = $db->getConnection(); 
+                    $stmt = $conn->prepare("UPDATE users SET target_usdt_ratio = ? WHERE id = ?");
+                    $stmt->execute([$ratio, $dbUserId]);
+                    $response = ['status' => 'success', 'message' => '目標比例已更新'];
+                } catch (Exception $e) {
+                    error_log("Update Target Error: " . $e->getMessage());
+                    $response = ['status' => 'error', 'message' => '更新失敗'];
+                }
+                break;
+
+            case 'get_crypto_transactions':
+                $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 20;
+                
+                try {
+                    $conn = $db->getConnection();
+                    $sql = "SELECT * FROM crypto_transactions 
+                            WHERE user_id = :uid 
+                            ORDER BY transaction_date DESC, id DESC 
+                            LIMIT :limit";
+                            
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bindValue(':uid', $dbUserId, PDO::PARAM_INT);
+                    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+                    $stmt->execute();
+                    
+                    $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    $response = ['status' => 'success', 'data' => $list];
+                } catch (Exception $e) {
+                    error_log("Get Crypto Tx Error: " . $e->getMessage());
+                    $response = ['status' => 'error', 'message' => '讀取失敗'];
+                }
+                break;
+                
+            case 'get_rebalancing_advice':
+                $cryptoService = new CryptoService();
+                $advice = $cryptoService->getRebalancingAdvice($dbUserId);
+                $response = ['status' => 'success', 'data' => $advice];
+                break;
+
+            case 'import_crypto_csv':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
+                
+                if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+                    $errorMsg = isset($_FILES['file']) ? ('Code: ' . $_FILES['file']['error']) : 'Empty File';
+                    $response = ['status' => 'error', 'message' => '檔案上傳失敗 (' . $errorMsg . ')'];
+                    break;
+                }
+        
+                $filePath = $_FILES['file']['tmp_name'];
+        
+                // 讀取前 5 行
+                $csvSnippet = "";
+                $handle = fopen($filePath, "r");
+                $lineCount = 0;
+                if ($handle) {
+                    $bom = fread($handle, 3);
+                    if ($bom !== "\xEF\xBB\xBF") {
+                        rewind($handle); 
+                    }
+                    
+                    while (($row = fgetcsv($handle)) !== false && $lineCount < 5) {
+                        $csvSnippet .= implode(",", $row) . "\n";
+                        $lineCount++;
+                    }
+                    fclose($handle);
+                }
+        
+                $geminiService = new GeminiService();
+                $mappingRule = $geminiService->generateCsvMapping($csvSnippet);
+        
+                if (!$mappingRule) {
+                    $response = ['status' => 'error', 'message' => 'AI 無法識別此 CSV 格式'];
+                    break;
+                }
+        
+                $cryptoService = new CryptoService();
+                $result = $cryptoService->processCsvBulk($dbUserId, $filePath, $mappingRule);
+        
                 $response = [
                     'status' => 'success',
-                    'message' => $message,
-                    'data' => $resultData, // 回傳給前端確認
-                    'mode' => $mode
+                    'data' => [
+                        'count' => $result['count'],
+                        'exchange_guess' => $mappingRule['exchange_name'] ?? 'Unknown'
+                    ]
                 ];
-            } else {
-                $response = ['status' => 'error', 'message' => 'AI 無法辨識內容'];
-            }
-            break;
-            
-        // 🟢 [新增] 更新 Crypto 交易
-        case 'update_crypto_transaction':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $id = (int)($input['id'] ?? 0);
-            
-            $cryptoService = new CryptoService();
-            if ($cryptoService->updateTransaction($dbUserId, $id, $input)) {
-                $response = ['status' => 'success', 'message' => '更新成功'];
-            } else {
-                $response = ['status' => 'error', 'message' => '更新失敗'];
-            }
-            break;
-
-        // 🟢 1. 新增：獲取用戶狀態 (用於前端判斷是否顯示引導頁)
-        case 'get_user_status':
-            // 注意：請確保 UserService.php 已新增 getUserStatus 方法
-            $status = $userService->getUserStatus($dbUserId);
-            $response = ['status' => 'success', 'data' => $status];
-            break;
-
-        // 🟢 2. 新增：提交引導資料並開通試用
-        case 'submit_onboarding':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                http_response_code(405); 
-                $response = ['status' => 'error', 'message' => 'Method not allowed'];
                 break;
-            }
-            $input = json_decode(file_get_contents('php://input'), true);
-            
-            // A. 儲存用戶偏好 (目標、預算、提醒時間)
-            // 注意：請確保 UserService.php 已新增 updateUserProfile 方法
-            $userService->updateUserProfile($dbUserId, [
-                'financial_goal' => $input['goal'] ?? '',
-                'monthly_budget' => $input['budget'] ?? 0,
-                'reminder_time'  => $input['reminder_time'] ?? null
-            ]);
 
-            // B. 開通 7 天試用獎勵
-            // 注意：請確保 UserService.php 已新增 activateTrial 方法
-            $userService->activateTrial($dbUserId, 7);
-
-            $response = ['status' => 'success', 'message' => '歡迎加入 FinBot！試用已開通。'];
-            break;
-        
-        // 1. [新增] 獲取用戶的所有帳本列表
-        case 'get_ledgers':
-            $ledgers = $ledgerService->getUserLedgers($dbUserId);
-            $response = ['status' => 'success', 'data' => $ledgers];
-            break;
-
-        // 2. [新增] 建立新帳本
-        case 'create_ledger':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $name = trim($input['name'] ?? '');
-            if (empty($name)) {
-                $response = ['status' => 'error', 'message' => '請輸入帳本名稱'];
+            default:
+                $response = ['status' => 'error', 'message' => 'Invalid action.'];
                 break;
-            }
-            $newId = $ledgerService->createLedger($dbUserId, $name, 'shared');
-            if ($newId) {
-                $response = ['status' => 'success', 'message' => '帳本建立成功', 'data' => ['id' => $newId]];
-            } else {
-                $response = ['status' => 'error', 'message' => '建立失敗'];
-            }
-            break;
+        }
 
-        // 3. [修改] 查詢交易列表 (支援 ledger_id)
-        case 'get_transactions':
-            $month = $_GET['month'] ?? date('Y-m');
-            // 接收前端傳來的 ledger_id (如果有)
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            
-            // 驗證權限：如果想查特定帳本，必須先確認是不是成員
-            if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
-                $response = ['status' => 'error', 'message' => '無權存取此帳本'];
-                break;
-            }
-
-            // 傳入 ledger_id 給 Service
-            $list = $transactionService->getTransactions($dbUserId, $month, $targetLedgerId);
-            $response = ['status' => 'success', 'data' => $list];
-            break;
-
-        // 4. [修改] 查詢收支統計 (支援 ledger_id)
-        case 'monthly_expense_breakdown':
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            if ($targetLedgerId && !$ledgerService->checkAccess($dbUserId, $targetLedgerId)) {
-                $response = ['status' => 'error', 'message' => '無權存取'];
-                break;
-            }
-
-            $totalExpense = $transactionService->getTotalExpenseByMonth($dbUserId, $targetLedgerId); 
-            $totalIncome = $transactionService->getTotalIncomeByMonth($dbUserId, $targetLedgerId);
-            $expenseBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'expense', $targetLedgerId); 
-            $incomeBreakdown = $transactionService->getMonthlyBreakdown($dbUserId, 'income', $targetLedgerId);
-
-            $response = [
-                'status' => 'success', 
-                'data' => [
-                    'total_expense' => $totalExpense,
-                    'total_income' => $totalIncome,
-                    'breakdown' => $expenseBreakdown,
-                    'income_breakdown' => $incomeBreakdown
-                ]
-            ];
-            break;
-        
-        case 'save_account':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            // 🔍 [新增這行] 印出前端傳來的完整 JSON，看看有沒有 custom_rate
-            $rawInput = file_get_contents('php://input');
-            error_log("🔍 API Debug Raw Input: " . $rawInput);
-
-            $input = json_decode(file_get_contents('php://input'), true);
-            
-            $name = trim($input['name'] ?? '');
-            $type = $input['type'] ?? 'Cash';
-            $balance = (float)($input['balance'] ?? 0);
-            $currency = $input['currency'] ?? 'TWD';
-            $date = $input['date'] ?? date('Y-m-d'); 
-            $ledgerId = isset($input['ledger_id']) ? (int)$input['ledger_id'] : null;
-            
-            // 🟢 [新增] 接收 custom_rate
-            $customRate = isset($input['custom_rate']) && $input['custom_rate'] !== '' ? (float)$input['custom_rate'] : null;
-
-            if (empty($name)) {
-                $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
-                break;
-            }
-
-            // 🟢 [修改] 傳入 customRate
-            $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date, $ledgerId, $customRate);
-
-            if ($success) {
-                $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
-            } else {
-                $response = ['status' => 'error', 'message' => '儲存失敗'];
-            }
-            break;
-        
-        
-        // 🟢 1. 獲取訂閱列表
-        case 'get_subscriptions':
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : null;
-            $rules = $transactionService->getRecurringRules($dbUserId, $targetLedgerId);
-            $response = ['status' => 'success', 'data' => $rules];
-            break;
-
-        // 🟢 2. 新增訂閱
-        case 'add_subscription':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            $input = json_decode(file_get_contents('php://input'), true);
-            
-            // 若前端有傳 ledger_id，記得塞進去
-            $targetLedgerId = isset($_GET['ledger_id']) ? (int)$_GET['ledger_id'] : ($input['ledger_id'] ?? null);
-            $input['ledger_id'] = $targetLedgerId;
-
-            if ($transactionService->addRecurringRule($dbUserId, $input)) {
-                $response = ['status' => 'success', 'message' => '訂閱已設定'];
-            } else {
-                $response = ['status' => 'error', 'message' => '設定失敗'];
-            }
-            break;
-
-        // 🟢 3. 刪除訂閱
-        case 'delete_subscription':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $ruleId = (int)($input['id'] ?? 0);
-            
-            if ($transactionService->deleteRecurringRule($dbUserId, $ruleId)) {
-                $response = ['status' => 'success', 'message' => '訂閱已刪除'];
-            } else {
-                $response = ['status' => 'error', 'message' => '刪除失敗'];
-            }
-            break;
-
-        // 🟢 4. 觸發自動補帳 (前端於背景呼叫)
-        case 'check_recurring':
-            // 執行檢查與補帳
-            $count = $transactionService->processRecurring($dbUserId);
-            $response = ['status' => 'success', 'processed_count' => $count];
-            break;
-
-            // 🟢 [新增] 更新加密貨幣目標現金比例
-        // 🟢 [修正] 更新加密貨幣目標現金比例
-        case 'update_crypto_target':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            $input = json_decode(file_get_contents('php://input'), true);
-            $ratio = isset($input['ratio']) ? (float)$input['ratio'] : null;
-
-            if ($ratio === null || $ratio < 0 || $ratio > 100) {
-                $response = ['status' => 'error', 'message' => '比例必須在 0 ~ 100 之間'];
-                break;
-            }
-
-            try {
-                // ✅ 修正：必須透過 getConnection() 取得 PDO 物件
-                $conn = $db->getConnection(); 
-                $stmt = $conn->prepare("UPDATE users SET target_usdt_ratio = ? WHERE id = ?");
-                $stmt->execute([$ratio, $dbUserId]);
-                $response = ['status' => 'success', 'message' => '目標比例已更新'];
-            } catch (Exception $e) {
-                error_log("Update Target Error: " . $e->getMessage());
-                $response = ['status' => 'error', 'message' => '更新失敗'];
-            }
-            break;
-
-        // 🟢 [修正] 獲取加密貨幣交易列表 (修復 $db->prepare 錯誤)
-        case 'get_crypto_transactions':
-            $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 20;
-            
-            try {
-                // ✅ 修正：必須透過 getConnection() 取得 PDO 物件
-                $conn = $db->getConnection();
-                
-                $sql = "SELECT * FROM crypto_transactions 
-                        WHERE user_id = :uid 
-                        ORDER BY transaction_date DESC, id DESC 
-                        LIMIT :limit";
-                        
-                $stmt = $conn->prepare($sql);
-                // 綁定參數以確保安全
-                $stmt->bindValue(':uid', $dbUserId, PDO::PARAM_INT);
-                $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-                $stmt->execute();
-                
-                $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                $response = ['status' => 'success', 'data' => $list];
-            } catch (Exception $e) {
-                error_log("Get Crypto Tx Error: " . $e->getMessage());
-                $response = ['status' => 'error', 'message' => '讀取失敗'];
-            }
-            break;
-            
-        // 🟢 [補上] 獲取再平衡建議 (原本檔案中似乎遺漏了這個 case)
-        case 'get_rebalancing_advice':
-            $cryptoService = new CryptoService();
-            // 呼叫 Service 計算建議
-            $advice = $cryptoService->getRebalancingAdvice($dbUserId);
-            $response = ['status' => 'success', 'data' => $advice];
-            break;
-
-        case 'import_crypto_csv':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); break; }
-            
-            if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-                $errorMsg = isset($_FILES['file']) ? ('Code: ' . $_FILES['file']['error']) : 'Empty File';
-                $response = ['status' => 'error', 'message' => '檔案上傳失敗 (' . $errorMsg . ')'];
-                break;
-            }
-    
-            $filePath = $_FILES['file']['tmp_name'];
-    
-            // 1. 讀取前 5 行 (包含 Header 和少量數據) 給 AI 分析
-            $csvSnippet = "";
-            $handle = fopen($filePath, "r");
-            $lineCount = 0;
-            if ($handle) {
-                // 處理 BOM (Byte Order Mark) 防止 AI 讀取錯誤
-                $bom = fread($handle, 3);
-                if ($bom !== "\xEF\xBB\xBF") {
-                    rewind($handle); // 沒有 BOM，倒帶回開頭
-                }
-                
-                while (($row = fgetcsv($handle)) !== false && $lineCount < 5) {
-                    // 將陣列轉回 CSV 字串格式餵給 AI
-                    $csvSnippet .= implode(",", $row) . "\n";
-                    $lineCount++;
-                }
-                fclose($handle);
-            }
-    
-            // 2. 呼叫 Gemini 產生規則 (Rule Generation)
-            $geminiService = new GeminiService();
-            $mappingRule = $geminiService->generateCsvMapping($csvSnippet);
-    
-            if (!$mappingRule) {
-                $response = ['status' => 'error', 'message' => 'AI 無法識別此 CSV 格式'];
-                break;
-            }
-    
-            // 3. 呼叫 CryptoService 使用規則處理整個檔案 (PHP Loop)
-            $cryptoService = new CryptoService();
-            $result = $cryptoService->processCsvBulk($dbUserId, $filePath, $mappingRule);
-    
-            $response = [
-                'status' => 'success',
-                'data' => [
-                    'count' => $result['count'],
-                    'exchange_guess' => $mappingRule['exchange_name'] ?? 'Unknown'
-                ]
-            ];
-            break;
-        default:
-            $response = ['status' => 'error', 'message' => 'Invalid action.'];
-            break;
+    } else {
+        http_response_code(401);
+        $response = ['status' => 'error', 'message' => 'Unauthorized'];
     }
 
 } catch (Throwable $e) {

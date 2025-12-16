@@ -119,13 +119,21 @@
         
         <div class="spacer"></div>
 
-        <button class="btn-primary btn-start btn-login" @click="emitLogin">
-            LINE 登入並領取獎勵
-        </button>
-        <p class="login-note">點擊將跳轉至 LINE 授權頁面</p>
-        <button class="btn-link mt-2" @click="emit('skip-login')">
-          先不登入，僅看看網頁 &rarr;
-        </button>
+        <div class="login-actions">
+            <button class="btn-primary btn-login" @click="emitLogin">
+                LINE 登入並領取獎勵
+            </button>
+            
+            <div class="divider">或</div>
+
+            <div id="google-btn-wrapper" class="google-btn-container"></div>
+            
+            <p class="login-note">點擊將跳轉至授權頁面</p>
+            
+            <button class="btn-link mt-2" @click="emit('skip-login')">
+              先不登入，僅看看網頁 &rarr;
+            </button>
+        </div>
       </div>
 
     </div>
@@ -179,6 +187,38 @@ const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0
 
 const selectedHour = ref('21');
 const selectedMinute = ref('00');
+
+// Google 登入回調函式
+function handleGoogleCredentialResponse(response) {
+    console.log("Google ID Token:", response.credential);
+    
+    // 1. 將 Token 存入 localStorage
+    localStorage.setItem('google_id_token', response.credential);
+    
+    // 2. 觸發登入成功 (您可以直接重新整理，或 emit 事件讓 App.vue 處理)
+    // 這裡為了簡單，我們直接重整，讓 App.vue 重新抓取資料
+    window.location.reload();
+}
+
+import { watch, nextTick } from 'vue';
+
+watch(step, async (newVal) => {
+    if (newVal === 7) {
+        await nextTick(); // 等待 DOM 更新
+        if (window.google) {
+            window.google.accounts.id.initialize({
+                // 請換成您的 Client ID
+                client_id: "251064690633-qgktj8rrpjf3fiqbtqntou7hk32q9e8t.apps.googleusercontent.com",
+                callback: handleGoogleCredentialResponse
+            });
+            
+            window.google.accounts.id.renderButton(
+                document.getElementById("google-btn-wrapper"),
+                { theme: "outline", size: "large", width: "300" } // 寬度可自訂
+            );
+        }
+    }
+});
 
 function updateTime() {
   form.reminder_time = `${selectedHour.value}:${selectedMinute.value}`;
@@ -422,4 +462,17 @@ h2 { color: #8c7b75; margin: 0 0 12px 0; font-size: 1.4rem; }
 .unlock-title { font-weight: bold; color: #555; margin-bottom: 8px; }
 .unlock-list { padding-left: 20px; margin: 0; color: #666; font-size: 0.9rem; }
 .spacer { height: 10px; }
+
+.divider {
+  margin: 12px 0;
+  color: #aaa;
+  font-size: 0.9rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.divider::before, .divider::after {
+  content: ""; flex: 1; height: 1px; background: #eee; margin: 0 10px;
+}
+.google-btn-container {
+  display: flex; justify-content: center; margin-bottom: 10px;
+}
 </style>

@@ -9,7 +9,6 @@ class UserService {
         $this->pdo = Database::getInstance()->getConnection();
     }
 
-    // ... (保留原有的 findOrCreateUser, linkBmcEmail, getUserByBmcEmail, activatePremiumByEmail) ...
     public function findOrCreateUser(string $lineUserId): int {
         $stmt = $this->pdo->prepare("SELECT id FROM users WHERE line_user_id = ?");
         $stmt->execute([$lineUserId]);
@@ -17,6 +16,25 @@ class UserService {
         if ($user) return (int)$user['id'];
         $stmt = $this->pdo->prepare("INSERT INTO users (line_user_id) VALUES (?)");
         $stmt->execute([$lineUserId]);
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    // 🟢 [新增]Google 登入專用方法
+    public function findOrCreateUserByGoogle(string $googleId, string $email): int {
+        // 1. 嘗試透過 Google ID 查找
+        $stmt = $this->pdo->prepare("SELECT id FROM users WHERE google_id = ?");
+        $stmt->execute([$googleId]);
+        $user = $stmt->fetch();
+        
+        if ($user) {
+            return (int)$user['id'];
+        }
+
+        // 2. 如果沒找到，建立新用戶
+        // 注意：這裡假設您的 DB 已經有 google_id 欄位
+        $stmt = $this->pdo->prepare("INSERT INTO users (google_id, email, created_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$googleId, $email]);
+        
         return (int)$this->pdo->lastInsertId();
     }
 
@@ -82,26 +100,13 @@ class UserService {
         return $stmt->execute([$userId, $actionType]);
     }
 
-    // ==========================================
-    // 🟢 新增：Onboarding 引導流程相關方法
-    // ==========================================
-
-    /**
-     * 獲取用戶目前的狀態 (用於前端判斷是否顯示引導)
-     */
     public function getUserStatus(int $userId): array {
-        // 🟢 [修改] 增加查詢 monthly_budget
         $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium, monthly_budget FROM users WHERE id = ?");
         $stmt->execute([$userId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        // 設定預設值
         return $result ?: ['is_onboarded' => 0, 'is_premium' => 0, 'monthly_budget' => 0];
     }
 
-    /**
-     * 更新用戶的設定檔 (引導流程用)
-     */
     public function updateUserProfile(int $userId, array $data): bool {
         $fields = [];
         $params = [':id' => $userId];
@@ -119,21 +124,16 @@ class UserService {
             $params[':time'] = $data['reminder_time'];
         }
         
-        // 標記已完成引導
         $fields[] = "is_onboarded = 1";
 
-        if (empty($fields)) return false; // 沒有要更新的欄位
+        if (empty($fields)) return false;
 
         $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE id = :id";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute($params);
     }
 
-    /**
-     * 直接給予試用天數 (用於引導完成獎勵)
-     */
     public function activateTrial(int $userId, int $days = 7): bool {
-        // 檢查是否已經是付費會員，避免覆蓋原本的長約
         if ($this->isPremium($userId)) {
             return true; 
         }
@@ -143,7 +143,6 @@ class UserService {
         return $stmt->execute([$newExpire, $userId]);
     }
 
-    // [新增] 獲取用戶當前鎖定的帳本 ID
     public function getActiveLedgerId(int $userId): ?int {
         $stmt = $this->pdo->prepare("SELECT active_ledger_id FROM users WHERE id = ?");
         $stmt->execute([$userId]);
@@ -151,11 +150,9 @@ class UserService {
         return $result ? (int)$result : null;
     }
 
-    // [新增] 設定用戶當前鎖定的帳本
     public function setActiveLedgerId(int $userId, int $ledgerId): bool {
         $stmt = $this->pdo->prepare("UPDATE users SET active_ledger_id = ? WHERE id = ?");
         return $stmt->execute([$ledgerId, $userId]);
     }
-    
 }
 ?>

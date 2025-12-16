@@ -11,7 +11,7 @@
           <div class="premium-price">僅需 <span class="price-tag">$3 USD</span> (約 NT$95)</div>
           <p class="premium-desc">訂閱會員可立即解鎖無限制 AI 服務與進階報表。</p>
           <div class="payment-buttons">
-            <button class="btn-pay btn-bmc" @click="openPaymentModal('bmc')">Apple Pay / 信用卡 / BMC</button>
+            <button class="btn-pay btn-bmc" @click="openPaymentModal('bmc')">Apple Pay / 信用卡</button>
             <button class="btn-pay btn-crypto" @click="openPaymentModal('crypto')">加密貨幣支付</button>
           </div>
         </div>
@@ -53,7 +53,7 @@
             <p>AI 正在分析單據...</p>
           </div>
           <div v-else class="upload-content">
-            <span class="icon">📸</span>
+            <!-- <span class="icon">📸</span> -->
             <p><strong>拍照或上傳單據</strong></p>
             <p class="sub">支援發票、收據、PDF 帳單</p>
           </div>

@@ -9,17 +9,31 @@ const API_BASE_URL = window.API_BASE_URL = 'https://finbot.tw/api.php';
  * 核心 API 呼叫方法：自動附加 LIFF ID Token
  */
 export async function fetchWithLiffToken(url, options = {}) {
-    if (typeof liff === 'undefined' || !liff.isLoggedIn()) {
+    // 1. 先檢查是否有 Google Token (優先權可自行調整，這裡假設有 Google Token 就用 Google)
+    const googleToken = localStorage.getItem('google_id_token');
+    
+    // 2. 檢查 LIFF 狀態
+    const isLiffLoggedIn = (typeof liff !== 'undefined') && liff.isLoggedIn();
+    
+    let token = '';
+    let provider = 'line'; // 預設為 line
+
+    if (googleToken) {
+        token = googleToken;
+        provider = 'google';
+    } else if (isLiffLoggedIn) {
+        token = liff.getIDToken();
+        provider = 'line';
+    } else {
+        // 都沒登入，直接回傳 null 或讓後端擋
         return null;
     }
     
-    const idToken = liff.getIDToken();
     const defaultHeaders = { 
-        'Authorization': `Bearer ${idToken}`
-        // ❌ 移除原本這裡的 'Content-Type': 'application/json'
+        'Authorization': `Bearer ${token}`,
+        'X-Auth-Provider': provider  // ★ 關鍵：告訴後端要用哪把尺來驗證
     };
 
-    // 🟢 [新增] 自動判斷：只有當 body 不是 FormData (上傳檔案) 時，才加 JSON header
     if (!(options.body instanceof FormData)) {
         defaultHeaders['Content-Type'] = 'application/json';
     }
@@ -29,12 +43,16 @@ export async function fetchWithLiffToken(url, options = {}) {
     // 建議：加上 try-catch 防止網絡錯誤導致崩潰
     try {
         const response = await fetch(url, options);
-
         if (response.status === 401) {
-            console.warn("Token 過期，重新登入");
-            liff.logout(); 
-            liff.login();
-            return null;
+             console.warn("Token 過期");
+             if (provider === 'google') {
+                 localStorage.removeItem('google_id_token');
+                 window.location.reload();
+             } else {
+                 liff.logout();
+                 liff.login();
+             }
+             return null;
         }
         return response;
     } catch (e) {

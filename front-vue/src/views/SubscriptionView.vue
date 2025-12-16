@@ -2,17 +2,17 @@
   <div class="sub-container">
     <div class="page-header">
       <div class="title-group">
-        <h2>訂閱管理</h2>
-        <p class="subtitle">自動記帳與週期性支出</p>
+        <h2>週期收支訂閱管理</h2>
+        <p class="subtitle">自動記帳與週期性收入支出</p>
       </div>
       <button class="add-btn" @click="openModal">
-        <span>+</span> 新增訂閱
+        <span>+</span> 新增週期收支
       </button>
     </div>
 
     <div v-if="loading" class="state-box"><span class="loader"></span> 載入中...</div>
     <div v-else-if="subscriptions.length === 0" class="empty-state">
-      <div class="icon">📅</div>
+      <!-- <div class="icon">📅</div> -->
       <p>沒有週期性項目</p>
       <p class="sub-text">新增房租、Netflix 或薪水，時間到自動幫您記帳！</p>
     </div>

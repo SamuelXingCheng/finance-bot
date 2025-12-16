@@ -16,16 +16,16 @@
 
     <div v-else-if="accounts.length === 0" class="empty-state-container">
       <div class="empty-content">
-        <div class="illustration">🏦</div>
-        <h3>建立您的第一個金庫</h3>
+        <!-- <div class="illustration">🏦</div> -->
+        <h3>建立您的第一個帳戶</h3>
         <p class="description">
           目前這個帳本尚無帳戶資料。<br>
           建立後，您將可以解鎖以下功能：
         </p>
         <ul class="benefit-list">
-          <li>✅ 自動生成資產配置圓餅圖</li>
-          <li>✅ AI 財務健檢與建議</li>
-          <li>✅ 追蹤淨資產成長趨勢</li>
+          <li>自動生成資產配置圓餅圖</li>
+          <li>AI 財務健檢與建議</li>
+          <li>追蹤淨資產成長趨勢</li>
         </ul>
         <button class="btn-primary-large" @click="openModal()">
           <span class="icon">＋</span> 立即新增第一個帳戶

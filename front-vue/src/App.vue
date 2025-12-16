@@ -26,7 +26,7 @@
             <div class="brand-logo">FinBot</div>
             <div class="brand-divider">/</div>
             
-            <button class="ledger-switch-btn" @click="toggleLedgerMenu">
+            <!-- <button class="ledger-switch-btn" @click="toggleLedgerMenu">
               <span class="ledger-name">{{ currentLedger?.name || '我的帳本' }}</span>
               <span class="arrow">▼</span>
             </button>
@@ -52,14 +52,14 @@
                 <span class="item-name">建立新帳本</span>
               </div>
             </div>
-            <div v-if="showLedgerMenu" class="dropdown-backdrop" @click="showLedgerMenu = false"></div>
+            <div v-if="showLedgerMenu" class="dropdown-backdrop" @click="showLedgerMenu = false"></div> -->
           </div>
 
           <div class="nav-links">
             <button @click="currentTab = 'Dashboard'" :class="['nav-item', currentTab === 'Dashboard' ? 'active' : '']">收支</button>
-            <button @click="currentTab = 'Subscription'" :class="['nav-item', currentTab === 'Subscription' ? 'active' : '']">訂閱</button>
+            <button @click="currentTab = 'Subscription'" :class="['nav-item', currentTab === 'Subscription' ? 'active' : '']">週期設定</button>
             <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
-            <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto(開發中)</button>
+            <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto專區</button>
           </div>
           <div class="nav-user">
             <img v-if="liffState.profile?.pictureUrl" :src="liffState.profile.pictureUrl" class="user-avatar" />
@@ -79,7 +79,7 @@
       </main>
 
       <a href="https://line.me/R/ti/p/@finbot" target="_blank" class="fab-chat">
-        <span class="fab-icon">💬</span><span class="fab-text">AI 記帳</span>
+        <span class="fab-icon">💬</span><span class="fab-text">Line AI 記帳</span>
       </a>
     </div>
 

@@ -3,8 +3,8 @@
     
     <div class="crypto-tabs">
       <button :class="{active: view === 'portfolio'}" @click="switchView('portfolio')">現貨資產</button>
-      <button :class="{active: view === 'rebalance'}" @click="switchView('rebalance')">再平衡</button>
-      <button :class="{active: view === 'futures'}" @click="switchView('futures')">合約戰績</button>
+      <button :class="{active: view === 'rebalance'}" @click="switchView('rebalance')">再平衡(開發中)</button>
+      <button :class="{active: view === 'futures'}" @click="switchView('futures')">合約戰績(開發中)</button>
     </div>
 
     <div v-if="view === 'portfolio'" class="fade-in">
@@ -530,6 +530,42 @@ onMounted(() => { fetchCryptoData(); setTimeout(() => fetchHistory(), 100); fetc
     background: #f8f9fa;
     padding: 12px;
     border-radius: 12px;
+    align-items: flex-start;
+    /* 確保父容器允許換行 */
+    flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+    /* 1. 覆蓋原本的 space-between */
+    .stats-row.three-col {
+        display: flex; /* 確保它還在 Flex 模式 */
+        flex-wrap: wrap;
+        
+        /* 關鍵修正：讓項目從左側開始排列 */
+        /* 這樣單一項目在第二行時也會貼齊左側，不會被 space-between 影響 */
+        justify-content: flex-start; 
+
+        /* 【現代瀏覽器推薦】使用 gap 屬性來處理間距，更簡潔易懂 */
+        gap: 4%; /* 假設您希望間距為 4% (100% - 48% - 48%) */
+        padding: 12px;
+        /* 注意：如果使用 gap，下面的 margin-right 就不需要了 */
+    }
+
+    /* 2. 調整 stat-item 的寬度和間距 */
+    .stats-row.three-col > .stat-item {
+        /* 如果使用 gap 屬性，寬度可以簡化為 */
+        width: 48%; 
+        
+        /* 如果不使用 gap 屬性，請用 calc() 來計算寬度，並手動添加右邊距 */
+        /* width: calc(50% - 2%); */ 
+        /* margin-right: 4%; */
+
+        margin-bottom: 10px; /* 增加垂直間距 */
+    }
+    
+    /* 3. 隱藏分隔線 */
+    .stats-row.three-col > .vertical-line {
+        display: none;
+    }
 }
 .stats-row { display: flex; background: #f8f9fa; padding: 12px; border-radius: 12px; }
 .stat-item { flex: 1; text-align: center; }

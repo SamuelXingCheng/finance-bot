@@ -94,4 +94,7 @@ if (!defined('LIMIT_VOICE_TX_DAILY')) define('LIMIT_VOICE_TX_DAILY', 3);
 // 免費版：每月/每年 AI 財務健檢次數限制 (這裡設為每月 2 次為例)
 if (!defined('LIMIT_HEALTH_CHECK_MONTHLY')) define('LIMIT_HEALTH_CHECK_MONTHLY', 2);
 
+if (!defined('GOOGLE_CLIENT_ID')) {
+    define('GOOGLE_CLIENT_ID', getenv('GOOGLE_CLIENT_ID') ?: '251064690633-qgktj8rrpjf3fiqbtqntou7hk32q9e8t.apps.googleusercontent.com');
+}
 ?>
