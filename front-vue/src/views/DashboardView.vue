@@ -733,24 +733,74 @@ async function fetchTrendData() {
 function toggleChart(type) { currentChartType.value = type; nextTick(() => { renderChart(); }); }
 function renderChart() {
   if (chartInstance) chartInstance.destroy();
+  
   const sourceData = currentChartType.value === 'expense' ? expenseBreakdown.value : incomeBreakdown.value;
-  const totalValue = currentChartType.value === 'expense' ? totalExpense.value : totalIncome.value;
   const rawLabels = Object.keys(sourceData);
-  if (rawLabels.length === 0 || totalValue <= 0) return;
+  
+  // 檢查是否有資料
+  if (rawLabels.length === 0) return;
+
   const labels = rawLabels.map(key => categoryMap[key] || key);
   const dataValues = Object.values(sourceData).map(v => parseFloat(v));
+  
   if (!expenseChartCanvas.value) return;
+
   chartInstance = new Chart(expenseChartCanvas.value, {
-    type: 'doughnut',
-    data: { labels: labels, datasets: [{ data: dataValues, backgroundColor: palette, borderWidth: 0, hoverOffset: 6 }] },
+    type: 'bar', // ★ 改為柱狀圖
+    data: { 
+        labels: labels, 
+        datasets: [{ 
+            data: dataValues, 
+            backgroundColor: palette, // 維持原本的配色，每根柱子不同色
+            borderRadius: 8,          // 圓角設計，比較好看
+            borderSkipped: false,
+            barPercentage: 0.6,       // 控制柱子粗細
+        }] 
+    },
     options: { 
         responsive: true,
         maintainAspectRatio: false,
-        cutout: '65%', 
         plugins: { 
-            legend: { display: false }, 
-            datalabels: { formatter: (value) => Math.round((value/totalValue)*100) >= 5 ? Math.round((value/totalValue)*100)+'%' : '', color: '#fff' } 
-        } 
+            legend: { display: false }, // 柱狀圖不需要圖例 (X軸已有標籤)
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return 'NT$ ' + numberFormat(context.parsed.y, 0);
+                    }
+                }
+            },
+            datalabels: { 
+                anchor: 'end', 
+                align: 'top', 
+                formatter: (value) => formatCompactNumber(value), // 顯示簡寫 (如 1.5k)
+                color: '#888',
+                font: { size: 11, weight: 'bold' },
+                offset: 2
+            } 
+        },
+        scales: {
+            y: { 
+                beginAtZero: true, 
+                grid: { color: '#f0f0f0', drawBorder: false },
+                ticks: { 
+                    callback: (val) => formatCompactNumber(val),
+                    font: { size: 10 },
+                    color: '#aaa'
+                },
+                border: { display: false } // 隱藏 Y 軸線
+            },
+            x: { 
+                grid: { display: false }, // 隱藏 X 軸網格
+                ticks: { 
+                    color: '#666',
+                    font: { size: 11 }
+                },
+                border: { display: false }
+            }
+        },
+        layout: {
+            padding: { top: 20 } // 預留頂部空間給標籤，避免被切掉
+        }
     }
   });
 }
@@ -1029,7 +1079,7 @@ onMounted(() => {
 .stat-item .value { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px; word-break: break-all; } 
 .text-income { color: #8fbc8f; } 
 .text-expense { color: #d67a7a; } 
-#chart-container { width: 100%; max-width: 300px; height: 250px; position: relative; display: flex; justify-content: center; align-items: center; margin: 0 auto; }
+#chart-container { width: 100%; max-width: 100%; height: 250px; position: relative; display: flex; justify-content: center; align-items: center; margin: 0 auto; }
 .chart-box-lg { width: 100%; height: 250px; position: relative; }
 .no-data-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #aaa; font-size: 0.9rem; width: 100%; text-align: center; }
 .chart-hint { font-size: 0.75rem; color: #aaa; margin-top: 10px; text-align: center; }
@@ -1216,5 +1266,8 @@ onMounted(() => {
     align-items: center;
   }
   .trend-type-toggle { margin: 0; }
+  #chart-container {
+    height: 350px; /* 電腦版高一點，看起來更舒適 */
+  }
 }
 </style>
