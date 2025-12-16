@@ -153,13 +153,30 @@
     <div class="card-section">
       <div class="section-header"><h2>歷史分類趨勢</h2></div>
       <div class="data-box chart-card">
-        <div class="date-controls mb-4">
-            <input type="date" v-model="trendFilter.start" class="date-input">
-            <span class="separator">~</span>
-            <input type="date" v-model="trendFilter.end" class="date-input">
-            <button @click="fetchTrendData" class="filter-btn">查詢</button>
+        
+        <div class="trend-controls mb-4">
+            <div class="trend-type-toggle">
+                <button 
+                    class="toggle-btn" 
+                    :class="{ active: trendChartType === 'expense' }" 
+                    @click="changeTrendType('expense')">支出</button>
+                <button 
+                    class="toggle-btn" 
+                    :class="{ active: trendChartType === 'income' }" 
+                    @click="changeTrendType('income')">收入</button>
+            </div>
+
+            <div class="date-range-inputs">
+                <input type="date" v-model="trendFilter.start" class="date-input">
+                <span class="separator">~</span>
+                <input type="date" v-model="trendFilter.end" class="date-input">
+                <button @click="fetchTrendData" class="filter-btn">查詢</button>
+            </div>
         </div>
-        <div class="chart-box-lg"><canvas ref="trendChartCanvas"></canvas></div>
+
+        <div class="chart-box-lg">
+            <canvas ref="trendChartCanvas"></canvas>
+        </div>
       </div>
     </div>
 
@@ -343,6 +360,9 @@ const NOWPAYMENTS_URL = 'https://nowpayments.io/donation/finbot2';
 const fileInput = ref(null);
 const isAnalyzing = ref(false);
 
+const trendChartType = ref('expense'); // 預設看支出
+const trendRawData = ref({});
+
 const categoryMap = {
   'Food': '飲食', 'Transport': '交通', 'Entertainment': '娛樂', 'Shopping': '購物',
   'Bills': '帳單', 'Investment': '投資', 'Medical': '醫療', 'Education': '教育',
@@ -467,6 +487,14 @@ const calendarDays = computed(() => {
 });
 
 // --- 方法 ---
+
+function changeTrendType(type) {
+    trendChartType.value = type;
+    if (Object.keys(trendRawData.value).length > 0) {
+        renderTrendChart(trendRawData.value);
+    }
+}
+
 
 // 🟢 [新增] 觸發選擇檔案
 function triggerFileInput() {
@@ -686,16 +714,19 @@ async function fetchExpenseData() {
     }
 }
 
-// [修正] 6. 獲取趨勢圖數據時帶上 ledger_id
 async function fetchTrendData() {
   const { start, end } = trendFilter.value;
+  // 這裡維持使用 category 模式抓取資料
   let url = `${window.API_BASE_URL}?action=trend_data&start=${start}&end=${end}&mode=category`;
   if (props.ledgerId) url += `&ledger_id=${props.ledgerId}`;
 
   const response = await fetchWithLiffToken(url);
   if (response && response.ok) {
       const result = await response.json();
-      if (result.status === 'success') renderTrendChart(result.data);
+      if (result.status === 'success') {
+          trendRawData.value = result.data; // ★ 存入暫存
+          renderTrendChart(result.data);
+      }
   }
 }
 
@@ -727,21 +758,111 @@ function renderChart() {
 function renderTrendChart(data) {
     if (trendChart) trendChart.destroy();
     if (!trendChartCanvas.value) return;
-    const labels = Object.keys(data); 
-    const allCategories = new Set();
-    labels.forEach(month => { Object.keys(data[month]).forEach(cat => allCategories.add(cat)); });
-    const datasets = Array.from(allCategories).map((cat, index) => {
-        const catData = labels.map(month => data[month][cat] || 0); 
-        const color = palette[index % palette.length];
-        return { label: categoryMap[cat] || cat, data: catData, borderColor: color, backgroundColor: color, tension: 0.3, fill: false, pointRadius: 3 };
+
+    const months = Object.keys(data).sort(); // 所有月份
+    if (months.length === 0) return;
+
+    // 1. 整理所有出現過的分類，並計算總額 (用來抓出 Top 5)
+    const categoryTotals = {};
+
+    months.forEach(month => {
+        const monthData = data[month]; // { Food: 100, Transport: 50... }
+        Object.keys(monthData).forEach(catKey => {
+            const amount = parseFloat(monthData[catKey] || 0);
+
+            // 這裡要過濾：只計算當前選擇類型 (支出/收入) 的分類
+            // 由於後端回傳的是 category name (例如 'Food'), 我們需要知道它是支出還是收入
+            // 簡單做法：假設所有分類預設都是支出，除非特別標記。
+            // 更好的做法：依賴前端 categoryMap 來判斷，或是後端回傳時多帶 type。
+            // 這裡我們用一個簡單的邏輯：金額 > 0 的通常都算，但為了精準，
+            // 您可能需要在 categoryMap 裡標記哪些是 income (如 Salary, Bonus, Allowance)。
+
+            const incomeCategories = ['Salary', 'Allowance', 'Bonus', 'Investment'];
+            const isIncomeCat = incomeCategories.includes(catKey);
+
+            if (trendChartType.value === 'expense' && isIncomeCat) return;
+            if (trendChartType.value === 'income' && !isIncomeCat) return;
+
+            if (!categoryTotals[catKey]) categoryTotals[catKey] = 0;
+            categoryTotals[catKey] += amount;
+        });
     });
+
+    // 2. 找出前 5 大分類
+    const sortedCats = Object.keys(categoryTotals).sort((a, b) => categoryTotals[b] - categoryTotals[a]);
+    const topCats = sortedCats.slice(0, 5); // 取前 5 名
+    const hasOthers = sortedCats.length > 5;
+
+    // 3. 建構 Datasets
+    const datasets = topCats.map((catKey, index) => {
+        return {
+            label: categoryMap[catKey] || catKey,
+            data: months.map(m => {
+                // 同樣過濾 income/expense
+                const val = data[m][catKey] || 0;
+                return val;
+            }),
+            backgroundColor: palette[index % palette.length],
+            stack: 'Stack 0', // 設定堆疊
+        };
+    });
+
+    // 處理「其他」
+    if (hasOthers) {
+        datasets.push({
+            label: '其他',
+            data: months.map(m => {
+                let otherSum = 0;
+                Object.keys(data[m]).forEach(catKey => {
+                    const incomeCategories = ['Salary', 'Allowance', 'Bonus', 'Investment'];
+                    const isIncomeCat = incomeCategories.includes(catKey);
+                    if (trendChartType.value === 'expense' && isIncomeCat) return;
+                    if (trendChartType.value === 'income' && !isIncomeCat) return;
+
+                    if (!topCats.includes(catKey)) {
+                        otherSum += parseFloat(data[m][catKey] || 0);
+                    }
+                });
+                return otherSum;
+            }),
+            backgroundColor: '#dcdcdc', // 灰色
+            stack: 'Stack 0',
+        });
+    }
+
+    // 4. 繪圖
     trendChart = new Chart(trendChartCanvas.value, {
-        type: 'line', data: { labels: labels, datasets: datasets },
-        options: { 
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false }, 
-            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, datalabels: { display: false } }, 
-            scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { callback: (val) => 'NT$' + numberFormat(val, 0) } }, x: { grid: { display: false } } } 
+        type: 'bar', // 改為長條圖
+        data: { labels: months, datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false }, // 滑鼠移上去顯示當月所有數據
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += 'NT$ ' + numberFormat(context.parsed.y, 0);
+                            }
+                            return label;
+                        }
+                    }
+                },
+                datalabels: { display: false } // 趨勢圖通常不顯示詳細數字以免太亂
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false } }, // X 軸堆疊
+                y: { 
+                    stacked: true, // Y 軸堆疊
+                    beginAtZero: true, 
+                    grid: { color: '#f0f0f0' },
+                    ticks: { callback: (val) => formatCompactNumber(val) } 
+                }
+            }
         }
     });
 }
@@ -1032,4 +1153,68 @@ onMounted(() => {
 .upload-content .sub { font-size: 0.8rem; color: #999; margin-top: 4px; }
 .analyzing { pointer-events: none; opacity: 0.7; }
 .loading-content { color: #d4a373; font-weight: bold; }
+
+.trend-controls {
+  display: flex;
+  flex-direction: column; /* 手機版垂直排列 */
+  gap: 12px;
+  background: #f7f5f0;
+  padding: 12px;
+  border-radius: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.trend-type-toggle {
+  display: flex;
+  background: #e0e0e0;
+  padding: 4px;
+  border-radius: 20px;
+  width: fit-content;
+  margin: 0 auto; /* 置中 */
+}
+
+.toggle-btn {
+  padding: 6px 20px;
+  border: none;
+  background: transparent;
+  color: #666;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn.active {
+  background: white;
+  color: #d4a373;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.date-range-inputs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.date-input {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  width: 120px;
+}
+
+/* 電腦版調整 */
+@media (min-width: 600px) {
+  .trend-controls {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .trend-type-toggle { margin: 0; }
+}
 </style>
