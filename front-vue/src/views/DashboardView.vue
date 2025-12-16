@@ -228,9 +228,24 @@
                   <button @click="viewMode = 'list'" :class="['toggle-btn', viewMode==='list'?'active':'']">列表</button>
                   <button @click="viewMode = 'calendar'" :class="['toggle-btn', viewMode==='calendar'?'active':'']">日曆</button>
                </div>
-               <div class="month-selector">
-                 <input type="month" v-model="currentListMonth" @change="fetchTransactions" class="month-input-styled">
-               </div>
+               <div class="month-selector-group">
+                <button class="month-btn prev" @click="shiftMonth(-1)">
+                  &lsaquo;
+                </button>
+                
+                <div class="month-display-wrapper">
+                  <input 
+                    type="month" 
+                    v-model="currentListMonth" 
+                    class="month-input-hidden"
+                  >
+                  <span class="month-label">{{ displayMonthText }}</span>
+                </div>
+
+                <button class="month-btn next" @click="shiftMonth(1)">
+                  &rsaquo;
+                </button>
+              </div>
             </div>
           </div>
 
@@ -361,7 +376,9 @@ const searchQuery = ref('');
 const viewMode = ref('list'); // 'list' or 'calendar'
 
 const trendFilter = ref({
-    start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().substring(0, 10),
+    // 🟢 修改：將 setFullYear 改為 setMonth，並減去 3
+    start: new Date(new Date().setMonth(new Date().getMonth() - 3)).toISOString().substring(0, 10),
+    
     end: new Date().toISOString().substring(0, 10)
 });
 const trendChartCanvas = ref(null);
@@ -526,6 +543,27 @@ const calendarDays = computed(() => {
   }
   return days;
 });
+
+const displayMonthText = computed(() => {
+  if (!currentListMonth.value) return '';
+  const [y, m] = currentListMonth.value.split('-');
+  return `${y}年 ${m}月`;
+});
+
+// ★ 新增：切換月份函式 (-1 為上個月, 1 為下個月)
+function shiftMonth(delta) {
+  const [year, month] = currentListMonth.value.split('-').map(Number);
+  
+  // 計算新日期 (設為 1 號避免大小月問題)
+  const date = new Date(year, month - 1 + delta, 1);
+  
+  // 轉回 YYYY-MM 格式
+  const newY = date.getFullYear();
+  const newM = String(date.getMonth() + 1).padStart(2, '0');
+  
+  currentListMonth.value = `${newY}-${newM}`;
+  // 這裡不需要手動 call fetchTransactions，因為已經有 watch(currentListMonth) 了
+}
 
 // --- 方法 ---
 
@@ -1375,4 +1413,64 @@ onMounted(() => {
 .divider-vertical {
   display: none; /* 在換行模式下通常不需要分隔線 */
 }
+.month-selector-group {
+  display: flex;
+  align-items: center;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  padding: 2px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* 左右切換按鈕 */
+.month-btn {
+  background: transparent;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2rem;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  line-height: 1;
+  padding-bottom: 4px; /* 微調垂直置中 */
+}
+
+.month-btn:hover {
+  background-color: #f0f0f0;
+  color: #d4a373;
+}
+
+/* 中間的月份顯示區 */
+.month-display-wrapper {
+  position: relative;
+  min-width: 100px;
+  text-align: center;
+  font-weight: 600;
+  color: #555;
+  font-size: 0.95rem;
+}
+
+/* 讓原生的 input 變透明並覆蓋在文字上 (這樣點擊文字還能叫出日曆) */
+.month-input-hidden {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  opacity: 0; /* 完全透明 */
+  cursor: pointer;
+  z-index: 2; /* 蓋在文字上面 */
+}
+
+/* 顯示的文字標籤 */
+.month-label {
+  position: relative;
+  z-index: 1;
+  pointer-events: none; /* 讓點擊穿透到 input */
+}
+
 </style>
