@@ -61,8 +61,51 @@
             <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
             <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto專區</button>
           </div>
-          <div class="nav-user">
-            <img v-if="liffState.profile?.pictureUrl" :src="liffState.profile.pictureUrl" class="user-avatar" />
+          <div class="nav-user" @click="showUserMenu = !showUserMenu">
+            <img 
+              v-if="liffState.profile?.pictureUrl" 
+              :src="liffState.profile.pictureUrl" 
+              class="user-avatar" 
+              alt="User"
+            />
+            <div v-else class="user-avatar-placeholder">?</div>
+
+            <div v-if="showUserMenu" class="user-dropdown">
+              <div class="menu-info">
+                {{ liffState.profile?.displayName || '使用者' }}
+              </div>
+              <div class="menu-divider"></div>
+              
+              <button class="menu-item" @click="openSettings">
+                個人設定
+              </button>
+              
+              <div class="menu-divider"></div>
+              <button class="menu-item logout-btn" @click.stop="handleLogout">
+                登出
+              </button>
+            </div>
+            <div v-if="showSettingsModal" class="modal-overlay" @click.self="showSettingsModal = false">
+              <div class="modal-card">
+                <h3>個人設定</h3>
+                
+                <div class="form-group">
+                  <label>每月預算 (NT$)</label>
+                  <input type="number" v-model="settingsForm.budget" class="modal-input" placeholder="0">
+                </div>
+
+                <div class="form-group">
+                  <label>每日記帳提醒時間</label>
+                  <input type="time" v-model="settingsForm.reminder_time" class="modal-input">
+                </div>
+
+                <div class="modal-actions">
+                  <button class="btn-cancel" @click="showSettingsModal = false">取消</button>
+                  <button class="btn-save" @click="saveSettings">儲存</button>
+                </div>
+              </div>
+            </div>
+            <div v-if="showUserMenu" class="dropdown-backdrop" @click.stop="showUserMenu = false"></div>
           </div>
         </div>
       </nav>
@@ -107,6 +150,13 @@ const currentViewRef = ref(null);
 const isLoading = ref(true); 
 const isOnboarded = ref(false); 
 const isGuestMode = ref(false); // ★ 新增：訪客模式狀態
+const showUserMenu = ref(false);
+
+const showSettingsModal = ref(false); // 控制設定視窗顯示
+const settingsForm = ref({
+  budget: 0,
+  reminder_time: '21:00'
+});
 
 // 帳本相關狀態
 const ledgers = ref([]);
@@ -127,6 +177,76 @@ const handleRefreshDashboard = () => {
     }
 };
 
+// ★ 新增：打開設定視窗 (並載入目前數值)
+async function openSettings() {
+  showUserMenu.value = false; // 關閉下拉選單
+  isLoading.value = true;
+  
+  try {
+    const response = await fetchWithLiffToken(`${API_URL}?action=get_user_status`);
+    if (response && response.ok) {
+      const result = await response.json();
+      if (result.status === 'success') {
+        settingsForm.value.budget = result.data.monthly_budget;
+        // 如果後端沒回傳時間，預設 21:00
+        settingsForm.value.reminder_time = result.data.reminder_time || '21:00';
+      }
+    }
+    showSettingsModal.value = true;
+  } catch (e) {
+    alert("載入設定失敗");
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// ★ 新增：儲存設定
+async function saveSettings() {
+  if (settingsForm.value.budget < 0) {
+    alert("預算不能為負數");
+    return;
+  }
+
+  try {
+    const response = await fetchWithLiffToken(`${API_URL}?action=update_settings`, {
+      method: 'POST',
+      body: JSON.stringify(settingsForm.value)
+    });
+    
+    const result = await response.json();
+    if (result.status === 'success') {
+      alert("設定已儲存！");
+      showSettingsModal.value = false;
+      // 觸發 Dashboard 重新整理以反映預算變化 (如果有監聽的話)
+      handleRefreshDashboard(); 
+    } else {
+      alert("儲存失敗：" + result.message);
+    }
+  } catch (e) {
+    console.error(e);
+    alert("連線錯誤");
+  }
+}
+
+// ★ 新增：登出函式
+function handleLogout() {
+  if (!confirm('確定要登出嗎？')) return;
+
+  // 1. 清除 Google Token
+  localStorage.removeItem('google_id_token');
+  
+  // 2. 清除其他暫存資料 (避免下次登入誤判)
+  localStorage.removeItem('pending_onboarding');
+  localStorage.removeItem('pending_join_token');
+
+  // 3. 執行 LIFF 登出 (如果是 LINE 登入環境)
+  if (liff.isLoggedIn()) {
+    liff.logout();
+  }
+
+  // 4. 重整頁面，讓 App 回到初始狀態
+  window.location.reload();
+}
 
 // 解析 JWT Token (取得 Google 用戶資訊)
 function parseJwt(token) {
@@ -554,5 +674,116 @@ onMounted(async () => {
   .user-avatar { width: 32px; height: 32px; }
   .main-content { padding: 16px 12px; }
   .brand-logo { font-size: 1rem; } 
+}
+
+/* 用戶區域與游標 */
+.nav-user {
+  position: relative;
+  cursor: pointer;
+  margin-left: 8px;
+}
+
+.user-avatar-placeholder {
+  width: 36px; height: 36px; background: #eee; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #aaa; font-weight: bold;
+}
+
+/* 用戶下拉選單 (參考帳本選單樣式) */
+.user-dropdown {
+  position: absolute;
+  top: 120%; right: 0; /* 靠右對齊 */
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  min-width: 160px;
+  z-index: 1001;
+  overflow: hidden;
+  animation: fadeIn 0.2s ease;
+}
+
+.menu-info {
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: #555;
+  background: #f9f9f9;
+  border-bottom: 1px solid #eee;
+}
+
+.menu-divider {
+  height: 1px; background: #eee; margin: 0;
+}
+
+.menu-item {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.logout-btn {
+  color: #ff4d4f; /* 紅色字體表示登出 */
+  font-weight: 500;
+}
+
+.logout-btn:hover {
+  background: #fff1f0;
+}
+
+/* 簡單的淡入動畫 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Modal 樣式 */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 2000;
+  display: flex; justify-content: center; align-items: center;
+  padding: 20px;
+}
+
+.modal-card {
+  background: white; width: 100%; max-width: 320px;
+  border-radius: 16px; padding: 24px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  animation: slideUp 0.3s ease;
+}
+
+.modal-card h3 {
+  margin: 0 0 20px 0; color: #5A483C; text-align: center;
+}
+
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; margin-bottom: 8px; font-size: 0.9rem; color: #666; }
+
+.modal-input {
+  width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;
+  font-size: 1rem; outline: none;
+  box-sizing: border-box; /* 重要：防止寬度爆版 */
+}
+.modal-input:focus { border-color: #d4a373; }
+
+.modal-actions {
+  display: flex; gap: 10px; margin-top: 24px;
+}
+
+.btn-cancel, .btn-save {
+  flex: 1; padding: 10px; border-radius: 8px; border: none;
+  font-weight: bold; cursor: pointer;
+}
+.btn-cancel { background: #f0f0f0; color: #666; }
+.btn-save { background: #d4a373; color: white; }
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 </style>

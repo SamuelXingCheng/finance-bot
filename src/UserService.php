@@ -101,10 +101,13 @@ class UserService {
     }
 
     public function getUserStatus(int $userId): array {
-        $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium, monthly_budget FROM users WHERE id = ?");
+        // 🟢 [修改] 增加查詢 reminder_time
+        $stmt = $this->pdo->prepare("SELECT is_onboarded, is_premium, monthly_budget, reminder_time FROM users WHERE id = ?");
         $stmt->execute([$userId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result ?: ['is_onboarded' => 0, 'is_premium' => 0, 'monthly_budget' => 0];
+        
+        // 設定預設值
+        return $result ?: ['is_onboarded' => 0, 'is_premium' => 0, 'monthly_budget' => 0, 'reminder_time' => '21:00'];
     }
 
     public function updateUserProfile(int $userId, array $data): bool {

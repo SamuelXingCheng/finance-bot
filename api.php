@@ -862,6 +862,25 @@ try {
                 ];
                 break;
 
+                // 🟢 [新增] 更新用戶設定 (預算、提醒時間)
+            case 'update_settings':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    http_response_code(405); break;
+                }
+                $input = json_decode(file_get_contents('php://input'), true);
+                
+                // 呼叫原本的 updateUserProfile (它只更新欄位，不會重置試用)
+                $success = $userService->updateUserProfile($dbUserId, [
+                    'monthly_budget' => $input['budget'] ?? 0,
+                    'reminder_time'  => $input['reminder_time'] ?? null
+                ]);
+
+                if ($success) {
+                    $response = ['status' => 'success', 'message' => '設定已更新'];
+                } else {
+                    $response = ['status' => 'error', 'message' => '更新失敗'];
+                }
+                break;
             default:
                 $response = ['status' => 'error', 'message' => 'Invalid action.'];
                 break;
