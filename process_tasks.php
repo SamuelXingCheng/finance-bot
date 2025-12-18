@@ -1,10 +1,10 @@
 <?php
 // process_tasks.php
-// 這是由 Crontab 定期執行的後台 Worker 腳本 (Consumer)
 
-// ----------------------------------------------------
-// 1. 載入必要的服務 (請確保路徑正確)
-// ----------------------------------------------------
+// 🟢 [新增] 允許背景執行，Line Webhook 斷線後繼續跑
+ignore_user_abort(true);
+set_time_limit(120); // 設定 2 分鐘超時，給 AI 足夠時間思考
+
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/src/Database.php';
 require_once __DIR__ . '/src/GeminiService.php';
@@ -12,12 +12,16 @@ require_once __DIR__ . '/src/LineService.php';
 require_once __DIR__ . '/src/TransactionService.php'; 
 require_once __DIR__ . '/src/UserService.php'; 
 
-// ----------------------------------------------------
-// 2. 服務初始化
-// ----------------------------------------------------
+// ... (接下來的程式碼保持您原檔的內容，不需要變動) ...
+// 它的邏輯是：
+// 1. 從 DB 撈取狀態為 PENDING 的任務
+// 2. 呼叫 GeminiService 進行分析
+// 3. 使用 pushFlexMessage 將最終的記帳結果 (包含金額、類別) 推播給使用者
 $task = null;
 $lineUserId = null; 
+
 try {
+    // 3.1. 開始事務：鎖定任務
     $db = Database::getInstance();
     $dbConn = $db->getConnection();
     $gemini = new GeminiService();
