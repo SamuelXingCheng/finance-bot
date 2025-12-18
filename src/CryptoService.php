@@ -365,7 +365,7 @@ class CryptoService {
      */
     public function getDashboardData(int $userId): array {
         
-        error_log("🚀 [Debug] 開始計算使用者 {$userId} 的 Dashboard 數據 (資產/交易隔離模式)...");
+        // error_log("🚀 [Debug] 開始計算使用者 {$userId} 的 Dashboard 數據 (資產/交易隔離模式)...");
 
         // ==========================================
         // 1. [資產面] 取得持倉 (用於計算總現值)
@@ -391,7 +391,7 @@ class CryptoService {
         $usdTwdRate = $this->rateService->getUsdTwdRate();
         $netInvestedUsd = ($usdTwdRate > 0) ? ($netInvestedTwd / $usdTwdRate) : 0;
 
-        error_log("💰 [資金] 淨入金(TWD): " . number_format($netInvestedTwd) . " / (USD): " . number_format($netInvestedUsd));
+        // error_log("💰 [資金] 淨入金(TWD): " . number_format($netInvestedTwd) . " / (USD): " . number_format($netInvestedUsd));
 
         // ==========================================
         // 3. [交易面] 取得交易流水 (用於 PHP 進行 FIFO 計算)
@@ -532,8 +532,8 @@ class CryptoService {
             array_keys($fifoInventoryStats)
         ));
 
-        error_log("--------------------------------------------------");
-        error_log("📊 [交易] 開始逐幣計算 PnL (FIFO 成本法):");
+        // error_log("--------------------------------------------------");
+        // error_log("📊 [交易] 開始逐幣計算 PnL (FIFO 成本法):");
 
         foreach ($allSymbols as $sym) {
             
@@ -574,11 +574,11 @@ class CryptoService {
             }
         }
         
-        error_log("--------------------------------------------------");
-        error_log("🏁 交易總績效 (Trading PnL): " . number_format($totalTradingPnL, 2));
-        error_log("🏁 總已實現損益 (Realized PnL): " . number_format($totalRealizedPnL, 2));
-        error_log("🏁 總未實現損益 (Unrealized PnL): " . number_format($totalUnrealizedPnL, 2)); 
-        error_log("🏁 資產總現值 (Asset): " . number_format($totalAssetsUsd, 2));
+        // error_log("--------------------------------------------------");
+        // error_log("🏁 交易總績效 (Trading PnL): " . number_format($totalTradingPnL, 2));
+        // error_log("🏁 總已實現損益 (Realized PnL): " . number_format($totalRealizedPnL, 2));
+        // error_log("🏁 總未實現損益 (Unrealized PnL): " . number_format($totalUnrealizedPnL, 2)); 
+        // error_log("🏁 資產總現值 (Asset): " . number_format($totalAssetsUsd, 2));
 
         // ==========================================
         // 5. 最終指標 (完全獨立) - 使用 FIFO 結果
@@ -1139,7 +1139,7 @@ class CryptoService {
         
         // 簡單檢查
         if ($updatedCryptoCount > 0 || $twdRate > 0) {
-            error_log("Price Update Success. Crypto: {$updatedCryptoCount} coins, TWD Rate: " . (1/$twdRate));
+            // error_log("Price Update Success. Crypto: {$updatedCryptoCount} coins, TWD Rate: " . (1/$twdRate));
             return true;
         }
 

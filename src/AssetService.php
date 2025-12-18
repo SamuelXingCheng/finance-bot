@@ -43,7 +43,7 @@ class AssetService {
     public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null, ?int $ledgerId = null, ?float $customRate = null): bool {
         
         // Debug Log (這行留著幫你除錯)
-        error_log("🔍 Debug AssetService: Name={$name}, RateInput=" . var_export($customRate, true));
+        // error_log("🔍 Debug AssetService: Name={$name}, RateInput=" . var_export($customRate, true));
         
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d');
@@ -118,7 +118,7 @@ class AssetService {
                 if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             }
             
-            error_log("AssetService UPSERT failed: " . $e->getMessage());
+            // error_log("AssetService UPSERT failed: " . $e->getMessage());
             
             // 🔥 重要：如果是被外部呼叫，必須把錯誤丟出去，讓外面的人知道失敗了！
             if (!$shouldStartTransaction) {
