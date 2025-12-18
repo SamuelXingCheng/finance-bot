@@ -108,6 +108,9 @@
                 <div class="form-group">
                   <label>每日記帳提醒時間</label>
                   <input type="time" v-model="settingsForm.reminder_time" class="modal-input">
+                  <p v-if="settingsForm.reminder_time && !isLineLinked" class="warning-text">
+                    您尚未綁定 LINE 帳號，無法接收通知。
+                  </p>
                 </div>
 
                 <div class="modal-actions">
@@ -923,5 +926,10 @@ onMounted(async () => {
     color: #999;
     margin-top: 6px;
     text-align: center;
+}
+.warning-text {
+  color: #d9534f; /* 紅色警告 */
+  font-size: 0.8rem;
+  margin-top: 4px;
 }
 </style>

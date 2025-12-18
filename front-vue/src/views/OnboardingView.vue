@@ -173,6 +173,10 @@
             </select>
           </div>
         </div>
+        <div class="reminder-note">
+          <span class="icon">💡</span>
+          <span>提醒將透過 LINE 發送，請務必在最後一步完成 <b>LINE 綁定/登入</b> 喔！</span>
+        </div>
         
         <button class="btn-primary" :disabled="!form.budget" @click="nextStep">完成設定</button>
       </div>
@@ -182,17 +186,17 @@
         <h2>恭喜完成！</h2>
         
         <div class="reward-card">
-            <p class="reward-label">🎉 新手專屬好禮</p>
-            <p class="reward-amount">7 天 PRO 會員試用</p>
-            <p class="reward-sub">+ FinPoints 50 點 (可抵扣訂閱)</p>
+            <p class="reward-label">新年限定期間 專屬好禮</p>
+            <p class="reward-amount">PRO 會員三個月試用</p>
+            <p class="reward-sub">抽獎 比特幣回饋</p>
         </div>
 
         <div class="unlock-info">
             <p class="unlock-title">試用期間您將擁有：</p>
             <ul class="unlock-list">
-              <li>🚀 無限次 AI 記帳與資產分析</li>
-              <li>📊 解鎖完整財務報表</li>
-              <li>☁️ 雲端自動備份</li>
+              <li>無限次 AI 記帳與資產分析</li>
+              <li>解鎖完整財務報表</li>
+              <li>雲端自動備份</li>
             </ul>
             <p class="unlock-note">* 試用結束後將自動轉為免費版，不會自動扣款。</p>
         </div>
@@ -566,4 +570,19 @@ h2 { color: #8c7b75; margin: 0 0 12px 0; font-size: 1.4rem; }
 @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+.reminder-note {
+  background: #fff8e1; /* 淡黃色背景 */
+  color: #856404;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #ffeeba;
+}
+.reminder-note .icon {
+  font-size: 1.2rem;
+}
 </style>
