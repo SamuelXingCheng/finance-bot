@@ -5,50 +5,104 @@ require_once __DIR__ . '/../config.php';
 class GeminiService {
     private $apiKey;
     private $model;
-    private $transactionSchema;
+    private $unifiedSchema;
 
     public function __construct() {
         $this->apiKey = GEMINI_API_KEY;
         $this->model = GEMINI_MODEL;
         
-        // 定義標準記帳 Schema
-        $this->transactionSchema = [
-            'type' => 'array', 
-            'items' => [
-                'type' => 'object',
-                'properties' => [
-                    'amount' => ['type' => 'number', 'description' => '交易金額，必須是正數'],
-                    'category' => ['type' => 'string', 'description' => '交易類別，例如: Food, Transport, Salary, Bills'],
-                    'description' => ['type' => 'string', 'description' => '詳細描述或備註'],
-                    'type' => ['type' => 'string', 'enum' => ['expense', 'income'], 'description' => '交易類型'],
-                    'date' => ['type' => 'string', 'description' => '交易日期 (YYYY-MM-DD)'],
-                    'currency' => ['type' => 'string', 'description' => '貨幣代碼 (TWD, USD...)'],
+        // 🌟 定義通用的意圖 Schema (維持不變，因為這結構能涵蓋所有需求)
+        $this->unifiedSchema = [
+            'type' => 'object',
+            'properties' => [
+                'intent' => [
+                    'type' => 'string', 
+                    'enum' => ['transaction', 'asset_setup', 'query', 'chat'],
+                    'description' => '用戶意圖判斷'
                 ],
-                'required' => ['amount', 'category', 'type', 'date', 'currency'] 
-            ]
+                // --- 1. 記帳資料 (對應您原本的輸出陣列) ---
+                'transaction_data' => [
+                    'type' => 'array',
+                    'description' => '當 intent 為 transaction 時，填入此欄位。必須是交易物件的陣列。',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'amount' => ['type' => 'number', 'description' => '金額 (正數)'],
+                            'category' => ['type' => 'string', 'description' => '類別 (Food, Transport...)'],
+                            'description' => ['type' => 'string', 'description' => '品項描述'],
+                            'type' => ['type' => 'string', 'enum' => ['expense', 'income']],
+                            'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD'],
+                            'currency' => ['type' => 'string', 'description' => 'TWD, USD...']
+                        ],
+                        'required' => ['amount', 'category', 'type', 'date', 'currency']
+                    ]
+                ],
+                // --- 2. 資產設定資料 ---
+                // --- 2. 資產/訂閱設定 ---
+                'asset_data' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'name' => ['type' => 'string', 'description' => '帳戶或訂閱名稱'],
+                        'type' => ['type' => 'string', 'description' => 'Bank, Cash, CreditCard, Stock, Subscription'],
+                        'balance' => ['type' => 'number', 'description' => '金額'],
+                    ]
+                ],
+                // --- 3. 查詢參數 ---
+                'query_params' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'target' => [
+                            'type' => 'string', 
+                            'enum' => ['expense', 'income', 'net_worth', 'account_list', 'subscription_list', 'summary'],
+                            'description' => 'summary 代表同時查詢收入與支出'
+                        ],
+                        'category' => [
+                            'type' => 'string',
+                            'description' => '指定類別 (例如: Investment)'
+                        ]
+                    ]
+                ],
+                // --- 4. 閒聊回覆 ---
+                'reply_text' => [
+                    'type' => 'string', 
+                    'description' => '給用戶的自然語言回覆'
+                ]
+            ],
+            'required' => ['intent']
         ];
     }
 
     /**
-     * [一般記帳] 處理生活記帳 (語音/文字/發票/信用卡帳單)
-     * 使用 Schema 強制約束格式
+     * 核心分析函式：處理所有文字/語音/圖片輸入
+     * 將原本的記帳 Prompt 完美融合進 Intent 判斷中
      */
-    public function parseTransaction(string $textOrPath): ?array {
+    public function analyzeInput(string $content): ?array {
         $today = date('Y-m-d');
         
-        // (保留您的原始 Instruction 不動)
+        // 🌟 這裡將您原本的指令整合進去
         $systemInstruction = <<<EOD
---- 核心指令：專業結構化數據轉換引擎 ---
+你是一位專業的個人財務 AI 助理。請先分析用戶輸入的「意圖 (Intent)」，並根據意圖輸出對應的 JSON 資料。
 
-你的唯一職責是將用戶輸入的「文字」、「語音」或「圖片（收據/發票/菜單）」轉換為嚴格符合指定 JSON 結構的數據陣列。
+--- 意圖 1：記帳 (transaction) ---
+如果用戶輸入包含消費、收入、轉帳等內容 (例如: "午餐 100", "薪水 50000")，請將 `intent` 設為 `transaction`，並將資料填入 `transaction_data` 陣列。
 
-**【指令優先級：最高】**
-1. **必須強制輸出 JSON 陣列：** 你的輸出必須是包含多個交易物件的列表 `[{...}, {...}]`。
-2. **必須完整拆分：** 用戶的一句話可能包含多個不同的消費或收入，請務必將它們拆分成獨立的項目。
-3. **必須有明確金額：** 如果輸入中沒有數字金額，請直接輸出空陣列 `[]`。
-4. **必須推斷日期：** 根據輸入中的時間指示 (例如 '昨天', '上週')，將交易日期轉換為 **YYYY-MM-DD** 格式。**如果圖片上有日期，以圖片為準；否則請使用今天的日期：{$today}。**
-5. **必須指定貨幣：** 如果用戶沒有提及貨幣種類，請預設使用 **TWD** 作為貨幣代碼。
-6. **圖片處理規則：** 若輸入為圖片，請辨識上面的總金額與品項。若有多個品項但無法一一對應金額，可合併為一筆「總計」。
+**【記帳核心規則 - 必須嚴格遵守】**
+1. **強制拆分：** 一句話若包含多筆消費，務必拆成多個物件。
+2. **日期推斷：** 根據 '昨天', '上週' 推斷日期。若無提及或圖片無日期，預設使用今天：{$today}。
+3. **貨幣預設：** 預設 **TWD**。
+4. **類別對照 (Category)：**
+   - Food: 吃飯, 飲料, 聚餐
+   - Transport: 交通, 加油, 停車
+   - Entertainment: 娛樂, 訂閱, 遊戲
+   - Shopping: 購物, 日用品
+   - Bills: 帳單, 房租
+   - Investment: 投資
+   - Medical: 醫療
+   - Education: 買書, 課程
+   - Miscellaneous: 其他
+5. **類型判斷 (Type)：**
+   - income: 薪水, 發薪, 領錢, 獎金, 股利, 發票中獎, 還錢, 轉帳給我
+   - expense: 其他所有消費
 
 設定：你是一位熟悉台灣生活、年輕人用語的專業記帳助手。請嚴格遵循以下規則：
 
@@ -69,26 +123,30 @@ Output:
 ]
 ========================
 
-規則 1 (Type 類型判斷):
-- income: 薪水, 發薪, 領錢, 獎金, 股利, 發票中獎, 還錢, 轉帳給我.
-- expense: 其他所有消費.
-
-規則 2 (Category 類別判斷 - 台灣習慣):
-- Food: 吃飯, 飲料, 聚餐.
-- Transport: 交通, 加油, 停車.
-- Entertainment: 娛樂, 訂閱, 遊戲.
-- Shopping: 購物, 日用品.
-- Bills: 帳單, 房租.
-- Investment: 投資.
-- Medical: 醫療.
-- Education: 買書, 課程.
-- Miscellaneous: 其他.
-
 規則 3: 請提取具體品項作為 description。
+
+--- 意圖 2：資產設定 (asset_setup) ---
+建立帳戶或管理訂閱。例如："建立台新 5萬" 或 "設定 Netflix 390"。
+
+--- 意圖 3：查詢 (query) ---
+詢問財務狀況。
+- "這個月花多少" -> target: expense
+- "這個月賺多少" -> target: income
+- "查詢支出" -> target: expense
+- "查詢收出" -> target: income
+- "投資花多少" -> target: expense, category: Investment
+- "查詢收支", "收支概況", "本月統計" -> target: summary
+- "我有幾個帳戶", "列出我的帳戶" -> target: account_list
+- "固定支出有哪些", "訂閱有哪些" -> target: subscription_list
+- "還有多少錢" -> target: net_worth
+請在 reply_text 給予確認回覆。
+
+--- 意圖 4：閒聊 (chat) ---
+一般對話或無法辨識時，在 reply_text 親切回覆。
+
 EOD;
         
-        // 傳入 true 表示使用 transactionSchema
-        return $this->callGeminiAPI($systemInstruction, $textOrPath, true);
+        return $this->callGeminiAPI($systemInstruction, $content, $this->unifiedSchema);
     }
 
     /**
@@ -98,7 +156,6 @@ EOD;
     public function parseCryptoScreenshot(string $filePath): ?array {
         $today = date('Y-m-d');
         
-        // (保留您的原始 Instruction 不動)
         $systemInstruction = <<<EOD
 --- 角色設定 ---
 你是一位專業的加密貨幣財務助理。你的任務是分析使用者上傳的「交易所截圖」或「合約 PNL 圖」，並提取結構化的交易數據。
@@ -124,93 +181,70 @@ EOD;
 
     /**
      * [核心] 共用的 Gemini API 呼叫邏輯
-     * 負責處理檔案讀取、Base64 編碼、CURL 請求發送
-     * @param mixed $useSchema boolean|array 若為 true 使用預設記帳 Schema；若為 array 則使用該自定義 Schema；若為 false 則不使用。
+     * 支援純文字或 FILE:路徑
      */
-    private function callGeminiAPI(string $systemInstruction, string $content, $useSchema = false): ?array {
+    private function callGeminiAPI(string $systemInstruction, string $content, $schema): ?array {
         $parts = [];
 
-        // 判斷是否為檔案路徑 (FILE:...)
+        // 判斷是否為檔案 (圖片/語音)
         if (strncmp($content, 'FILE:', 5) === 0) {
             $filePath = trim(substr($content, 5));
-            
             if (file_exists($filePath)) {
                 $fileData = file_get_contents($filePath);
                 $base64Data = base64_encode($fileData);
                 $mimeType = mime_content_type($filePath);
                 
-                // 修正 m4a 誤判為 application/octet-stream 的問題
-                if (str_ends_with($filePath, '.m4a')) {
-                    $mimeType = 'audio/mp4';
-                }
+                // 修正 m4a 類型
+                if (str_ends_with($filePath, '.m4a')) $mimeType = 'audio/mp4';
 
                 $parts = [
-                    ['text' => $systemInstruction . "\n\n[系統提示] 請分析此檔案。"],
-                    [
-                        'inline_data' => [
-                            'mime_type' => $mimeType, 
-                            'data' => $base64Data
-                        ]
-                    ]
+                    ['text' => $systemInstruction . "\n\n[系統提示] 請分析此檔案內容。"],
+                    ['inline_data' => ['mime_type' => $mimeType, 'data' => $base64Data]]
                 ];
             } else {
-                error_log("GeminiService Error: File not found at {$filePath}");
+                error_log("GeminiService: File not found {$filePath}");
                 return null;
             }
         } else {
-            // 純文字輸入
-            if (empty($content)) {
-                $mergedText = $systemInstruction;
-            } else {
-                $mergedText = $systemInstruction . "\n\nUser input: " . $content;
-            }
-            $parts = [['text' => $mergedText]];
+            // 純文字
+            $parts = [['text' => $systemInstruction . "\n\nUser Input: " . $content]];
         }
 
-        // 設定生成參數
-        $generationConfig = [
-            'responseMimeType' => 'application/json'
-        ];
-
-        // 🟢 [修正] 支援 boolean 或 array 類型的 Schema 設定
-        if ($useSchema === true) {
-            $generationConfig['responseSchema'] = $this->transactionSchema;
-        } elseif (is_array($useSchema)) {
-            $generationConfig['responseSchema'] = $useSchema;
-        }
-
-        $data = [
+        $payload = [
             'contents' => [['role' => 'user', 'parts' => $parts]],
-            'generationConfig' => $generationConfig
+            'generationConfig' => [
+                'responseMimeType' => 'application/json'
+            ]
         ];
 
-        $ch = curl_init("https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}");
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        // 只有當傳入 Schema 時才加入設定，避免影響其他彈性輸出
+        if ($schema !== false) {
+            $payload['generationConfig']['responseSchema'] = $schema;
+        }
+
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$this->model}:generateContent?key={$this->apiKey}";
+        
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-
+        
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($httpCode !== 200 || !$response) {
-            error_log("Gemini API Error: HTTP $httpCode, Response: $response");
+            error_log("Gemini API Error: {$httpCode} - {$response}");
             return null;
         }
 
-        $responseData = json_decode($response, true);
-        $jsonText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? null;
+        $data = json_decode($response, true);
+        $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
         
-        if ($jsonText) {
-            $resultArray = json_decode($jsonText, true);
-            if (is_array($resultArray)) {
-                return $resultArray;
-            }
-        }
-        return null;
+        return $text ? json_decode($text, true) : null;
     }
-
+    
     /**
      * 🌟 分析資產配置 (保持不變)
      */
@@ -326,9 +360,8 @@ CSV 片段：
 ```csv
 {$csvSnippet}
 EOD;
-// 傳入自定義 Schema
+    // 傳入自定義 Schema
     return $this->callGeminiAPI($prompt, "", $schema);
     }
-
 }
 ?>
