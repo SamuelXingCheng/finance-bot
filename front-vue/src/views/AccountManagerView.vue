@@ -255,6 +255,8 @@
                     {{ typeNameMap[account.type] || account.type }}
                   </span>
                   <span class="currency">{{ account.currency_unit }}</span>
+                  <span v-if="account.symbol" class="symbol-tag">{{ account.symbol }}</span>
+                  <span v-if="account.quantity > 0" class="qty-tag">{{ account.quantity }} 股</span>
                 </div>
               </div>
               
@@ -262,6 +264,7 @@
                 <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
                   {{ numberFormat(account.balance, getPrecision(account.currency_unit)) }}
                 </div>
+                <div v-if="account.symbol" class="hint-xs">估算市值</div>
                 <div class="action-buttons">
                   <button class="pill-btn update" @click="openModal(account)">
                     更新快照
@@ -342,6 +345,20 @@
               <option value="Investment">其他投資</option>
               <option value="Liability">負債</option>
             </select>
+          </div>
+
+          <div v-if="form.type === 'Stock' || form.type === 'Bond'" class="special-fields-box">
+            <div class="form-row">
+              <div class="form-group half">
+                <label>標的代碼 (Symbol)</label>
+                <input type="text" v-model="form.symbol" class="input-std" placeholder="如 AAPL 或 2330.TW">
+              </div>
+              <div class="form-group half">
+                <label>持股數量</label>
+                <input type="number" v-model.number="form.quantity" step="any" class="input-std" placeholder="股數/單位">
+              </div>
+            </div>
+            <p class="hint">填寫後，未來系統可嘗試為您自動更新市價。</p>
           </div>
 
           <div class="form-row">
@@ -496,7 +513,9 @@ const form = ref({
     balance: 0, 
     currency: 'TWD',
     date: new Date().toISOString().substring(0, 10),
-    custom_rate: null
+    custom_rate: null,
+    symbol: '',    // 🟢 新增
+    quantity: null // 🟢 新增
 });
 
 const currencySelectValue = ref('TWD');
@@ -943,7 +962,9 @@ function openModalForSnapshot(snapshotItem) {
         balance: parseFloat(snapshotItem.balance), 
         currency: snapshotItem.currency_unit,
         date: snapshotItem.snapshot_date,
-        custom_rate: parseFloat(snapshotItem.exchange_rate) || null
+        custom_rate: parseFloat(snapshotItem.exchange_rate) || null,
+        symbol: snapshotItem.symbol || '',    // 🟢 帶入歷史快照代碼
+        quantity: snapshotItem.quantity || null // 🟢 帶入歷史快照數量
     };
     
     const currencyToSet = snapshotItem.currency_unit;
@@ -1004,7 +1025,9 @@ function openModal(account = null) {
         balance: parseFloat(account.balance), 
         currency: account.currency_unit, 
         date: today,
-        custom_rate: null
+        custom_rate: null,
+        symbol: account.symbol || '',    // 🟢 帶入現有代碼
+        quantity: account.quantity || null // 🟢 帶入現有數量
     };
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
     if (knownCurrency) { currencySelectValue.value = account.currency_unit; isCustomCurrency.value = false; } else { currencySelectValue.value = 'CUSTOM'; isCustomCurrency.value = true; }
@@ -1016,7 +1039,9 @@ function openModal(account = null) {
         balance: 0, 
         currency: 'TWD', 
         date: today,
-        custom_rate: null
+        custom_rate: null,
+        symbol: '',    // 🟢 重設
+        quantity: null // 🟢 重設
     };
     resetCurrency(); 
   }
@@ -1347,6 +1372,30 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
     .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
     .date-controls { width: 100%; justify-content: space-between; }
 }
+
+/* 🟢 新增樣式 */
+.special-fields-box {
+  background-color: #fdfcf8;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+  margin-bottom: 16px;
+}
+
+.symbol-tag {
+  font-size: 0.7rem;
+  background: #f0f0f0;
+  color: #666;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.qty-tag {
+  font-size: 0.7rem;
+  color: #999;
+}
+
 </style>
 
 <style>

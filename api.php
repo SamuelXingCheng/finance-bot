@@ -710,18 +710,32 @@ try {
                 $currency = $input['currency'] ?? 'TWD';
                 $date = $input['date'] ?? date('Y-m-d'); 
                 $ledgerId = isset($input['ledger_id']) ? (int)$input['ledger_id'] : null;
-                
                 $customRate = isset($input['custom_rate']) && $input['custom_rate'] !== '' ? (float)$input['custom_rate'] : null;
+            
+                // 🟢 新增：從 API 輸入中獲取標的與數量
+                $symbol = !empty($input['symbol']) ? strtoupper(trim($input['symbol'])) : null;
 
+                if ($symbol !== null) {
+                    // 🟢 如果代碼以數字開頭且沒點號，儲存時自動補上 .TW
+                    // 這樣可以同時處理 2330 -> 2330.TW 和 00631L -> 00631L.TW
+                    if (preg_match('/^\d/', $symbol) && strpos($symbol, '.') === false) {
+                        $symbol .= '.TW';
+                    }
+                }
+                $quantity = isset($input['quantity']) && $input['quantity'] !== '' ? (float)$input['quantity'] : null;
+            
                 if (empty($name)) {
                     $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
                     break;
                 }
-
-                $success = $assetService->upsertAccountBalance($dbUserId, $name, $balance, $type, $currency, $date, $ledgerId, $customRate);
-
+            
+                // 🟢 呼叫更新後的 Service 方法
+                $success = $assetService->upsertAccountBalance(
+                    $dbUserId, $name, $balance, $type, $currency, $date, $ledgerId, $customRate, $symbol, $quantity
+                );
+            
                 if ($success) {
-                    $response = ['status' => 'success', 'message' => '帳戶快照已儲存'];
+                    $response = ['status' => 'success', 'message' => '帳戶資料已儲存'];
                 } else {
                     $response = ['status' => 'error', 'message' => '儲存失敗'];
                 }

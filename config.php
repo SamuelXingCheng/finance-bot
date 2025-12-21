@@ -69,6 +69,7 @@ if (!defined('DB_HOST') ||
     !defined('LINE_LIFF_ID') ||              // LIFF App ID (用於前端初始化)
     !defined('LIFF_DASHBOARD_URL') ||        // LIFF URL (用於 Webhook 回覆)
     !defined('GEMINI_API_KEY') ||
+    !defined('FINNHUB_API_KEY') ||
     !defined('NOWPAYMENTS_IPN_KEY') ||       // ✅ 修正：這裡只檢查是否定義 (defined)
     !defined('NOWPAYMENTS_API_KEY') ||
     !defined('BMC_WEBHOOK_SECRET')           // ✅ 修正：語法已修復
