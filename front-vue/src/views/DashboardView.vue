@@ -186,6 +186,9 @@
           <div class="list-controls-row">
             <div class="search-wrapper">
               <div class="filter-scroll-view">
+                <button class="filter-chip add-btn-chip" @click="openAddModal">
+                  新增
+                </button>
                 <button 
                   class="filter-chip" 
                   :class="{ active: searchQuery === '' }" 
@@ -220,6 +223,60 @@
                 >
                   {{ item.name }}
                 </button>
+              </div>
+              <div v-if="isAddModalOpen" class="modal-overlay" @click.self="isAddModalOpen = false">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h3>新增紀錄 / 類別</h3>
+                    <button class="close-btn" @click="isAddModalOpen = false">×</button>
+                  </div>
+                  
+                  <form @submit.prevent="handleTransactionSubmit">
+                      <div class="form-group type-select">
+                          <div class="radio-group">
+                              <label class="radio-label" :class="{ active: transactionForm.type === 'expense' }">
+                                <input type="radio" v-model="transactionForm.type" value="expense">支出
+                              </label>
+                              <label class="radio-label" :class="{ active: transactionForm.type === 'income' }">
+                                <input type="radio" v-model="transactionForm.type" value="income">收入
+                              </label>
+                          </div>
+                      </div>
+
+                      <div class="form-row">
+                          <input type="number" v-model.number="transactionForm.amount" placeholder="金額" required class="input-std half" step="0.01">
+                          <input type="text" v-model="transactionForm.currency" placeholder="幣種" class="input-std half" required>
+                      </div>
+
+                      <div class="form-group mt-2">
+                          <input type="date" v-model="transactionForm.date" required class="input-std">
+                      </div>
+
+                      <div class="form-group">
+                          <input type="text" v-model="transactionForm.description" placeholder="項目說明 (例如：第一筆創業基金)" required class="input-std">
+                      </div>
+
+                      <div class="form-group">
+                          <label class="sub-label">分類</label>
+                          <select v-model="selectCategoryMode" class="input-std" @change="handleCategoryChange">
+                              <option v-for="(name, key) in categoryMap" :key="key" :value="key">{{ name }}</option>
+                              <option value="CUSTOM_INPUT">➕ 自訂新類別...</option>
+                          </select>
+                      </div>
+                      
+                      <div class="form-group" v-if="isCustomCategory">
+                          <input 
+                            type="text" 
+                            v-model="transactionForm.category" 
+                            placeholder="請輸入新類別名稱 (例如: 創業)" 
+                            class="input-std highlight-input"
+                            required
+                          >
+                      </div>
+
+                      <button type="submit" class="save-btn">新增確認</button>
+                  </form>
+                </div>
               </div>
             </div>
             
@@ -421,6 +478,44 @@ const categoryMap = {
   'Miscellaneous': '其他', 'Salary': '薪水', 'Allowance': '津貼', 'Bonus': '獎金',
 };
 const palette = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2'];
+
+const isAddModalOpen = ref(false);
+
+const selectCategoryMode = ref('Miscellaneous'); 
+const isCustomCategory = ref(false);
+
+// 🔴 請補上這一段 (處理下拉選單切換的函式)
+function handleCategoryChange() {
+  if (selectCategoryMode.value === 'CUSTOM_INPUT') {
+    // 切換到自訂模式：顯示輸入框，並清空原本的值讓用戶輸入
+    isCustomCategory.value = true;
+    transactionForm.value.category = ''; 
+  } else {
+    // 切換回預設模式：隱藏輸入框，並將選單的值填入 Form
+    isCustomCategory.value = false;
+    transactionForm.value.category = selectCategoryMode.value;
+  }
+}
+
+// 🟢 [新增] 開啟新增視窗的函式
+function openAddModal() {
+  // 1. 重置表單為預設值
+  transactionForm.value = {
+    type: 'expense',
+    amount: '', // 留空讓使用者填
+    date: new Date().toISOString().substring(0, 10), // 今天
+    description: '',
+    category: 'Miscellaneous',
+    currency: 'TWD'
+  };
+  
+  // 2. 重置類別選單狀態
+  selectCategoryMode.value = 'Miscellaneous';
+  isCustomCategory.value = false;
+  
+  // 3. 開啟視窗
+  isAddModalOpen.value = true;
+}
 
 const dynamicFilterCategories = computed(() => {
   // 1. 先放入所有的預設固定類別
@@ -1029,26 +1124,51 @@ async function handleTransactionSubmit() {
       return;
   }
 
-  formMessage.value = '處理中...';
-  messageClass.value = 'msg-processing';
-
-  // 準備 Payload
+  // 1. 準備 Payload
   const payload = { ...transactionForm.value };
+  
   // 如果有選擇帳本，就帶入 ID
   if (props.ledgerId) {
       payload.ledger_id = props.ledgerId;
   }
 
-  const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_transaction`, {
-    method: 'POST', body: JSON.stringify(payload) // 改傳 payload
-  });
-  if (response && (await response.json()).status === 'success') {
-      formMessage.value = '成功'; messageClass.value = 'msg-success';
-      transactionForm.value.amount = null; transactionForm.value.description = '';
-      refreshAllData(); // 成功後刷新
-      setTimeout(() => { formMessage.value = ''; }, 3000);
-  } else {
-      formMessage.value = '失敗'; messageClass.value = 'msg-error';
+  try {
+      const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=add_transaction`, {
+        method: 'POST', body: JSON.stringify(payload)
+      });
+      
+      // 先解析 JSON，方便後面取用 message
+      const result = await response.json(); 
+
+      if (response && result.status === 'success') {
+          // 🟢 2. 成功後的處理
+          
+          // (A) 刷新頁面所有數據 (包含篩選列的新類別、交易列表)
+          refreshAllData(); 
+          
+          // (B) 重置表單 (為了下次打開時是乾淨的)
+          transactionForm.value = {
+            type: 'expense', 
+            amount: '', 
+            date: new Date().toISOString().substring(0, 10),
+            description: '', 
+            category: 'Miscellaneous', 
+            currency: 'TWD'
+          };
+          
+          // (C) [關鍵修改] 關閉新增視窗
+          isAddModalOpen.value = false;
+          
+          // (D) 顯示成功提示
+          alert("新增成功！");
+          
+      } else {
+          // 🔴 3. 失敗處理
+          alert("新增失敗：" + (result.message || '未知錯誤'));
+      }
+  } catch (e) {
+      console.error(e);
+      alert("發生網路錯誤，請稍後再試。");
   }
 }
 
@@ -1497,6 +1617,26 @@ onMounted(() => {
   position: relative;
   z-index: 1;
   pointer-events: none; /* 讓點擊穿透到 input */
+}
+
+/* 新增按鈕的特別樣式 */
+.add-btn-chip {
+  background-color: #8c7b75 !important; /* 深棕色 */
+  color: white !important;
+  border-color: #8c7b75 !important;
+  font-weight: bold;
+}
+
+.sub-label {
+  font-size: 0.8rem;
+  color: #999;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.highlight-input {
+  border-color: #d4a373;
+  background-color: #fffbf5;
 }
 
 </style>
