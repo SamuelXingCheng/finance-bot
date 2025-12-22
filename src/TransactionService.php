@@ -18,11 +18,11 @@ class TransactionService {
     }
 
     private function sanitizeCategory(string $category): string {
-        $normalizedCategory = ucfirst(strtolower(trim($category))); 
-        if (in_array($normalizedCategory, self::VALID_CATEGORIES)) {
-            return $normalizedCategory;
-        }
-        return 'Miscellaneous';
+        // 去除前後空白
+        $cleanCategory = trim($category);
+        
+        // 如果使用者沒填，預設給 Miscellaneous；否則直接回傳使用者輸入的文字
+        return !empty($cleanCategory) ? $cleanCategory : 'Miscellaneous';
     }
 
     // [輔助方法] 根據資料庫類型取得日期格式化 SQL (解決 SQLite 不支援 DATE_FORMAT 的問題)

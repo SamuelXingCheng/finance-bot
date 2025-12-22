@@ -93,7 +93,10 @@ try {
     $dbUserId = $userService->findOrCreateUser($lineUserId);
     if (!$dbUserId) throw new Exception("User verification failed.");
 
-    $aiResult = $gemini->analyzeInput($userText); 
+    $stmtCat = $dbConn->prepare("SELECT DISTINCT category FROM transactions WHERE user_id = ?");
+    $stmtCat->execute([$dbUserId]);
+    $userCategories = $stmtCat->fetchAll(PDO::FETCH_COLUMN);
+    $aiResult = $gemini->analyzeInput($task['user_text'], $userCategories);
     
     if ($aiResult && isset($aiResult['intent'])) {
         $intent = $aiResult['intent'];

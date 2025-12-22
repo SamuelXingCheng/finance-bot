@@ -60,8 +60,8 @@
         </div>
       </div>
     </div>
-    <!-- <div class="card-section"> -->
-      <!-- <div class="section-header"><h2>快速記帳</h2></div>
+    <!-- <div class="card-section">
+      <div class="section-header"><h2>快速記帳</h2></div>
       <div class="data-box input-card">
         <form id="add-transaction-form" @submit.prevent="handleTransactionSubmit">
           <div class="form-group type-select">
@@ -107,20 +107,20 @@
           <div class="form-group">
             <label>分類</label>
             <div class="select-wrapper">
-              <select v-model="transactionForm.category" required class="input-minimal">
-                <option value="Food">飲食</option>
-                <option value="Transport">交通</option>
-                <option value="Entertainment">娛樂</option>
-                <option value="Shopping">購物</option>
-                <option value="Bills">帳單</option>
-                <option value="Investment">投資</option>
-                <option value="Medical">醫療</option>
-                <option value="Education">教育</option>
-                <option value="Salary">薪水</option>
-                <option value="Allowance">津貼</option>
-                <option value="Bonus">獎金</option>
-                <option value="Miscellaneous">其他</option>
+              <select v-model="selectCategoryMode" class="input-minimal" @change="handleCategoryChange">
+                <option v-for="(name, key) in categoryMap" :key="key" :value="key">{{ name }}</option>
+                <option value="CUSTOM_INPUT">➕ 自訂類別...</option>
               </select>
+            </div>
+
+            <div v-if="isCustomCategory" class="mt-2">
+              <input 
+                type="text" 
+                v-model="transactionForm.category" 
+                placeholder="請輸入新類別 (例如: 公關費)" 
+                class="input-minimal"
+                required
+              >
             </div>
           </div>
           <button type="submit" class="submit-btn">新增紀錄</button>
@@ -212,13 +212,13 @@
                 <div class="divider-vertical"></div>
 
                 <button 
-                  v-for="(name, key) in categoryMap" 
-                  :key="key" 
+                  v-for="item in dynamicFilterCategories" 
+                  :key="item.key" 
                   class="filter-chip"
-                  :class="{ active: searchQuery === key }"
-                  @click="searchQuery = key"
+                  :class="{ active: searchQuery === item.key }"
+                  @click="searchQuery = item.key"
                 >
-                  {{ name }}
+                  {{ item.name }}
                 </button>
               </div>
             </div>
@@ -421,6 +421,32 @@ const categoryMap = {
   'Miscellaneous': '其他', 'Salary': '薪水', 'Allowance': '津貼', 'Bonus': '獎金',
 };
 const palette = ['#D4A373', '#FAEDCD', '#CCD5AE', '#E9EDC9', '#A98467', '#ADC178', '#6C584C', '#B5838D', '#E5989B', '#FFB4A2'];
+
+const dynamicFilterCategories = computed(() => {
+  // 1. 先放入所有的預設固定類別
+  const list = Object.keys(categoryMap).map(key => ({
+    key: key,
+    name: categoryMap[key]
+  }));
+  
+  // 2. 掃描目前的交易紀錄，找出「自訂類別」
+  const existingKeys = new Set(Object.keys(categoryMap));
+  const customKeys = new Set();
+  
+  transactions.value.forEach(tx => {
+    // 如果這筆交易的 category 不在預設清單內，就是自訂的
+    if (tx.category && !existingKeys.has(tx.category)) {
+      customKeys.add(tx.category);
+    }
+  });
+
+  // 3. 將找到的自訂類別加入清單
+  customKeys.forEach(cat => {
+    list.push({ key: cat, name: cat }); // 自訂類別的顯示名稱就是它自己
+  });
+
+  return list;
+});
 
 // --- [新增] 計算屬性區 (Budget, Filter, Calendar) ---
 

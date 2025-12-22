@@ -56,9 +56,9 @@
           </div>
 
           <div class="nav-links">
+            <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
             <button @click="currentTab = 'Dashboard'" :class="['nav-item', currentTab === 'Dashboard' ? 'active' : '']">收支</button>
             <button @click="currentTab = 'Subscription'" :class="['nav-item', currentTab === 'Subscription' ? 'active' : '']">週期設定</button>
-            <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
             <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto專區</button>
           </div>
           <div class="nav-user" @click="showUserMenu = !showUserMenu">
@@ -159,7 +159,7 @@ import CryptoView from './views/CryptoView.vue';
 const LIFF_ID = import.meta.env.VITE_LIFF_ID || "2008601432-OmoVrl0l";
 const API_URL = import.meta.env.VITE_API_BASE_URL || window.API_BASE_URL;
 
-const currentTab = ref('Dashboard');
+const currentTab = ref('Accounts');
 const currentViewRef = ref(null);
 const isLoading = ref(true); 
 const isOnboarded = ref(false); 

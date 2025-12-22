@@ -40,13 +40,13 @@
           :class="['tab-btn-earth', { active: currentTab === 'overview' }]" 
           @click="currentTab = 'overview'"
         >
-          📊 資產總覽
+          資產總覽
         </button>
         <button 
           :class="['tab-btn-earth', { active: currentTab === 'accounts' }]" 
           @click="currentTab = 'accounts'"
         >
-          💳 帳戶管理
+          帳戶管理
         </button>
       </div>
 
