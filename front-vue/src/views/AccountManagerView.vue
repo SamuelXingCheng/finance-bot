@@ -35,318 +35,222 @@
 
     <div v-else class="main-content-wrapper">
       
-      <div v-if="aiAnalysis" class="ai-box-inline mb-6">
-        <div class="ai-header"><span class="ai-label">AI</span> 財務健檢報告</div>
-        <div class="ai-content">{{ aiAnalysis }}</div>
-      </div>
-
-      <div class="net-worth-hero mb-6">
-        <div class="hero-label">目前總淨資產</div>
-        <div class="hero-amount">NT$ {{ numberFormat(chartData.total_assets - chartData.total_liabilities, 0) }}</div>
-      </div>
-
-      <div class="summary-grid-2x2 mb-6">
-        <div class="summary-card">
-          <label>現金總額</label>
-          <div class="amount">NT$ {{ numberFormat(chartData.cash, 0) }}</div>
-        </div>
-        <div class="summary-card">
-          <label>股票市值</label>
-          <div class="amount">NT$ {{ numberFormat(chartData.stock, 0) }}</div>
-        </div>
-        <div class="summary-card">
-          <label>其他投資</label>
-          <div class="amount">NT$ {{ numberFormat(chartData.investment - chartData.stock - (chartData.bond || 0), 0) }}</div>
-        </div>
-        <div class="summary-card text-danger">
-          <label>總負債</label>
-          <div class="amount">NT$ {{ numberFormat(chartData.total_liabilities, 0) }}</div>
-        </div>
-      </div>
-
-      <div v-if="stockAccounts.length > 0" class="stocks-section mb-6">
-        <h3 class="section-title">持股矩陣 (依標的彙總)</h3>
-        <div class="stocks-grid-3x3">
-          <div v-for="stock in stockAccounts" :key="stock.symbol" class="stock-item-card">
-            <div class="stock-card-header">
-              <div class="stock-symbol-badge">{{ stock.symbol }}</div>
-              <div class="stock-source-count" v-if="stock.count > 1">
-                {{ stock.count }} 筆來源
-              </div>
-            </div>
-            
-            <div class="stock-card-body">
-              <div class="main-value-group">
-                <span class="label">預估市值</span>
-                <span class="value">NT$ {{ numberFormat(stock.balance, 0) }}</span>
-              </div>
-              <div class="divider"></div>
-              <div class="sub-value-row">
-                <div class="sub-item">
-                  <span class="sub-label">持有股數</span>
-                  <span class="sub-value">{{ numberFormat(stock.quantity, 0) }}</span>
-                </div>
-                <div class="sub-item right">
-                  <span class="sub-label">參考單價</span>
-                  <span class="sub-value">
-                    {{ stock.quantity > 0 ? numberFormat(stock.balance / stock.quantity, 1) : '-' }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <p class="chart-hint-sm tr">* 此處合併顯示相同代碼的資產，編輯請至下方列表。</p>
-      </div>
-
-      <div class="ai-section mb-6">
-        <div v-if="aiAnalysis" class="ai-box">
-          <div class="ai-header">
-            <span class="ai-label">AI</span> 財務健檢報告
-          </div>
-          <div class="ai-content">{{ aiAnalysis }}</div>
-        </div>
-        <div v-else-if="aiLoading" class="ai-loading">
-          <span class="loader"></span> 正在分析您的財務結構...
-        </div>
-        <button v-else @click="fetchAIAnalysis" class="ai-btn">
-          生成 AI 資產配置建議
+      <div class="tab-control-earth mb-6">
+        <button 
+          :class="['tab-btn-earth', { active: currentTab === 'overview' }]" 
+          @click="currentTab = 'overview'"
+        >
+          📊 資產總覽
+        </button>
+        <button 
+          :class="['tab-btn-earth', { active: currentTab === 'accounts' }]" 
+          @click="currentTab = 'accounts'"
+        >
+          💳 帳戶管理
         </button>
       </div>
 
-      <div class="charts-wrapper mb-6">
-        <div class="chart-card wide-card">
-          <div class="chart-header-row">
-            <h3>資產成長趨勢 (歷史淨值)</h3>
-            <div class="date-controls">
-              <button @click="fetchAssetHistory('1m')" class="filter-btn-sm" :class="{active: historyRange==='1m'}">1月</button>
-              <button @click="fetchAssetHistory('6m')" class="filter-btn-sm" :class="{active: historyRange==='6m'}">6月</button>
-              <button @click="fetchAssetHistory('1y')" class="filter-btn-sm" :class="{active: historyRange==='1y'}">1年</button>
-            </div>
+      <div v-if="currentTab === 'overview'" class="tab-content fade-in">
+        
+        <div v-if="aiAnalysis" class="ai-section mb-6">
+          <div class="ai-box">
+             <div class="ai-header"><span class="ai-label">AI</span> 財務健檢報告</div>
+             <div class="ai-content">{{ aiAnalysis }}</div>
           </div>
-          <div class="chart-box-lg">
-            <canvas ref="assetHistoryChartCanvas"></canvas>
-          </div>
-          <p class="chart-hint-sm">* 顯示依據您手動記錄的「快照」加總，建議定期更新所有帳戶以維持準確性。</p>
+        </div>
+        <div v-else-if="aiLoading" class="ai-section mb-6 ai-loading">
+           <span class="loader"></span> 正在分析您的財務結構...
+        </div>
+        <div v-else class="ai-section mb-6">
+           <button @click="fetchAIAnalysis" class="ai-btn">生成 AI 資產配置建議</button>
         </div>
 
-        <div class="chart-card wide-card simulation-card">
-          <div class="chart-header-row">
-            <h3>資產購買力保衛戰 (20年預測)</h3>
-            <span class="badge-beta">Beta</span>
-          </div>
+        <div class="net-worth-hero mb-6">
+          <div class="hero-label">目前總淨資產</div>
+          <div class="hero-amount">NT$ {{ numberFormat((chartData.total_assets || 0) - (chartData.total_liabilities || 0), 0) }}</div>
+        </div>
 
-          <div class="simulation-container-vertical">
-            
-            <div class="sim-chart-wrapper full-width">
-              <div class="chart-box-lg">
-                <canvas ref="simulationChartCanvas"></canvas>
+        <div class="summary-grid-2x2 mb-6">
+          <div class="summary-card">
+            <label>現金總額</label>
+            <div class="amount">NT$ {{ numberFormat(chartData.cash, 0) }}</div>
+          </div>
+          <div class="summary-card">
+            <label>股票市值</label>
+            <div class="amount">NT$ {{ numberFormat(chartData.stock, 0) }}</div>
+          </div>
+          <div class="summary-card">
+            <label>其他投資</label>
+            <div class="amount">NT$ {{ numberFormat((chartData.investment || 0) - (chartData.stock || 0) - (chartData.bond || 0), 0) }}</div>
+          </div>
+          <div class="summary-card text-danger">
+            <label>總負債</label>
+            <div class="amount">NT$ {{ numberFormat(chartData.total_liabilities, 0) }}</div>
+          </div>
+        </div>
+
+        <div class="charts-wrapper mb-6">
+          
+          <div class="chart-card wide-card">
+            <div class="chart-header-row">
+              <h3>資產成長趨勢 (歷史淨值)</h3>
+              <div class="date-controls">
+                <button @click="fetchAssetHistory('1m')" class="filter-btn-sm" :class="{active: historyRange==='1m'}">1月</button>
+                <button @click="fetchAssetHistory('6m')" class="filter-btn-sm" :class="{active: historyRange==='6m'}">6月</button>
+                <button @click="fetchAssetHistory('1y')" class="filter-btn-sm" :class="{active: historyRange==='1y'}">1年</button>
               </div>
             </div>
+            <div class="chart-box-lg">
+              <canvas ref="assetHistoryChartCanvas"></canvas>
+            </div>
+            <p class="chart-hint-sm">* 顯示依據您手動記錄的「快照」加總。</p>
+          </div>
 
-            <div class="controls-info-grid">
-              
-              <div class="sim-controls-panel">
-                <div class="control-group">
-                  <div class="control-header">
-                    <label class="label-professional">預期年通膨率 (Inflation)</label>
-                    <span class="control-value text-danger">{{ inflationRate }}%</span>
-                  </div>
-                  <input type="range" v-model.number="inflationRate" min="1" max="8" step="0.1" class="slider slider-danger" @input="updateSimulationChart">
-                  <div class="control-desc">若通膨高於投資報酬，資產將實質縮水。</div>
+          <div class="chart-card wide-card simulation-card">
+            <div class="chart-header-row">
+              <h3>資產購買力保衛戰 (20年預測)</h3>
+              <span class="badge-beta">Beta</span>
+            </div>
+            <div class="simulation-container-vertical">
+                <div class="sim-chart-wrapper full-width">
+                  <div class="chart-box-lg"><canvas ref="simulationChartCanvas"></canvas></div>
                 </div>
+                <div class="controls-info-grid">
+                  <div class="sim-controls-panel">
+                      <div class="control-group">
+                        <div class="control-header">
+                          <label class="label-professional">預期年通膨率 (Inflation)</label>
+                          <span class="control-value text-danger">{{ inflationRate }}%</span>
+                        </div>
+                        <input type="range" v-model.number="inflationRate" min="1" max="8" step="0.1" class="slider slider-danger" @input="updateSimulationChart">
+                      </div>
+                      <div class="control-group">
+                        <div class="control-header">
+                           <label class="label-professional">現金持有比例</label>
+                           <span class="control-value text-primary">{{ simulatedCashRatio }}%</span>
+                        </div>
+                        <input type="range" v-model.number="simulatedCashRatio" min="0" max="100" step="5" class="slider slider-primary" @input="updateSimulationChart">
+                      </div>
+                   </div>
+                   <div class="simulation-info-card professional-card">
+                      <div class="sim-result-box" :class="isBeatingInflation ? 'border-success' : 'border-danger'">
+                         <div class="result-text">
+                            <h4>{{ isBeatingInflation ? '資產成功增值' : '購買力將縮水' }}</h4>
+                            <p>20年後預估: <strong>NT$ {{ numberFormat(finalWealth, 0) }}</strong></p>
+                         </div>
+                      </div>
+                   </div>
+                </div>
+             </div>
+          </div>
 
-                <div class="control-group">
-                  <div class="control-header">
-                    <label class="label-professional">現金持有比例 (Cash Ratio)</label>
-                    <span class="control-value text-primary">{{ simulatedCashRatio }}%</span>
-                  </div>
-                  <input type="range" v-model.number="simulatedCashRatio" min="0" max="100" step="5" class="slider slider-primary" @input="updateSimulationChart">
-                  <div class="control-desc">
-                    目前實際現金比例：<strong>{{ currentRealCashRatio }}%</strong>
-                    <span v-if="simulatedCashRatio < currentRealCashRatio" class="diff-tag good">模擬減少</span>
-                    <span v-if="simulatedCashRatio > currentRealCashRatio" class="diff-tag bad">模擬增加</span>
-                  </div>
-                </div>
+          <div class="chart-card">
+            <h3>現金流配置</h3>
+            <div class="chart-box"><canvas ref="allocationChartCanvas"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>地區配置</h3>
+            <div class="chart-box"><canvas ref="twUsChartCanvas"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>股債配置</h3>
+            <div class="chart-box"><canvas ref="stockBondChartCanvas"></canvas></div>
+          </div>
+          <div class="chart-card">
+             <h3>法幣 vs 加密貨幣</h3>
+             <div class="chart-box"><canvas ref="currencyChartCanvas"></canvas></div>
+          </div>
+          <div class="chart-card">
+             <h3>加密貨幣分佈</h3>
+             <div class="chart-box"><canvas ref="holdingValueChartCanvas"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>資產負債總覽</h3>
+            <div class="chart-box"><canvas ref="netWorthChartCanvas"></canvas></div>
+          </div>
+
+          <div class="chart-card wide-card">
+            <div class="chart-header-row">
+              <h3>收支趨勢</h3>
+              <div class="date-controls">
+                <input type="date" v-model="trendFilter.start" class="date-input"> <span class="separator">~</span> <input type="date" v-model="trendFilter.end" class="date-input">
+                <button @click="fetchTrendData" class="filter-btn">查詢</button>
               </div>
-
-              <div class="simulation-info-card professional-card">
-                <h4 class="card-title-sm">
-                  <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 20V10M12 20V4M6 20v-6" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                  模擬參數基準
-                </h4>
-                <div class="info-row">
-                  <span class="label">起始總資產</span>
-                  <span class="value number-font">NT$ {{ numberFormat(simulatedStartAmount, 0) }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="label">
-                    現金活存回報
-                    <div class="tooltip-icon" title="假設放在銀行活存或定存的低風險利率">
-                      <svg class="icon-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
-                    </div>
-                  </span>
-                  <span class="value number-font">{{ (RATE_CASH * 100).toFixed(1) }}%</span>
-                </div>
-                <div class="info-row">
-                  <span class="label">
-                    投資平均回報
-                    <div class="tooltip-icon" title="假設股債配置的長期平均年化報酬">
-                       <svg class="icon-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
-                    </div>
-                  </span>
-                  <span class="value number-font">{{ (RATE_INVEST * 100).toFixed(1) }}%</span>
-                </div>
-                <p class="info-note">* 系統依據您的資產總額與設定比例，以此回報率進行 20 年複利推演。</p>
-              </div>
+            </div>
+            <div class="chart-box-lg">
+              <canvas ref="trendChartCanvas"></canvas>
             </div>
           </div>
 
-          <div class="sim-result-box" :class="isBeatingInflation ? 'border-success' : 'border-danger'">
-            <div class="result-icon-wrapper">
-              <svg v-if="isBeatingInflation" class="icon-svg-lg text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke-linecap="round" stroke-linejoin="round"/>
-                <polyline points="22 4 12 14.01 9 11.01" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <svg v-else class="icon-svg-lg text-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-            </div>
-            
-            <div class="result-text">
-              <h4 :class="isBeatingInflation ? 'text-success-dark' : 'text-danger-dark'">
-                {{ isBeatingInflation ? '資產成功增值' : '購買力將縮水' }}
-              </h4>
-              <p>
-                在 <strong>{{ inflationRate }}%</strong> 通膨下，20 年後您需要累積到 <span class="highlight-target">NT$ {{ numberFormat(finalHurdle, 0) }}</span> 才能維持現在生活水準。
-                <br>
-                依此配置，您的資產預估將來到 <span :class="isBeatingInflation ? 'text-success' : 'text-danger'" class="fw-bold">NT$ {{ numberFormat(finalWealth, 0) }}</span>。
-                <span v-if="isBeatingInflation" class="trend-indicator good">
-                  (跑贏通膨 +{{ numberFormat(finalWealth - finalHurdle, 0) }})
-                </span>
-                <span v-else class="trend-indicator bad">
-                  (落後通膨 -{{ numberFormat(finalHurdle - finalWealth, 0) }})
-                </span>
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <h3>現金流配置 (現金 vs 投資)</h3>
-          <div class="chart-box">
-            <canvas ref="allocationChartCanvas"></canvas>
-          </div>
-          <div class="chart-meta">
-            <span class="dot cash"></span> 現金: {{ numberFormat(chartData.cash, 0) }}
-            <span class="dot invest ml-2"></span> 投資: {{ numberFormat(chartData.investment, 0) }}
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <h3>地區配置 (台灣 vs 海外)</h3>
-          <div class="chart-box">
-            <canvas ref="twUsChartCanvas"></canvas>
-          </div>
-          <div class="chart-meta">
-            <span class="dot tw-stock"></span> 台: {{ numberFormat(chartData.tw_invest, 0) }}
-            <span class="dot us-stock ml-2"></span> 外: {{ numberFormat(chartData.overseas_invest, 0) }}
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <h3>股債配置</h3>
-          <div class="chart-box">
-            <canvas ref="stockBondChartCanvas"></canvas>
-          </div>
-          <div class="chart-meta">
-            <span class="dot stock"></span> 股: {{ numberFormat(chartData.stock, 0) }}
-            <span class="dot bond ml-2"></span> 債: {{ numberFormat(chartData.bond, 0) }}
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <h3>法幣 vs 加密貨幣配置</h3>
-          <div class="chart-box">
-            <canvas ref="currencyChartCanvas"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <h3>加密貨幣分佈</h3>
-          <div class="chart-box">
-            <canvas ref="holdingValueChartCanvas"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <h3>資產負債總覽</h3>
-          <div class="chart-box">
-            <canvas ref="netWorthChartCanvas"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card wide-card">
-          <div class="chart-header-row">
-            <h3>收支趨勢</h3>
-            <div class="date-controls">
-              <input type="date" v-model="trendFilter.start" class="date-input">
-              <span class="separator">~</span>
-              <input type="date" v-model="trendFilter.end" class="date-input">
-              <button @click="fetchTrendData" class="filter-btn">查詢</button>
-            </div>
-          </div>
-          <div class="chart-box-lg">
-            <canvas ref="trendChartCanvas"></canvas>
-          </div>
         </div>
       </div>
 
-      <div class="account-groups">
-        <h3 class="list-header">詳細列表</h3>
-        <div v-for="group in groupedAccounts" :key="group.type" class="account-group">
-          <h4 class="group-title">{{ group.title }}</h4>
-          <div class="account-list">
-            <div v-for="account in group.items" :key="account.name" class="account-card">
-              <div class="card-left">
-                <div class="acc-name">{{ account.name }}</div>
-                <div class="acc-meta">
-                  <span class="badge" :class="getTypeClass(account.type)">
-                    {{ typeNameMap[account.type] || account.type }}
-                  </span>
-                  <span class="currency">{{ account.currency_unit }}</span>
-                  <span v-if="account.symbol" class="symbol-tag">{{ account.symbol }}</span>
-                  <span v-if="account.quantity > 0" class="qty-tag">{{ account.quantity }} 股</span>
+      <div v-if="currentTab === 'accounts'" class="tab-content fade-in">
+        
+        <div v-if="stockAccounts.length > 0" class="stocks-section mb-6">
+          <h3 class="section-title">持股矩陣 (依標的彙總)</h3>
+          <div class="stocks-grid-3x3">
+            <div v-for="stock in stockAccounts" :key="stock.symbol" class="stock-item-card">
+              <div class="stock-card-header">
+                <div class="stock-symbol-badge">{{ stock.symbol }}</div>
+                <div class="stock-source-count" v-if="stock.count > 1">{{ stock.count }} 筆來源</div>
+              </div>
+              <div class="stock-card-body">
+                <div class="main-value-group">
+                  <span class="label">預估市值</span>
+                  <span class="value">NT$ {{ numberFormat(stock.balance, 0) }}</span>
+                </div>
+                <div class="divider"></div>
+                <div class="sub-value-row">
+                  <div class="sub-item">
+                    <span class="sub-label">持有股數</span>
+                    <span class="sub-value">{{ numberFormat(stock.quantity, 0) }}</span>
+                  </div>
+                  <div class="sub-item right">
+                    <span class="sub-label">參考單價</span>
+                    <span class="sub-value">{{ stock.quantity > 0 ? numberFormat(stock.balance / stock.quantity, 1) : '-' }}</span>
+                  </div>
                 </div>
               </div>
-              
-              <div class="card-right">
-                <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
-                  {{ numberFormat(account.balance, getPrecision(account.currency_unit)) }}
+            </div>
+          </div>
+          <p class="chart-hint-sm tr">* 此處合併顯示相同代碼的資產。</p>
+        </div>
+
+        <div class="account-groups">
+          <h3 class="list-header">詳細列表</h3>
+          <div v-for="group in groupedAccounts" :key="group.type" class="account-group">
+            <h4 class="group-title">{{ group.title }}</h4>
+            <div class="account-list">
+              <div v-for="account in group.items" :key="account.name" class="account-card">
+                <div class="card-left">
+                  <div class="acc-name">{{ account.name }}</div>
+                  <div class="acc-meta">
+                    <span class="badge" :class="getTypeClass(account.type)">{{ typeNameMap[account.type] || account.type }}</span>
+                    <span class="currency">{{ account.currency_unit }}</span>
+                    <span v-if="account.symbol" class="symbol-tag">{{ account.symbol }}</span>
+                    <span v-if="account.quantity > 0" class="qty-tag">{{ account.quantity }} 股</span>
+                  </div>
                 </div>
-                <div v-if="account.symbol" class="hint-xs">估算市值</div>
-                <div class="action-buttons">
-                  <button class="pill-btn update" @click="openModal(account)">
-                    更新快照
-                  </button>
-                  <button 
-                    class="text-btn view-history" 
-                    @click="fetchAccountHistory(account.name)"
-                    :disabled="historyLoading"
-                  >
-                    歷史
-                  </button>
-                  <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
+                
+                <div class="card-right">
+                  <div class="acc-balance" :class="account.type === 'Liability' ? 'text-debt' : 'text-asset'">
+                    {{ numberFormat(account.balance, getPrecision(account.currency_unit)) }}
+                  </div>
+                  <div v-if="account.symbol" class="hint-xs">估算市值</div>
+                  <div class="action-buttons">
+                    <button class="pill-btn update" @click="openModal(account)">更新</button>
+                    <button class="text-btn view-history" @click="fetchAccountHistory(account.name)">歷史</button>
+                    <button class="text-btn delete" @click="handleDelete(account.name)">刪除</button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
       </div>
+
     </div>
 
     <div v-if="isHistoryModalOpen" class="modal-backdrop" @click.self="closeHistoryModal">
@@ -488,6 +392,8 @@ import "driver.js/dist/driver.css";
 
 Chart.register(ChartDataLabels);
 
+const currentTab = ref('overview');
+
 const emit = defineEmits(['refreshDashboard']);
 
 // 定義 Props 接收 ledgerId
@@ -623,17 +529,33 @@ const groupedAccounts = computed(() => {
 // 🟢 核心邏輯：合併相同 Symbol 的股票
 const stockAccounts = computed(() => {
   const groups = {};
+  
   accounts.value.forEach(acc => {
-    if (acc.type === 'Stock' && acc.symbol) {
-      const sym = acc.symbol.toUpperCase();
+    // 🟢 [修正] 移除 "&& acc.symbol" 嚴格限制
+    // 只要是股票類型 (Stock) 就一定要顯示，不管有沒有代碼
+    if (acc.type === 'Stock') {
+      
+      // 🟢 [防呆] 如果有代碼就用代碼，沒有就用「帳戶名稱」暫代
+      // 加上 String() 避免如果代碼是純數字 (如 2330) 導致報錯
+      let sym = acc.symbol ? String(acc.symbol).toUpperCase() : acc.name;
+      
       if (!groups[sym]) {
-        groups[sym] = { symbol: sym, balance: 0, quantity: 0, count: 0 };
+        groups[sym] = { 
+            symbol: sym, 
+            balance: 0, 
+            quantity: 0, 
+            count: 0 
+        };
       }
-      groups[sym].balance += parseFloat(acc.balance);
+      
+      // 累加數值 (加上 || 0 防止資料缺漏產生 NaN)
+      groups[sym].balance += parseFloat(acc.balance || 0);
       groups[sym].quantity += parseFloat(acc.quantity || 0);
       groups[sym].count += 1;
     }
   });
+
+  // 依照市值從大到小排序
   return Object.values(groups).sort((a, b) => b.balance - a.balance);
 });
 
@@ -1671,6 +1593,35 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
 .charts-wrapper { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 24px; }
 @media (min-width: 600px) { .charts-wrapper { grid-template-columns: 1fr 1fr; } .wide-card { grid-column: span 2; } }
 
+/* --- 🟢 新增：分頁控制 (大地色系) --- */
+.tab-control-earth {
+  display: flex;
+  background: #f0ebe5; /* 配合您的邊框顏色 */
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+.tab-btn-earth {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: #8c7b75; /* 配合您的深色字體 */
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.95rem;
+}
+.tab-btn-earth.active {
+  background: white;
+  color: #d4a373; /* 您的主色 */
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 簡單的淡入動畫 */
+.fade-in { animation: fadeIn 0.3s ease-in-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 
 <style>

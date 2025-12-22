@@ -38,7 +38,21 @@ class AssetService {
      * * @param string|null $symbol 股票代碼 (例如 AAPL, 2330.TW)
      * @param float|null $quantity 持股數量
      */
-    public function upsertAccountBalance(int $userId, string $name, float $balance, string $type, string $currencyUnit, ?string $snapshotDate = null, ?int $ledgerId = null, ?float $customRate = null): bool {
+    /**
+     * 更新或新增帳戶餘額 (快照) - 修正版：支援 Symbol, Quantity 與 LedgerID 防呆
+     */
+    public function upsertAccountBalance(
+        int $userId, 
+        string $name, 
+        float $balance, 
+        string $type, 
+        string $currencyUnit, 
+        ?string $snapshotDate = null, 
+        ?int $ledgerId = null, 
+        ?float $customRate = null,
+        ?string $symbol = null,    // 🟢 修正1: 新增參數
+        ?float $quantity = null    // 🟢 修正1: 新增參數
+    ): bool {
         
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d');
@@ -52,7 +66,7 @@ class AssetService {
         }
     
         try {
-            // 1. 查詢該帳戶目前紀錄的最新日期 (用來決定是否要更新 accounts 主表的當前餘額)
+            // 1. 查詢該帳戶目前紀錄的最新日期
             $maxDateSql = "SELECT MAX(snapshot_date) FROM account_balance_history WHERE user_id = :userId AND account_name = :name";
             $stmtMax = $this->pdo->prepare($maxDateSql);
             $stmtMax->execute([':userId' => $userId, ':name' => $name]);
@@ -61,55 +75,70 @@ class AssetService {
             // 如果 傳入日期 >= 目前最新日期，代表這是最新的狀態，需要更新 accounts 表
             $shouldUpdateMainAccount = ($date >= $latestHistoryDate);
     
-            // 2. 檢查帳戶並更新 accounts 表 (顯示在列表上的最新狀態)
-            $checkSql = "SELECT id FROM accounts WHERE user_id = :userId AND name = :name";
+            // 2. 檢查帳戶是否存在 (🟢 修正2: 多撈 ledger_id 來做防呆)
+            $checkSql = "SELECT id, ledger_id FROM accounts WHERE user_id = :userId AND name = :name";
             $stmtCheck = $this->pdo->prepare($checkSql);
             $stmtCheck->execute([':userId' => $userId, ':name' => $name]);
-            $existingId = $stmtCheck->fetchColumn();
+            $existingAccount = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+            
+            // 🟢 修正2: Ledger ID 防呆邏輯
+            // 如果傳入的是 null，但資料庫原本就有值，就沿用原本的 ID
+            $finalLedgerId = $ledgerId;
+            if ($existingAccount && $ledgerId === null) {
+                $finalLedgerId = $existingAccount['ledger_id'];
+            }
     
-            if (!$existingId) {
-                // 若帳戶不存在，建立新帳戶
-                $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, last_updated_at)
-                              VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :time)";
+            if (!$existingAccount) {
+                // 若帳戶不存在，建立新帳戶 (🟢 修正3: 寫入 symbol 和 quantity)
+                $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, symbol, quantity, last_updated_at)
+                              VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :symbol, :quantity, :time)";
                 $stmtInsert = $this->pdo->prepare($insertSql);
                 $stmtInsert->execute([
-                    ':userId' => $userId, ':ledgerId' => $ledgerId, ':name' => $name,
-                    ':type' => $assetType, ':balance' => $balance, ':unit' => strtoupper($currencyUnit), ':time' => $currentTime
+                    ':userId' => $userId, ':ledgerId' => $finalLedgerId, ':name' => $name,
+                    ':type' => $assetType, ':balance' => $balance, ':unit' => strtoupper($currencyUnit), 
+                    ':symbol' => $symbol, ':quantity' => $quantity, // 綁定參數
+                    ':time' => $currentTime
                 ]);
             } else {
                 // 若帳戶存在，且這次輸入的日期比較新 (或等於)，就更新主表
                 if ($shouldUpdateMainAccount) {
+                    // (🟢 修正3: 更新 symbol 和 quantity)
                     $updateSql = "UPDATE accounts SET ledger_id = :ledgerId, type = :type, balance = :balance, 
-                                  currency_unit = :unit, last_updated_at = :time WHERE id = :id";
+                                  currency_unit = :unit, symbol = :symbol, quantity = :quantity, last_updated_at = :time WHERE id = :id";
                     $stmtUpdate = $this->pdo->prepare($updateSql);
                     $stmtUpdate->execute([
-                        ':ledgerId' => $ledgerId, ':type' => $assetType, ':balance' => $balance,
-                        ':unit' => strtoupper($currencyUnit), ':time' => $currentTime, ':id' => $existingId
+                        ':ledgerId' => $finalLedgerId, ':type' => $assetType, ':balance' => $balance,
+                        ':unit' => strtoupper($currencyUnit), 
+                        ':symbol' => $symbol, ':quantity' => $quantity, // 綁定參數
+                        ':time' => $currentTime, ':id' => $existingAccount['id']
                     ]);
                 }
             }
     
             // 3. 寫入 account_balance_history (歷史快照)
-            // 🟢 [修改重點] 使用 ON DUPLICATE KEY UPDATE 語法
-            // 如果 (user_id, account_name, snapshot_date) 已經存在，就更新餘額，而不是報錯
+            // (🟢 修正3: 歷史紀錄也寫入 symbol 和 quantity)
             $sqlHistory = "INSERT INTO account_balance_history 
-                            (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, snapshot_date)
+                            (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, symbol, quantity, snapshot_date)
                            VALUES 
-                            (:userId, :ledgerId, :name, :balance, :unit, :rate, :date)
+                            (:userId, :ledgerId, :name, :balance, :unit, :rate, :symbol, :quantity, :date)
                            ON DUPLICATE KEY UPDATE
                             balance = VALUES(balance),
                             currency_unit = VALUES(currency_unit),
                             exchange_rate = VALUES(exchange_rate),
+                            symbol = VALUES(symbol),
+                            quantity = VALUES(quantity),
                             ledger_id = VALUES(ledger_id)";
                             
             $stmtHist = $this->pdo->prepare($sqlHistory);
             $stmtHist->execute([
                 ':userId' => $userId, 
-                ':ledgerId' => $ledgerId, 
+                ':ledgerId' => $finalLedgerId, // 使用防呆後的 ID
                 ':name' => $name,
                 ':balance' => $balance, 
                 ':unit' => strtoupper($currencyUnit), 
                 ':rate' => $customRate, 
+                ':symbol' => $symbol,     // 綁定參數
+                ':quantity' => $quantity, // 綁定參數
                 ':date' => $date
             ]);
     
