@@ -35,6 +35,70 @@
 
     <div v-else class="main-content-wrapper">
       
+      <div v-if="aiAnalysis" class="ai-box-inline mb-6">
+        <div class="ai-header"><span class="ai-label">AI</span> 財務健檢報告</div>
+        <div class="ai-content">{{ aiAnalysis }}</div>
+      </div>
+
+      <div class="net-worth-hero mb-6">
+        <div class="hero-label">目前總淨資產</div>
+        <div class="hero-amount">NT$ {{ numberFormat(chartData.total_assets - chartData.total_liabilities, 0) }}</div>
+      </div>
+
+      <div class="summary-grid-2x2 mb-6">
+        <div class="summary-card">
+          <label>現金總額</label>
+          <div class="amount">NT$ {{ numberFormat(chartData.cash, 0) }}</div>
+        </div>
+        <div class="summary-card">
+          <label>股票市值</label>
+          <div class="amount">NT$ {{ numberFormat(chartData.stock, 0) }}</div>
+        </div>
+        <div class="summary-card">
+          <label>其他投資</label>
+          <div class="amount">NT$ {{ numberFormat(chartData.investment - chartData.stock - (chartData.bond || 0), 0) }}</div>
+        </div>
+        <div class="summary-card text-danger">
+          <label>總負債</label>
+          <div class="amount">NT$ {{ numberFormat(chartData.total_liabilities, 0) }}</div>
+        </div>
+      </div>
+
+      <div v-if="stockAccounts.length > 0" class="stocks-section mb-6">
+        <h3 class="section-title">持股矩陣 (依標的彙總)</h3>
+        <div class="stocks-grid-3x3">
+          <div v-for="stock in stockAccounts" :key="stock.symbol" class="stock-item-card">
+            <div class="stock-card-header">
+              <div class="stock-symbol-badge">{{ stock.symbol }}</div>
+              <div class="stock-source-count" v-if="stock.count > 1">
+                {{ stock.count }} 筆來源
+              </div>
+            </div>
+            
+            <div class="stock-card-body">
+              <div class="main-value-group">
+                <span class="label">預估市值</span>
+                <span class="value">NT$ {{ numberFormat(stock.balance, 0) }}</span>
+              </div>
+              <div class="divider"></div>
+              <div class="sub-value-row">
+                <div class="sub-item">
+                  <span class="sub-label">持有股數</span>
+                  <span class="sub-value">{{ numberFormat(stock.quantity, 0) }}</span>
+                </div>
+                <div class="sub-item right">
+                  <span class="sub-label">參考單價</span>
+                  <span class="sub-value">
+                    {{ stock.quantity > 0 ? numberFormat(stock.balance / stock.quantity, 1) : '-' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="chart-hint-sm tr">* 此處合併顯示相同代碼的資產，編輯請至下方列表。</p>
+      </div>
+
       <div class="ai-section mb-6">
         <div v-if="aiAnalysis" class="ai-box">
           <div class="ai-header">
@@ -554,6 +618,23 @@ const groupedAccounts = computed(() => {
         }
     });
     return result;
+});
+
+// 🟢 核心邏輯：合併相同 Symbol 的股票
+const stockAccounts = computed(() => {
+  const groups = {};
+  accounts.value.forEach(acc => {
+    if (acc.type === 'Stock' && acc.symbol) {
+      const sym = acc.symbol.toUpperCase();
+      if (!groups[sym]) {
+        groups[sym] = { symbol: sym, balance: 0, quantity: 0, count: 0 };
+      }
+      groups[sym].balance += parseFloat(acc.balance);
+      groups[sym].quantity += parseFloat(acc.quantity || 0);
+      groups[sym].count += 1;
+    }
+  });
+  return Object.values(groups).sort((a, b) => b.balance - a.balance);
 });
 
 // 輔助判斷函數
@@ -1139,9 +1220,11 @@ onMounted(() => {
 <style scoped>
 /* 共用樣式 */
 .accounts-container { 
-  max-width: 100%; 
-  padding-bottom: 40px;
-  overflow: visible; /* 配合 sticky */
+  padding: 16px; 
+  padding-bottom: 80px; /* 預留底部空間給手機操作 */
+  max-width: 1000px; 
+  margin: 0 auto; 
+  overflow: visible;
 }
 
 /* 🌟 標題列 Sticky 設定 */
@@ -1395,6 +1478,198 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
   font-size: 0.7rem;
   color: #999;
 }
+
+/* 2. Hero 淨資產 (置頂大卡片) */
+.net-worth-hero { 
+  background: linear-gradient(135deg, #d4a373 0%, #a98467 100%); 
+  color: white; 
+  padding: 36px; 
+  border-radius: 28px; 
+  text-align: center; 
+  box-shadow: 0 10px 25px rgba(212, 163, 115, 0.25); 
+  margin-bottom: 24px;
+}
+.hero-label { font-size: 1rem; opacity: 0.9; margin-bottom: 4px; }
+.hero-amount { font-size: 2.4rem; font-weight: 800; letter-spacing: 1px; }
+
+/* 3. 2x2 概覽卡片 */
+.summary-grid-2x2 { 
+  display: grid; 
+  grid-template-columns: 1fr 1fr; 
+  gap: 12px; 
+  margin-bottom: 24px;
+}
+.summary-card { 
+  background: white; 
+  padding: 20px; 
+  border-radius: 20px; 
+  border: 1px solid #f0ebe5; 
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02); 
+}
+.summary-card label { display: block; font-size: 0.8rem; color: #8c7b75; margin-bottom: 6px; }
+.summary-card .amount { font-size: 1.15rem; font-weight: 700; color: #444; }
+.text-danger .amount { color: #dc3545; }
+
+/* 4. 持股矩陣 (視覺優化版) */
+.section-title { font-size: 1.1rem; font-weight: bold; color: #8c7b75; margin-bottom: 12px; }
+.stocks-grid-3x3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+/* 🟢 手機版優化：斷點提升到 600px 確保大多數手機都單欄顯示 */
+@media (max-width: 600px) {
+  
+  /* --- A. 上方持股矩陣 (Matrix) 優化 --- */
+  
+  /* 1. 改為雙欄顯示，讓畫面更緊湊 */
+  .stocks-grid-3x3 { 
+    grid-template-columns: repeat(2, 1fr); 
+    gap: 10px; 
+  }
+
+  /* 2. 矩陣卡片內部：改為垂直堆疊，避免寬度不足時文字重疊 */
+  .stock-card-header { 
+    flex-direction: column; 
+    align-items: flex-start; 
+    gap: 6px; 
+    padding: 10px;
+  }
+  
+  /* 標籤過長時自動省略 */
+  .stock-symbol-badge {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.9rem;
+  }
+  
+  /* 來源數標籤靠左 */
+  .stock-source-count { 
+    margin-left: 0; 
+  }
+
+  .stock-card-body { padding: 10px; }
+  
+  /* 數值區：次要資訊 (股數/單價) 改為垂直排列 */
+  .sub-value-row { 
+    flex-direction: column; 
+    gap: 4px; 
+  }
+  
+  .sub-item.right { 
+    align-items: flex-start; 
+    text-align: left;
+    margin-top: 4px;
+  }
+
+  /* --- B. 下方詳細列表 (List) 優化 --- */
+  
+  /* 1. 卡片佈局：由「左右並排」改為「上下分層」 */
+  .account-card {
+    flex-direction: column;
+    align-items: stretch; /* 讓內容撐滿寬度 */
+    gap: 12px;
+    padding: 16px;
+  }
+
+  /* 2. 左側資訊 (名稱+標籤) */
+  .card-left {
+    width: 100%;
+    border-bottom: 1px dashed #eee; /* 加一條虛線區隔 */
+    padding-bottom: 12px;
+  }
+  
+  /* 讓標籤列 (幣別/股數) 可以換行，避免太長被切掉 */
+  .acc-meta {
+    flex-wrap: wrap; 
+    gap: 6px;
+  }
+
+  /* 3. 右側資訊 (餘額+按鈕) */
+  .card-right {
+    width: 100%;
+    display: flex;
+    flex-direction: row; /* 改為橫向排列 */
+    justify-content: space-between; /* 餘額靠左，按鈕靠右 */
+    align-items: center;
+    text-align: left; /* 重置文字對齊 */
+  }
+
+  /* 4. 餘額顯示優化 */
+  .acc-balance {
+    font-size: 1.25rem; /* 放大字體 */
+    order: 1; /* 確保在左邊 */
+  }
+
+  /* 手機版隱藏 "估算市值" 這種提示字，節省空間 */
+  .hint-xs {
+    display: none;
+  }
+
+  /* 5. 操作按鈕區 */
+  .action-buttons {
+    order: 2; /* 確保在右邊 */
+    margin-top: 0;
+  }
+
+  /* --- C. 其他通用調整 --- */
+  .summary-grid-2x2 { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .hero-amount { font-size: 2rem; }
+  .chart-header-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .date-controls { width: 100%; justify-content: space-between; }
+}
+
+
+.stock-item-card { 
+  background: white; 
+  border-radius: 18px; 
+  border: 1px solid #e0e0e0; 
+  overflow: hidden; 
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03); 
+  transition: transform 0.2s; 
+}
+.stock-item-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.06); }
+
+/* 卡片頭部 */
+.stock-card-header { 
+  background-color: #f8f6f2; 
+  padding: 10px 14px; 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  border-bottom: 1px solid #eee; 
+}
+.stock-symbol-badge { 
+  font-family: monospace; 
+  font-weight: bold; 
+  color: #555; 
+  font-size: 0.9rem; 
+  background: #e6e2d8; 
+  padding: 2px 6px; 
+  border-radius: 4px;
+}
+.stock-source-count { 
+  font-size: 0.7rem; color: #999; 
+  background: white; 
+  padding: 1px 6px; border-radius: 10px; border: 1px solid #ddd; 
+}
+
+/* 卡片數據區 */
+.stock-card-body { padding: 14px; }
+.main-value-group { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 10px; }
+.main-value-group .label { font-size: 0.75rem; color: #aaa; margin-bottom: 2px; }
+.main-value-group .value { font-size: 1.2rem; font-weight: 800; color: #d4a373; letter-spacing: 0.5px; }
+
+.divider { height: 1px; background: #f0f0f0; margin-bottom: 10px; }
+
+.sub-value-row { display: flex; justify-content: space-between; }
+.sub-item { display: flex; flex-direction: column; }
+.sub-item.right { align-items: flex-end; }
+.sub-label { font-size: 0.65rem; color: #bbb; }
+.sub-value { font-size: 0.85rem; color: #666; font-weight: 500; font-family: monospace; }
+.tr { text-align: right; margin-top: 5px; color: #ccc; font-size: 0.75rem; }
+
+/* 5. 圖表區塊 */
+.charts-wrapper { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 24px; }
+@media (min-width: 600px) { .charts-wrapper { grid-template-columns: 1fr 1fr; } .wide-card { grid-column: span 2; } }
 
 </style>
 
