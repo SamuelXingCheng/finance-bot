@@ -162,47 +162,70 @@ class AssetService {
     }
 
     /**
-     * 取得歷史淨值趨勢 (折線圖數據)
+     * [最終生產版] 取得歷史淨值趨勢
+     * 修正重點：
+     * 1. 以 accounts 主表為白名單 (White-list)。
+     * 2. 無歷史紀錄的帳戶 -> 自動使用當前餘額 (Fallback)。
+     * 3. 自訂匯率 (Custom Rate) -> 直接視為台幣價格，不重複乘匯率。
      */
     public function getAssetHistory(int $userId, string $range = '1y', ?int $ledgerId = null): array {
+        // --- 1. 設定日期範圍 ---
         $now = new DateTime();
         $today = $now->format('Y-m-d');
         $intervalStr = ($range === '1m') ? '-1 month' : (($range === '6m') ? '-6 months' : '-1 year');
         $startDate = (new DateTime())->modify($intervalStr)->format('Y-m-d');
 
-        // 🟢 1. 先取得所有帳戶的類型 (這是關鍵！)
-        // 我們需要知道哪些帳戶是負債 (Liability)
-        $typeSql = "SELECT name, type FROM accounts WHERE user_id = :userId";
-        $stmtType = $this->pdo->prepare($typeSql);
-        $stmtType->execute([':userId' => $userId]);
-        // 產生一個對照表: ['房貸' => 'Liability', '錢包' => 'Cash']
-        $accountTypes = $stmtType->fetchAll(PDO::FETCH_KEY_PAIR);
+        // --- 2. 抓出所有「現存帳戶」 (Account White List) ---
+        // 這是計算的基準，確保不會遺漏任何帳戶
+        $accSql = "SELECT name, type, balance, currency_unit, symbol, quantity FROM accounts WHERE user_id = :userId";
+        $paramsAcc = [':userId' => $userId];
+        if ($ledgerId) {
+            $accSql .= " AND ledger_id = :ledgerId ";
+            $paramsAcc[':ledgerId'] = $ledgerId;
+        }
+        $stmtAcc = $this->pdo->prepare($accSql);
+        $stmtAcc->execute($paramsAcc);
+        $allAccounts = $stmtAcc->fetchAll(PDO::FETCH_ASSOC);
 
-        // 2. 撈取歷史紀錄
+        // 建立帳戶名冊，並預設標記 has_history 為 false
+        $accountMap = [];
+        foreach ($allAccounts as $acc) {
+            $accountMap[$acc['name']] = [
+                'type' => $acc['type'],
+                'current_balance' => (float)$acc['balance'],
+                'current_unit' => strtoupper($acc['currency_unit']),
+                'has_history' => false 
+            ];
+        }
+
+        // --- 3. 撈取歷史紀錄 ---
         $sql = "SELECT snapshot_date, account_name, balance, currency_unit, exchange_rate 
                 FROM account_balance_history 
-                WHERE user_id = :userId 
-                  AND account_name NOT LIKE 'Crypto-%' "; // 🚨 關鍵修正 2: 排除所有以 Crypto- 開頭的彙總性標籤
-        
-        $params = [':userId' => $userId];
+                WHERE user_id = :userId ";
+        $paramsHist = [':userId' => $userId];
         if ($ledgerId) {
             $sql .= " AND ledger_id = :ledgerId ";
-            $params[':ledgerId'] = $ledgerId;
+            $paramsHist[':ledgerId'] = $ledgerId;
         }
-        
+        // 依照日期排序，確保同一天取到最後一筆
         $sql .= " ORDER BY snapshot_date ASC, id ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
+            $stmt->execute($paramsHist);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            if (empty($rows)) return ['labels' => [], 'data' => []];
+            // 標記哪些帳戶是真的有歷史資料的
+            foreach ($rows as $row) {
+                if (isset($accountMap[$row['account_name']])) {
+                    $accountMap[$row['account_name']]['has_history'] = true;
+                }
+            }
 
             $rateService = new ExchangeRateService($this->pdo);
             $usdTwdRate = $rateService->getUsdTwdRate();
             
-            // 整理資料：按日期分組
+            // 將歷史資料按日期分組
             $historyByDate = [];
             $firstDateInData = null;
             foreach ($rows as $row) {
@@ -211,38 +234,46 @@ class AssetService {
                 $historyByDate[$d][] = $row;
             }
 
-            // 計算回放起點
-            $replayStart = min($firstDateInData, $startDate);
+            // 設定回放起始點 (若完全無歷史，就從範圍起始日開始)
+            $replayStart = $firstDateInData ? min($firstDateInData, $startDate) : $startDate;
+            
             $period = new DatePeriod(
                 new DateTime($replayStart), 
                 new DateInterval('P1D'), 
                 (new DateTime($today))->modify('+1 day')
             );
 
-            $currentBalances = []; 
+            // 用來暫存回放過程中的餘額狀態
+            $replayBalances = []; 
+            
             $chartLabels = []; 
             $chartData = [];
 
-            // 每日重播 (Replay) 計算淨值
+            // --- 4. 開始每日重播 (Replay) ---
             foreach ($period as $dt) {
                 $currentDate = $dt->format('Y-m-d');
                 $dayOfMonth = $dt->format('d');
 
-                // 更新當日餘額表
+                // A. 更新當日歷史餘額
+                // 只有「有歷史紀錄」的帳戶會在這裡被更新
                 if (isset($historyByDate[$currentDate])) {
                     foreach ($historyByDate[$currentDate] as $record) {
-                        $acc = $record['account_name'];
-                        $currentBalances[$acc] = [
-                            'balance' => (float)$record['balance'], 
-                            'unit' => strtoupper($record['currency_unit']),
-                            'custom_rate' => !empty($record['exchange_rate']) ? (float)$record['exchange_rate'] : null
-                        ];
+                        $name = $record['account_name'];
+                        // 只處理還活著的帳戶 (排除已刪除的幽靈帳戶)
+                        if (isset($accountMap[$name])) {
+                            $replayBalances[$name] = [
+                                'balance' => (float)$record['balance'], 
+                                'unit' => strtoupper($record['currency_unit']),
+                                'custom_rate' => !empty($record['exchange_rate']) ? (float)$record['exchange_rate'] : null
+                            ];
+                        }
                     }
                 }
 
-                // 產生圖表數據
+                // B. 結算當日總資產
                 if ($currentDate >= $startDate) {
                     $shouldRecord = true;
+                    // 若範圍不是 1m，則只記錄特定日期以節省效能
                     if ($range !== '1m') {
                         $shouldRecord = ($dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
                     }
@@ -250,32 +281,51 @@ class AssetService {
                     if ($shouldRecord) {
                         $dailyTotalTwd = 0.0;
                         
-                        foreach ($currentBalances as $name => $accData) {
-                            $bal = $accData['balance']; 
-                            $curr = $accData['unit'];
-                            $customRate = $accData['custom_rate'];
+                        // 遍歷所有「現存帳戶」進行加總
+                        foreach ($accountMap as $name => $info) {
+                            $bal = 0; $unit = 'TWD'; $customRate = null;
                             
-                            // 🟢 判斷帳戶類型
-                            // 如果帳戶已被刪除(查不到類型)，預設為資產(Cash)，避免報錯
-                            $type = $accountTypes[$name] ?? 'Cash';
+                            // 決策：使用歷史回放值？還是當前餘額補貼？
+                            if ($info['has_history']) {
+                                // 情況 1：有歷史紀錄 -> 使用 replayBalances
+                                if (isset($replayBalances[$name])) {
+                                    $bal = $replayBalances[$name]['balance'];
+                                    $unit = $replayBalances[$name]['unit'];
+                                    $customRate = $replayBalances[$name]['custom_rate'];
+                                }
+                                // 如果有歷史但還沒走到第一筆紀錄，預設 bal 為 0 (代表尚未開戶)
+                            } else {
+                                // 情況 2：完全無歷史 (如: 倚恩國泰) -> Fallback: 使用當前餘額
+                                // 讓它在圖表上呈現一條平線，而不是 0
+                                $bal = $info['current_balance'];
+                                $unit = $info['current_unit'];
+                            }
 
-                            // 計算該帳戶的 TWD 價值
+                            // 計算價值 (TWD)
                             $val = 0.0;
+                            
+                            // 🟢 修正重點：自訂匯率計算邏輯
                             if ($customRate && $customRate > 0) {
+                                // 若有自訂匯率 (如 BTC 價格)，直接相乘，不需再乘匯率
                                 $val = $bal * $customRate;
                             } else {
-                                if ($curr === 'TWD') {
+                                // 自動匯率模式
+                                if ($unit === 'TWD') {
                                     $val = $bal;
                                 } else {
                                     try {
-                                        $rateToUSD = $rateService->getRateToUSD($curr);
+                                        // 嘗試透過 API 取得對 USD 匯率，再轉回 TWD
+                                        $rateToUSD = $rateService->getRateToUSD($unit);
                                         $val = $bal * $rateToUSD * $usdTwdRate;
-                                    } catch (Exception $e) {}
+                                    } catch (Exception $e) {
+                                        // 若抓不到匯率，保守起見算 0 或保留原值 (這裡設為 0 避免虛增)
+                                        $val = 0; 
+                                    }
                                 }
                             }
 
-                            // 🟢 關鍵邏輯：負債要用扣的，資產用加的
-                            if ($type === 'Liability') {
+                            // 負債要扣除
+                            if ($info['type'] === 'Liability') {
                                 $dailyTotalTwd -= $val;
                             } else {
                                 $dailyTotalTwd += $val;
@@ -288,38 +338,46 @@ class AssetService {
                 }
             }
             return ['labels' => $chartLabels, 'data' => $chartData];
+
         } catch (PDOException $e) { 
+            error_log("getAssetHistory Error: " . $e->getMessage());
             return ['labels' => [], 'data' => []]; 
         }
     }
     
     /**
-     * 取得目前資產配置摘要 (圓餅圖與總淨值用)
+     * [最終生產版] 取得資產摘要 (卡片顯示用)
+     * 邏輯與 getAssetHistory 保持一致，確保圖表與卡片金額吻合
      */
     public function getNetWorthSummary(int $userId, ?int $ledgerId = null): array {
         $rateService = new ExchangeRateService($this->pdo);
+        $usdTwdRate = $rateService->getUsdTwdRate();
         
-        $sql = "SELECT type, currency_unit, SUM(balance) as total 
-                FROM accounts 
-                WHERE user_id = :userId ";
+        // 抓取帳戶資料，並嘗試獲取該帳戶「最新」的歷史匯率 (Custom Rate)
+        // 這樣可以確保若您曾經手動設定過價格 (如 BTC 價格)，卡片會採用該價格
+        $sql = "SELECT a.name, a.balance, a.currency_unit, a.type, 
+                       (SELECT exchange_rate 
+                        FROM account_balance_history h 
+                        WHERE h.user_id = a.user_id AND h.account_name = a.name 
+                        ORDER BY h.snapshot_date DESC LIMIT 1) as custom_rate
+                FROM accounts a 
+                WHERE a.user_id = :userId ";
         
         $params = [':userId' => $userId];
         if ($ledgerId) {
-            $sql .= " AND ledger_id = :ledgerId ";
+            $sql .= " AND a.ledger_id = :ledgerId ";
             $params[':ledgerId'] = $ledgerId;
         }
         
-        $sql .= " GROUP BY type, currency_unit ORDER BY currency_unit, type";
+        $sql .= " ORDER BY a.currency_unit, a.type";
     
         try {
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
+            // 初始化統計變數
             $summary = []; 
-            $globalNetWorthUSD = 0.0; 
-            $usdTwdRate = $rateService->getUsdTwdRate();
-            
             $totalCash = 0.0; 
             $totalInvest = 0.0; 
             $totalAssets = 0.0; 
@@ -329,45 +387,97 @@ class AssetService {
             $totalTwInvest = 0.0; 
             $totalOverseasInvest = 0.0; 
             
-            foreach ($results as $row) {
-                $currency = $row['currency_unit']; 
-                $type = $row['type']; 
-                $total = (float)$row['total'];
-                
-                $rateToUSD = $rateService->getRateToUSD($currency);
-                $usdValue = $total * $rateToUSD; 
-                $twdValue = $usdValue * $usdTwdRate;
+            // 用來計算總淨值 (全部換算成台幣累加)
+            $globalNetWorthTWD = 0.0;
 
-                if (!isset($summary[$currency])) {
-                    $summary[$currency] = ['assets' => 0.0, 'liabilities' => 0.0, 'net_worth' => 0.0, 'usd_total' => 0.0, 'twd_total' => 0.0];
+            foreach ($accounts as $row) {
+                $currency = strtoupper($row['currency_unit']); 
+                $type = $row['type']; 
+                $balance = (float)$row['balance'];
+                $customRate = !empty($row['custom_rate']) ? (float)$row['custom_rate'] : null;
+                
+                // --- 核心價值計算 (與圖表邏輯一致) ---
+                $twdValue = 0.0;
+                $usdValue = 0.0; // 僅供參考用
+
+                if ($customRate && $customRate > 0) {
+                    // 🟢 修正重點：自訂匯率視為 TWD 價格，直接相乘
+                    $twdValue = $balance * $customRate;
+                    
+                    // 反推美金價值 (僅供 UI 顯示參考，不影響總值計算)
+                    $usdValue = ($usdTwdRate > 0) ? ($twdValue / $usdTwdRate) : 0;
+                } else {
+                    // 自動匯率模式
+                    if ($currency === 'TWD') {
+                        $twdValue = $balance;
+                        $usdValue = ($usdTwdRate > 0) ? ($balance / $usdTwdRate) : 0;
+                    } else {
+                        try {
+                            $rateToUSD = $rateService->getRateToUSD($currency);
+                            $usdValue = $balance * $rateToUSD; 
+                            $twdValue = $usdValue * $usdTwdRate;
+                        } catch (Exception $e) {
+                            // 若抓不到匯率，忽略此資產價值 (避免虛增)
+                            $twdValue = 0;
+                            $usdValue = 0;
+                        }
+                    }
                 }
 
+                // --- 初始化幣別統計陣列 ---
+                if (!isset($summary[$currency])) {
+                    $summary[$currency] = [
+                        'assets' => 0.0, 
+                        'liabilities' => 0.0, 
+                        'net_worth' => 0.0, 
+                        'usd_total' => 0.0, 
+                        'twd_total' => 0.0
+                    ];
+                }
+
+                // --- 累加各項指標 ---
                 if ($type === 'Liability') {
-                    $summary[$currency]['liabilities'] += $total; 
-                    $summary[$currency]['net_worth'] -= $total;
-                    $globalNetWorthUSD -= $usdValue; 
+                    // 負債類
+                    $summary[$currency]['liabilities'] += $balance; // 原幣餘額
+                    $summary[$currency]['net_worth'] -= $balance;   // 淨值扣除
+                    
+                    $globalNetWorthTWD -= $twdValue;
                     $totalLiabilities += $twdValue;
                 } else {
-                    $summary[$currency]['assets'] += $total; 
-                    $summary[$currency]['net_worth'] += $total;
-                    $globalNetWorthUSD += $usdValue; 
+                    // 資產類 (Cash, Stock, Investment, Bond)
+                    $summary[$currency]['assets'] += $balance; 
+                    $summary[$currency]['net_worth'] += $balance;
+                    
+                    $globalNetWorthTWD += $twdValue;
                     $totalAssets += $twdValue;
                     
+                    // 細項分類統計
                     if ($type === 'Cash') {
                         $totalCash += $twdValue;
                     } else {
                         $totalInvest += $twdValue;
-                        if ($type === 'Stock' || $type === 'Investment') $totalStock += $twdValue; 
-                        elseif ($type === 'Bond') $totalBond += $twdValue;
                         
-                        if ($currency === 'TWD') $totalTwInvest += $twdValue; 
-                        else $totalOverseasInvest += $twdValue;
+                        if ($type === 'Stock') $totalStock += $twdValue; 
+                        elseif ($type === 'Bond') $totalBond += $twdValue;
+                        elseif ($type === 'Investment') {
+                            // 將 Investment (加密貨幣等) 暫歸類於廣義投資或股票區塊
+                            // 您也可以新增 $totalCrypto 變數來獨立顯示
+                            $totalStock += $twdValue; 
+                        }
+                        
+                        // 地區/市場分類
+                        if ($currency === 'TWD') {
+                            $totalTwInvest += $twdValue; 
+                        } else {
+                            $totalOverseasInvest += $twdValue;
+                        }
                     }
                 }
+                
+                // 幣別匯總 (估值)
                 $summary[$currency]['usd_total'] += $usdValue; 
                 $summary[$currency]['twd_total'] += $twdValue;
             }
-            $globalNetWorthTWD = $globalNetWorthUSD * $usdTwdRate;
             
             return [
                 'breakdown' => $summary, 
@@ -385,7 +495,14 @@ class AssetService {
                 ]
             ];
         } catch (PDOException $e) { 
-            return ['breakdown' => [], 'global_twd_net_worth' => 0.0, 'usdTwdRate' => 32.0, 'charts' => []]; 
+            error_log("getNetWorthSummary Failed: " . $e->getMessage());
+            // 發生錯誤時回傳空結構，避免前端報錯
+            return [
+                'breakdown' => [], 
+                'global_twd_net_worth' => 0.0, 
+                'usdTwdRate' => 32.0, 
+                'charts' => []
+            ]; 
         }
     }
 
