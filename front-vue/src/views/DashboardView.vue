@@ -378,9 +378,40 @@
                 <input type="text" v-model="editForm.description" required class="input-std">
             </div>
             <div class="form-group">
-                <select v-model="editForm.category" class="input-std">
-                    <option v-for="(name, key) in categoryMap" :key="key" :value="key">{{ name }}</option>
-                </select>
+                <div class="form-group">
+                  <div class="form-group">
+                      <label class="sub-label">分類</label>
+                      <select v-model="editSelectCategoryMode" class="input-std" @change="handleEditCategoryChange">
+                          <option v-for="item in dynamicFilterCategories" :key="item.key" :value="item.key">
+                              {{ item.name }}
+                          </option>
+                          
+                          <option disabled>──────────</option>
+
+                          <option value="CUSTOM_INPUT">➕ 自訂新類別...</option>
+                      </select>
+                  </div>
+                  
+                  <div class="form-group" v-if="isEditCustomCategory">
+                      <input 
+                          type="text" 
+                          v-model="editForm.category" 
+                          placeholder="請輸入類別名稱" 
+                          class="input-std highlight-input"
+                          required
+                      >
+                  </div>
+                </div>
+                
+                <div class="form-group" v-if="isEditCustomCategory">
+                    <input 
+                        type="text" 
+                        v-model="editForm.category" 
+                        placeholder="請輸入類別名稱" 
+                        class="input-std highlight-input"
+                        required
+                    >
+                </div>
             </div>
             <button type="submit" class="save-btn">儲存修改</button>
         </form>
@@ -483,6 +514,20 @@ const isAddModalOpen = ref(false);
 
 const selectCategoryMode = ref('Miscellaneous'); 
 const isCustomCategory = ref(false);
+
+// 🟢 [新增] 編輯視窗專用的自訂類別狀態
+const editSelectCategoryMode = ref('Miscellaneous');
+const isEditCustomCategory = ref(false);
+
+function handleEditCategoryChange() {
+  if (editSelectCategoryMode.value === 'CUSTOM_INPUT') {
+    isEditCustomCategory.value = true;
+    editForm.value.category = ''; // 清空讓用戶輸入
+  } else {
+    isEditCustomCategory.value = false;
+    editForm.value.category = editSelectCategoryMode.value;
+  }
+}
 
 // 🔴 請補上這一段 (處理下拉選單切換的函式)
 function handleCategoryChange() {
@@ -853,13 +898,27 @@ async function handleDeleteTx(id) {
 }
 
 function openEditModal(tx) {
-    editForm.value = { 
-        id: tx.id, amount: parseFloat(tx.amount), type: tx.type,
-        date: tx.transaction_date, description: tx.description,
-        category: tx.category, currency: tx.currency
-    };
+    editForm.value = { ...tx, amount: parseFloat(tx.amount) }; // 簡化寫法
+
+    // 檢查這個類別是否已經在我們的「動態清單」中
+    // (dynamicFilterCategories 包含預設類別 + 歷史紀錄中出現過的自訂類別)
+    const isKnownCategory = dynamicFilterCategories.value.some(item => item.key === tx.category);
+
+    if (isKnownCategory) {
+        // 情況 A：是已知類別 (包含已存在的自訂類別，如 "公關費")
+        // -> 直接在選單中選中它，不顯示輸入框
+        editSelectCategoryMode.value = tx.category;
+        isEditCustomCategory.value = false;
+    } else {
+        // 情況 B：完全未知的類別 (極少見，除非是剛匯入的資料)
+        // -> 切換到自訂輸入模式
+        editSelectCategoryMode.value = 'CUSTOM_INPUT';
+        isEditCustomCategory.value = true;
+    }
+
     isEditModalOpen.value = true;
 }
+
 function closeModal() { isEditModalOpen.value = false; }
 
 async function handleUpdateTx() {
