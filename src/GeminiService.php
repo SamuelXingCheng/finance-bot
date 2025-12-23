@@ -204,9 +204,15 @@ EOD;
         if (strncmp($content, 'FILE:', 5) === 0) {
             $filePath = trim(substr($content, 5));
             if (file_exists($filePath)) {
+                
+                // 🟢 [新增] 針對圖片進行壓縮 (長邊縮至 1500px 其實對 OCR 就很夠了)
+                $mimeType = mime_content_type($filePath);
+                if (strpos($mimeType, 'image/') === 0) {
+                    $this->resizeImage($filePath, 1500);
+                }
+
                 $fileData = file_get_contents($filePath);
                 $base64Data = base64_encode($fileData);
-                $mimeType = mime_content_type($filePath);
                 
                 // 修正 m4a 類型
                 if (str_ends_with($filePath, '.m4a')) $mimeType = 'audio/mp4';
@@ -244,7 +250,18 @@ EOD;
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
         
+        // 設定連線超時為 30 秒
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30); 
+        // 設定執行超時為 180 秒 (3分鐘)，給 AI 足夠時間「打字」吐出 40 筆資料
+        curl_setopt($ch, CURLOPT_TIMEOUT, 180);
+
         $response = curl_exec($ch);
+        
+        // 🟢 [新增] 錯誤檢查：如果是 Timeout，記錄下來
+        if (curl_errno($ch)) {
+            error_log("Gemini cURL Error: " . curl_error($ch));
+        }
+
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
@@ -377,5 +394,72 @@ EOD;
     // 傳入自定義 Schema
     return $this->callGeminiAPI($prompt, "", $schema);
     }
+
+
+    /**
+     * 🟢 [新增] 圖片壓縮函式
+     * 將大圖縮小至長邊 1024px，大幅減少 Token 消耗與記憶體佔用
+     */
+    private function resizeImage($filePath, $maxSide = 1024) {
+        try {
+            list($width, $height, $type) = getimagesize($filePath);
+            
+            // 如果讀取失敗或圖片本來就很小，就不處理
+            if (!$width || ($width <= $maxSide && $height <= $maxSide)) {
+                return;
+            }
+
+            // 計算縮放比例
+            $ratio = $width / $height;
+            if ($ratio > 1) {
+                $newWidth = $maxSide;
+                $newHeight = $maxSide / $ratio;
+            } else {
+                $newHeight = $maxSide;
+                $newWidth = $maxSide * $ratio;
+            }
+
+            // 建立畫布
+            $src = null;
+            switch ($type) {
+                case IMAGETYPE_JPEG: $src = imagecreatefromjpeg($filePath); break;
+                case IMAGETYPE_PNG:  $src = imagecreatefrompng($filePath); break;
+                case IMAGETYPE_WEBP: $src = imagecreatefromwebp($filePath); break;
+            }
+
+            if (!$src) return; // 不支援的格式直接跳過
+
+            $dst = imagecreatetruecolor($newWidth, $newHeight);
+            
+            // 保留透明度 (針對 PNG/WebP)
+            if ($type == IMAGETYPE_PNG || $type == IMAGETYPE_WEBP) {
+                imagealphablending($dst, false);
+                imagesavealpha($dst, true);
+            }
+
+            // 重樣採樣 (縮圖)
+            imagecopyresampled($dst, $src, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+            // 覆蓋原檔 (壓縮品質 80)
+            switch ($type) {
+                case IMAGETYPE_JPEG: imagejpeg($dst, $filePath, 80); break;
+                case IMAGETYPE_PNG:  imagepng($dst, $filePath, 8); break; // PNG 壓縮等級 0-9
+                case IMAGETYPE_WEBP: imagewebp($dst, $filePath, 80); break;
+            }
+
+            // 釋放記憶體
+            imagedestroy($src);
+            imagedestroy($dst);
+            
+            // 手動觸發 GC，確保記憶體釋放
+            gc_collect_cycles();
+
+        } catch (Throwable $e) {
+            error_log("Image Resize Failed: " . $e->getMessage());
+            // 縮圖失敗不影響流程，繼續使用原圖
+        }
+    }
 }
+
+
 ?>

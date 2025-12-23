@@ -3,7 +3,8 @@
 
 // 1. 允許背景執行設定
 ignore_user_abort(true);
-set_time_limit(120); 
+set_time_limit(600); 
+ini_set('memory_limit', '1024M');
 
 // 隨機微延遲，避免多個任務同時啟動撞擊 API 頻率限制
 usleep(rand(100000, 800000)); 
@@ -80,6 +81,7 @@ try {
     $lineUserId = $task['line_user_id'];
     $userText = $task['user_text'];
     $taskId = $task['id'];
+    $replyToken = $task['reply_token'] ?? '';
     $targetLedgerId = $task['ledger_id'] ?? null;
     
     $dbConn->prepare("UPDATE gemini_tasks SET status = 'PROCESSING', processed_at = NOW() WHERE id = :id")
@@ -140,7 +142,13 @@ try {
                 'body' => ['type' => 'box', 'layout' => 'vertical', 'spacing' => 'sm', 'contents' => $detailContents],
                 'footer' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $commonFooterNotice]
             ];
-            $lineService->pushFlexMessage($lineUserId, "記帳完成", $flexPayload);
+            $messages = [[
+                'type' => 'flex',
+                'altText' => '記帳完成',
+                'contents' => $flexPayload
+            ]];
+            // 使用智慧發送
+            $lineService->smartReply($replyToken, $lineUserId, $messages);
         }
 
         // =================================================
@@ -171,7 +179,12 @@ try {
                 ],
                 'footer' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $commonFooterNotice]
             ];
-            $lineService->pushFlexMessage($lineUserId, "資產設定確認", $confirmFlex);
+            $messages = [[
+                'type' => 'flex',
+                'altText' => '資產設定確認',
+                'contents' => $confirmFlex
+            ]];
+            $lineService->smartReply($replyToken, $lineUserId, $messages);
         }
 
         // =================================================
@@ -279,7 +292,12 @@ try {
                 ],
                 'footer' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $commonFooterNotice]
             ];
-            $lineService->pushFlexMessage($lineUserId, $title, $textFlex);
+            $messages = [[
+                'type' => 'flex',
+                'altText' => $title,
+                'contents' => $textFlex
+            ]];
+            $lineService->smartReply($replyToken, $lineUserId, $messages);
         }
 
         // 成功結案
@@ -301,7 +319,12 @@ try {
             'footer' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $commonFooterNotice]
         ];
         $dbConn->prepare("UPDATE gemini_tasks SET status = 'FAILED' WHERE id = :id")->execute([':id' => $taskId]);
-        $lineService->pushFlexMessage($lineUserId, "無法解析", $failFlex);
+        $messages = [[
+            'type' => 'flex',
+            'altText' => '無法解析',
+            'contents' => $failFlex
+        ]];
+        $lineService->smartReply($replyToken, $lineUserId, $messages);
     }
 
 } catch (Throwable $e) {
@@ -324,7 +347,12 @@ try {
             ],
             'footer' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $commonFooterNotice]
         ];
-        $lineService->pushFlexMessage($lineUserId, "系統錯誤", $errorFlex);
+        $messages = [[
+            'type' => 'flex',
+            'altText' => '系統錯誤',
+            'contents' => $errorFlex
+        ]];
+        $lineService->smartReply($replyToken, $lineUserId, $messages);
     }
 }
 

@@ -44,38 +44,58 @@ $fail = 0;
 foreach ($users as $user) {
     $userId = (int)$user['id'];
     
-    // 🟢 步驟 3: 準備數據並執行快照 (修正 ArgumentCountError 的關鍵)
     try {
-        // A. 先獲取當前儀表板數據 (這裡會抓到最新的價格和資料庫的持倉)
+        // A. 獲取儀表板數據 (這裡回傳的是 TWD 計價的數據)
         $dashboardData = $cryptoService->getDashboardData($userId);
         
         $dashboard = $dashboardData['dashboard'];
-        $rawHoldings = $dashboardData['holdings']; // 取得持倉列表
+        $rawHoldings = $dashboardData['holdings']; 
         $usdTwdRate = (float)$dashboardData['usdTwdRate'];
         
-        // 注意：有些版本 getDashboardData 回傳的是 netInvestedTwd，有些是 totalCostTwd，這邊做個防呆
+        // 防呆：避免匯率為 0 導致除法錯誤
+        if ($usdTwdRate <= 0) $usdTwdRate = 32.0; 
+
         $totalCostTwd = (float)($dashboard['netInvestedTwd'] ?? $dashboard['totalCostTwd'] ?? 0);
 
-        // B. 轉換持倉格式，符合 captureSnapshot 的參數要求
+        // B. 轉換持倉格式
         $snapshotHoldings = [];
+        // 🟢 定義不需轉美金的幣種 (與 AssetService 保持一致)
+        $directTwdCurrencies = ['USD', 'USDT', 'USDC', 'BUSD', 'DAI'];
+
         foreach ($rawHoldings as $h) {
-            // 將 getDashboardData 的資料轉為 captureSnapshot 需要的格式
+            // 取得當前價格 (這是 getDashboardData 回傳的台幣價格)
+            $priceTwd = (float)($h['currentPrice'] ?? 0);
+            $symbol = strtoupper($h['symbol']); // 轉大寫以防萬一
+            
+            // 🟢 [修正邏輯] 分流處理
+            if (in_array($symbol, $directTwdCurrencies)) {
+                // A. 穩定幣 (USDT)：直接存 TWD 價格 (即匯率，如 32.5)
+                // AssetService 讀到時會直接乘，所以這樣存才對
+                $storeRate = $priceTwd; 
+            } else {
+                // B. 其他加密貨幣 (BTC)：除以匯率，還原成 USD 價格 (如 96000)
+                // AssetService 讀到時會幫你乘匯率，所以這裡要先除掉
+                if ($usdTwdRate > 0) {
+                    $storeRate = $priceTwd / $usdTwdRate;
+                } else {
+                    $storeRate = 0;
+                }
+            }
+
             $snapshotHoldings[] = [
                 'symbol' => $h['symbol'],
                 'qty' => (float)$h['balance'],
-                'price_usd' => (float)($h['currentPrice'] ?? 0),
-                // price_twd 會在 captureSnapshot 內部自動計算，這裡不用傳
+                'price_usd' => $storeRate, // 雖然變數叫 price_usd，但這裡存的是「符合邏輯的混合匯率」
             ];
         }
 
-        // C. 呼叫 captureSnapshot (正確傳入 4 個參數)
-        // 參數順序: userId, holdingsSnapshot, usdTwdRate, totalCostTwd
+        // C. 呼叫 captureSnapshot
         if ($cryptoService->captureSnapshot($userId, $snapshotHoldings, $usdTwdRate, $totalCostTwd)) {
             $success++;
             echo "User {$userId}: Snapshot OK\n"; 
         } else {
             $fail++;
-            echo "User {$userId}: Snapshot Failed (Func returned false)\n";
+            echo "User {$userId}: Snapshot Failed\n";
         }
 
     } catch (Exception $e) {
@@ -84,9 +104,7 @@ foreach ($users as $user) {
     }
     
     $count++;
-    
-    // 稍微暫停，避免瞬間 DB I/O 過高
-    usleep(50000); // 0.05 秒
+    usleep(50000); 
 }
 
 echo "--- Finished. Total: {$count}, Success: {$success}, Failed: {$fail} ---\n";
