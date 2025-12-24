@@ -969,6 +969,90 @@ try {
                     ]
                 ];
                 break;
+            
+            // [新增] 儲存陪跑策略
+            case 'save_strategy':
+                // 1. 接收前端 JSON
+                $input = json_decode(file_get_contents('php://input'), true);
+                
+                if (!$input) {
+                    echo json_encode(['status' => 'error', 'message' => 'Invalid input']);
+                    exit;
+                }
+
+                // 2. 呼叫你原本就有的 UserService 方法
+                // 你的方法定義是: public function saveStrategy($userId, $type, $data)
+                // 所以我們第三個參數直接傳 $input 陣列進去，因為前端傳來的 key (start_date, initial_capital...) 剛好都對應你的 SQL
+                try {
+                    $success = $userService->saveStrategy(
+                        $dbUserId, 
+                        $input['type'] ?? 'rent_vs_buy', 
+                        $input // 把整個資料陣列傳進去
+                    );
+
+                    if ($success) {
+                        echo json_encode(['status' => 'success']);
+                    } else {
+                        echo json_encode(['status' => 'error', 'message' => 'Database update failed']);
+                    }
+                } catch (Exception $e) {
+                    error_log("API Save Error: " . $e->getMessage());
+                    echo json_encode(['status' => 'error', 'message' => 'Server error']);
+                }
+                break;
+
+            // [修改後] 取得陪跑狀態 (只計算投入本金，不計算資產市值)
+            case 'get_pacing_status':
+                $type = $_GET['type'] ?? 'rent_vs_buy';
+                
+                // 1. 讀取策略設定 (取得目標金額、開始日期)
+                $strategy = $userService->getStrategy($dbUserId, $type);
+                
+                // 2. [已移除] 移除 AssetService 的呼叫
+                // $assets = $assetService->getAssets($dbUserId); <-- 造成錯誤的行
+                // 我們暫時將流動資產視為 0，或者前端不顯示此欄位
+                $liquidAssets = 0; 
+                
+                // 3. 取得收支平均 (供前端參考用)
+                $monthlyIncome = $transactionService->getTotalIncomeByMonth($dbUserId); // 本月收入
+                $monthlyExpense = $transactionService->getTotalExpenseByMonth($dbUserId); // 本月支出
+                $avgSavings = $monthlyIncome - $monthlyExpense; 
+                
+                if (!$strategy) {
+                    // 情境 A：尚未設定過策略 => 回傳 Setup 模式
+                    $response = [
+                        'status' => 'success',
+                        'mode' => 'setup',
+                        'data' => [
+                            // 前端如果要顯示「目前資產」，這裡會是 0。建議前端先隱藏此欄位。
+                            'liquid_assets' => 0, 
+                            'avg_monthly_savings' => round($avgSavings),
+                            'avg_monthly_income' => round($monthlyIncome)
+                        ]
+                    ];
+                } else {
+                    // 情境 B：已有策略 => 回傳 Dashboard 模式
+                    
+                    // 🟢 核心邏輯：從記帳紀錄中，撈出「策略開始後」新增的投入本金
+                    // 呼叫我們剛修好的 TransactionService 方法
+                    $addedPrincipal = $transactionService->getInvestmentSumSince($dbUserId, $strategy['start_date']);
+                    
+                    $response = [
+                        'status' => 'success',
+                        'mode' => 'dashboard',
+                        'data' => [
+                            'liquid_assets' => 0, // 暫時給 0，避免前端報錯
+                            'avg_monthly_savings' => round($avgSavings),
+                            'avg_monthly_income' => round($monthlyIncome),
+                            'strategy' => $strategy,
+                            'progress' => [
+                                // 這是進度條唯一需要的數據
+                                'added_principal_from_ledger' => $addedPrincipal 
+                            ]
+                        ]
+                    ];
+                }
+                break;
 
             default:
                 $response = ['status' => 'error', 'message' => 'Invalid action.'];

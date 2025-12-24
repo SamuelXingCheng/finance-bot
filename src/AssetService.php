@@ -316,6 +316,67 @@ class AssetService {
             return ['labels' => [], 'data' => []]; 
         }
     }
+
+    /**
+     * 🟢 [新增] 取得所有資產列表 (包含 TWD 估值)
+     * 用於 API get_pacing_status 計算總流動資產
+     */
+    public function getAssets(int $userId): array {
+        $rateService = new ExchangeRateService($this->pdo);
+        $usdTwdRate = $rateService->getUsdTwdRate();
+
+        // 1. 取得所有帳戶與最新匯率
+        $sql = "SELECT a.*, 
+                       (SELECT exchange_rate 
+                        FROM account_balance_history h 
+                        WHERE h.user_id = a.user_id AND h.account_name = a.name 
+                        ORDER BY h.snapshot_date DESC LIMIT 1) as custom_rate
+                FROM accounts a 
+                WHERE a.user_id = :userId";
+        
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':userId' => $userId]);
+        $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $results = [];
+        foreach ($accounts as $row) {
+            $currency = strtoupper($row['currency_unit']);
+            $balance = (float)$row['balance'];
+            $customRate = !empty($row['custom_rate']) ? (float)$row['custom_rate'] : null;
+            $twdValue = 0.0;
+
+            // 匯率計算邏輯 (與 getNetWorthSummary 保持一致)
+            if ($customRate && $customRate > 0) {
+                if (in_array($currency, self::DIRECT_TWD_RATE_CURRENCIES)) {
+                    // 情況 A (USD/USDT): CustomRate 是 TWD 匯率
+                    $twdValue = $balance * $customRate;
+                } else {
+                    // 情況 B (BTC/ETH): CustomRate 是 USD 價格 -> 轉 TWD
+                    $usdValue = $balance * $customRate;
+                    $twdValue = $usdValue * $usdTwdRate;
+                }
+            } else {
+                // 自動匯率
+                if ($currency === 'TWD') {
+                    $twdValue = $balance;
+                } else {
+                    try {
+                        $rateToUSD = $rateService->getRateToUSD($currency);
+                        $twdValue = $balance * $rateToUSD * $usdTwdRate;
+                    } catch (Exception $e) { $twdValue = 0; }
+                }
+            }
+
+            $row['value_twd'] = $twdValue;
+            
+            // 將 type 轉為小寫 (如 'Cash' -> 'cash')，以便 api.php 判斷
+            $row['type'] = strtolower($row['type']); 
+            
+            $results[] = $row;
+        }
+
+        return $results;
+    }
     
     /**
      * [卡片摘要邏輯] 

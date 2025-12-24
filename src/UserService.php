@@ -175,5 +175,48 @@ class UserService {
         return $stmt->execute([$lineUserId, $userId]);
     }
 
+    /**
+     * 儲存或更新使用者的財務策略
+     */
+    public function saveStrategy($userId, $type, $data) {
+        $sql = "INSERT INTO user_strategies 
+                (user_id, type, start_date, initial_capital, monthly_invest_target, params)
+                VALUES (:uid, :type, :start_date, :initial_capital, :monthly_invest, :params)
+                ON DUPLICATE KEY UPDATE
+                start_date = VALUES(start_date),
+                initial_capital = VALUES(initial_capital),
+                monthly_invest_target = VALUES(monthly_invest_target),
+                params = VALUES(params)";
+        
+        // 🟢 [修正] 這裡是 $this->pdo，不是 $this->db
+        $stmt = $this->pdo->prepare($sql);
+        
+        $paramsJson = is_array($data['params']) ? json_encode($data['params'], JSON_UNESCAPED_UNICODE) : $data['params'];
+
+        return $stmt->execute([
+            ':uid' => $userId,
+            ':type' => $type,
+            ':start_date' => $data['start_date'],
+            ':initial_capital' => $data['initial_capital'],
+            ':monthly_invest' => $data['monthly_invest_target'],
+            ':params' => $paramsJson
+        ]);
+    }
+
+    /**
+     * 取得使用者的策略設定
+     */
+    public function getStrategy($userId, $type) {
+        // 🟢 [修正] 這裡是 $this->pdo
+        $stmt = $this->pdo->prepare("SELECT * FROM user_strategies WHERE user_id = :uid AND type = :type");
+        $stmt->execute([':uid' => $userId, ':type' => $type]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($row && !empty($row['params'])) {
+            $row['params'] = json_decode($row['params'], true);
+        }
+        return $row;
+    }
+
 }
 ?>

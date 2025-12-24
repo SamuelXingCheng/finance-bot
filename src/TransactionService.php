@@ -397,5 +397,57 @@ class TransactionService {
             return $stmt->execute([':id' => $id, ':userId' => $userId]);
         } catch (PDOException $e) { return false; }
     }
+
+    /**
+     * 計算某個日期之後，特定分類(投資相關)的支出總和
+     * 修正版：根據截圖資料表結構，移除不存在的欄位，僅透過 category 判斷
+     */
+    public function getInvestmentSumSince($userId, $startDate) {
+        // [Debug]
+        error_log("🔍 [Debug] getInvestmentSumSince Start");
+        error_log("   User ID: " . $userId);
+        error_log("   Start Date: " . $startDate);
+
+        // SQL 邏輯：
+        // 1. 必須是該使用者的 (user_id)
+        // 2. 日期在策略開始之後 (transaction_date)
+        // 3. 類型必須是支出 (expense) 或是 轉帳 (transfer) 
+        //    (有些記帳習慣會把投資記成轉帳，所以我們兩個都抓，重點看 category)
+        // 4. 分類名稱必須包含「投資、存股、股票、證券」等關鍵字
+        
+        $sql = "SELECT SUM(amount) as total 
+                FROM transactions 
+                WHERE user_id = :uid 
+                  AND transaction_date >= :date
+                  AND (type = 'expense' OR type = 'transfer') 
+                  AND (
+                      category LIKE '%投資%' OR 
+                      category LIKE '%存股%' OR 
+                      category LIKE '%證券%' OR 
+                      category LIKE '%基金%' OR
+                      LOWER(category) LIKE '%investment%' OR 
+                      LOWER(category) LIKE '%stock%' OR 
+                      LOWER(category) LIKE '%fund%' OR
+                      LOWER(category) LIKE '%etf%'
+                  )";
+                  
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([
+                ':uid' => $userId, 
+                ':date' => $startDate
+            ]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            $total = (float) ($result['total'] ?? 0);
+
+            error_log("   Returning Total: " . $total);
+
+            return $total;
+        } catch (PDOException $e) {
+            error_log("❌ Get Investment Sum Error: " . $e->getMessage());
+            return 0.0;
+        }
+    }
 }
 ?>
