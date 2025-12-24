@@ -207,8 +207,20 @@
                     <span class="sub-value">{{ numberFormat(stock.quantity, 0) }}</span>
                   </div>
                   <div class="sub-item right">
-                    <span class="sub-label">參考單價</span>
-                    <span class="sub-value">{{ stock.quantity > 0 ? numberFormat(stock.balance / stock.quantity, 1) : '-' }}</span>
+                    <span class="sub-label">
+                      {{ stock.total_cost > 0 ? '成本均價' : '參考市價' }}
+                    </span>
+                    
+                    <span class="sub-value">
+                      {{ 
+                        stock.quantity > 0 
+                          ? numberFormat(
+                              (stock.total_cost > 0 ? stock.total_cost : stock.balance) / stock.quantity, 
+                              1
+                            ) 
+                          : '-' 
+                      }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -272,6 +284,9 @@
                 <span class="date">{{ item.snapshot_date }}</span>
                 <span class="balance">
                   {{ numberFormat(item.balance, getPrecision(item.currency_unit)) }} {{ item.currency_unit }}
+                  <span v-if="item.quantity > 0" class="history-unit-price">
+                    (@ {{ numberFormat(item.balance / item.quantity, 2) }})
+                  </span>
                 </span>
               </div>
               <div class="list-actions-sm">
@@ -336,13 +351,15 @@
                 <input type="number" v-model.number="form.quantity" step="any" class="input-std" placeholder="股數">
               </div>
               <div class="form-group half">
-                <label>平均單價</label>
-                <input type="number" v-model.number="form.unitCost" step="any" class="input-std highlight-input" placeholder="每股成本">
+                <label>{{ priceLabel }}</label> 
+                <input type="number" v-model.number="form.unitCost" step="any" class="input-std highlight-input" placeholder="單價">
               </div>
             </div>
 
             <div class="calc-info" v-if="form.quantity && form.unitCost">
-                <span>≈ 總投入成本: </span>
+                <span v-if="form.cost_basis > 0">≈ 總投入成本: </span>
+                <span v-else>≈ 當時總市值: </span>
+                
                 <span class="calc-value">
                     {{ numberFormat(form.quantity * form.unitCost, 0) }} {{ form.currency }}
                 </span>
@@ -549,6 +566,13 @@ const isStockType = computed(() => {
     return form.value.type === 'Stock' || form.value.type === 'Bond';
 });
 
+const priceLabel = computed(() => {
+    if (form.value.cost_basis && form.value.cost_basis > 0) {
+        return '成本單價 (Cost Basis)';
+    }
+    return '當時單價 (Market Price)';
+});
+
 // 🟢 [新增] 自動判斷幣種的函式
 function autoDetectCurrency(symbol) {
     if (!symbol) return;
@@ -610,17 +634,11 @@ function onCostBasisInput() {
     }
 }
 
-// 🟢 核心邏輯：合併相同 Symbol 的股票
 const stockAccounts = computed(() => {
   const groups = {};
   
   accounts.value.forEach(acc => {
-    // 🟢 [修正] 移除 "&& acc.symbol" 嚴格限制
-    // 只要是股票類型 (Stock) 就一定要顯示，不管有沒有代碼
     if (acc.type === 'Stock') {
-      
-      // 🟢 [防呆] 如果有代碼就用代碼，沒有就用「帳戶名稱」暫代
-      // 加上 String() 避免如果代碼是純數字 (如 2330) 導致報錯
       let sym = acc.symbol ? String(acc.symbol).toUpperCase() : acc.name;
       
       if (!groups[sym]) {
@@ -628,18 +646,21 @@ const stockAccounts = computed(() => {
             symbol: sym, 
             balance: 0, 
             quantity: 0, 
+            total_cost: 0, // 🟢 新增：用來累加成本
             count: 0 
         };
       }
       
-      // 累加數值 (加上 || 0 防止資料缺漏產生 NaN)
       groups[sym].balance += parseFloat(acc.balance || 0);
       groups[sym].quantity += parseFloat(acc.quantity || 0);
+      
+      // 🟢 新增：累加成本 (防呆：如果沒有 cost_basis 則加 0)
+      groups[sym].total_cost += parseFloat(acc.cost_basis || 0);
+      
       groups[sym].count += 1;
     }
   });
 
-  // 依照市值從大到小排序
   return Object.values(groups).sort((a, b) => b.balance - a.balance);
 });
 
@@ -1065,21 +1086,52 @@ function closeHistoryModal() {
 
 function openModalForSnapshot(snapshotItem) {
     closeHistoryModal();
+    
+    // 1. 找出原始帳戶的類型
     const sourceAccount = accounts.value.find(acc => acc.name === snapshotItem.account_name);
     const accountType = sourceAccount ? sourceAccount.type : 'Cash';
     
     isEditMode.value = true;
+    
+    // 2. 準備數據
+    const qty = parseFloat(snapshotItem.quantity) || 0;
+    const bal = parseFloat(snapshotItem.balance) || 0;
+    
+    // 🟢 關鍵修正 1：先讀取資料庫裡的成本
+    const historyCostBasis = parseFloat(snapshotItem.cost_basis) || 0;
+
+    // 🟢 關鍵修正 2：在這裡定義並計算 displayUnitCost (一定要在 form.value 之前！)
+    let displayUnitCost = null;
+
+    if (qty > 0) {
+        if (historyCostBasis > 0) {
+             // 如果有成本，顯示「成本單價」
+             displayUnitCost = parseFloat((historyCostBasis / qty).toFixed(2));
+        } else {
+             // 如果沒成本，顯示「市值單價」
+             displayUnitCost = parseFloat((bal / qty).toFixed(2));
+        }
+    }
+
+    // 3. 填入表單
     form.value = { 
         name: snapshotItem.account_name, 
         type: accountType, 
-        balance: parseFloat(snapshotItem.balance), 
+        balance: bal, 
         currency: snapshotItem.currency_unit,
         date: snapshotItem.snapshot_date,
         custom_rate: parseFloat(snapshotItem.exchange_rate) || null,
-        symbol: snapshotItem.symbol || '',    // 🟢 帶入歷史快照代碼
-        quantity: snapshotItem.quantity || null // 🟢 帶入歷史快照數量
+        symbol: snapshotItem.symbol || '',    
+        quantity: qty > 0 ? qty : null,
+        
+        // 🟢 這裡使用上面算好的變數
+        unitCost: displayUnitCost,
+        
+        // 🟢 載入成本，讓標題變更為 "成本單價"
+        cost_basis: historyCostBasis 
     };
     
+    // 4. 處理幣種顯示
     const currencyToSet = snapshotItem.currency_unit;
     const knownCurrency = currencyList.find(c => c.code === currencyToSet);
     if (knownCurrency) {
@@ -1089,6 +1141,12 @@ function openModalForSnapshot(snapshotItem) {
         currencySelectValue.value = 'CUSTOM';
         isCustomCurrency.value = true;
     }
+    
+    // 觸發自動幣種偵測
+    if (accountType === 'Stock' && form.value.symbol) {
+        autoDetectCurrency(form.value.symbol);
+    }
+
     isModalOpen.value = true;
 }
 
@@ -1754,6 +1812,16 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
 }
 .mt-2 {
   margin-top: 12px;
+}
+
+/* 🟢 新增樣式：歷史列表的單價顯示 */
+.history-unit-price {
+  display: block; /* 換行顯示，或者用 inline-block 放在旁邊 */
+  font-size: 0.75rem;
+  color: #999;
+  font-weight: normal;
+  margin-top: 2px;
+  font-family: monospace; /* 讓數字更整齊 */
 }
 
 </style>

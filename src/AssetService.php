@@ -133,17 +133,18 @@ class AssetService {
             // 注意：如果你的 history 表沒有 cost_basis 欄位，這段維持原樣即可
             // 如果 history 表也有 cost_basis，這裡也要跟著加，目前假設只有 accounts 表有
             $sqlHistory = "INSERT INTO account_balance_history 
-                            (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, symbol, quantity, snapshot_date)
-                           VALUES 
-                            (:userId, :ledgerId, :name, :balance, :unit, :rate, :symbol, :quantity, :date)
-                           ON DUPLICATE KEY UPDATE
-                            balance = VALUES(balance),
-                            currency_unit = VALUES(currency_unit),
-                            exchange_rate = VALUES(exchange_rate),
-                            symbol = VALUES(symbol),
-                            quantity = VALUES(quantity),
-                            ledger_id = VALUES(ledger_id)";
-                            
+                        (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, symbol, quantity, cost_basis, snapshot_date)
+                       VALUES 
+                        (:userId, :ledgerId, :name, :balance, :unit, :rate, :symbol, :quantity, :costBasis, :date)
+                       ON DUPLICATE KEY UPDATE
+                        balance = VALUES(balance),
+                        currency_unit = VALUES(currency_unit),
+                        exchange_rate = VALUES(exchange_rate),
+                        symbol = VALUES(symbol),
+                        quantity = VALUES(quantity),
+                        cost_basis = VALUES(cost_basis),  -- 🟢 這一行很重要，如果當天已有資料，會更新成本
+                        ledger_id = VALUES(ledger_id)";
+                        
             $stmtHist = $this->pdo->prepare($sqlHistory);
             $stmtHist->execute([
                 ':userId' => $userId, 
@@ -154,9 +155,10 @@ class AssetService {
                 ':rate' => $customRate, 
                 ':symbol' => $symbol,
                 ':quantity' => $quantity,
+                ':costBasis' => $costBasis, // 🟢 記得綁定參數
                 ':date' => $date
             ]);
-    
+
             if ($shouldStartTransaction) {
                 $this->pdo->commit();
             }
@@ -462,9 +464,11 @@ class AssetService {
      * 取得帳戶列表
      */
     public function getAccounts(int $userId, ?int $ledgerId = null): array {
-        $sql = "SELECT name, type, symbol, balance, quantity, currency_unit, last_updated_at 
+        // 🟢 修改重點：補上 cost_basis 欄位
+        $sql = "SELECT name, type, symbol, balance, quantity, cost_basis, currency_unit, last_updated_at 
             FROM accounts 
             WHERE user_id = :userId ";
+            
         $params = [':userId' => $userId];
         if ($ledgerId) {
             $sql .= " AND ledger_id = :ledgerId ";
@@ -508,9 +512,12 @@ class AssetService {
 
     /**
      * 取得單一帳戶的歷史快照列表 (詳細頁面用)
+     * 🟢 [修正] 補上 symbol, quantity, exchange_rate, cost_basis
      */
     public function getAccountSnapshots(int $userId, string $accountName, int $limit = 50): array {
-        $sql = "SELECT account_name, balance, currency_unit, snapshot_date 
+        // 🟢 在 SELECT 加入 cost_basis
+        $sql = "SELECT account_name, balance, currency_unit, snapshot_date, 
+                       exchange_rate, symbol, quantity, cost_basis
                 FROM account_balance_history 
                 WHERE user_id = :userId AND account_name = :name 
                 ORDER BY snapshot_date DESC 
