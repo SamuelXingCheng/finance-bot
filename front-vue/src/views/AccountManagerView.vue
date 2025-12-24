@@ -198,7 +198,9 @@
         <div v-if="stockAccounts.length > 0" class="stocks-section mb-6">
           <h3 class="section-title">持股矩陣 (依標的彙總)</h3>
           <div class="stocks-grid-3x3">
-            <div v-for="stock in stockAccounts" :key="stock.symbol" class="stock-item-card">
+            <div v-for="stock in stockAccounts" :key="stock.symbol" 
+              class="stock-item-card clickable" 
+              @click="openStockDetail(stock)">
               <div class="stock-card-header">
                 <div class="stock-symbol-badge">{{ stock.symbol }}</div>
                 <div class="stock-source-count" v-if="stock.count > 1">{{ stock.count }} 筆來源</div>
@@ -430,6 +432,74 @@
           </button>
         </form>
       </div>
+    </div>
+    <div v-if="isDetailModalOpen" class="modal-backdrop" @click.self="closeDetailModal">
+        <div class="modal-content detail-modal">
+          <div class="modal-header">
+            <div class="header-left">
+              <span class="symbol-badge-lg">{{ selectedStockSymbol }}</span>
+              <span class="header-title">持倉明細</span>
+            </div>
+            <button @click="closeDetailModal" class="close-btn">&times;</button>
+          </div>
+
+          <div class="detail-summary-box">
+            <div class="d-row">
+              <label>總庫存</label>
+              <span>{{ numberFormat(selectedStockSummary.quantity, 0) }} 股</span>
+            </div>
+            <div class="d-row">
+              <label>總市值</label>
+              <span class="fw-bold">NT$ {{ numberFormat(selectedStockSummary.balance, 0) }}</span>
+            </div>
+            <div class="d-row" v-if="selectedStockSummary.total_cost > 0">
+              <label>總損益</label>
+              <span :class="getTrendClass(selectedStockSummary.balance - selectedStockSummary.total_cost)">
+                {{ (selectedStockSummary.balance - selectedStockSummary.total_cost) > 0 ? '+' : '' }}
+                {{ numberFormat(selectedStockSummary.balance - selectedStockSummary.total_cost, 0) }}
+                <small>({{ ((selectedStockSummary.balance - selectedStockSummary.total_cost) / selectedStockSummary.total_cost * 100).toFixed(1) }}%)</small>
+              </span>
+            </div>
+          </div>
+
+          <div class="detail-list">
+            <div v-for="acc in selectedStockAccounts" :key="acc.id" class="detail-item">
+              <div class="item-header">
+                <span class="acc-name-tag">{{ acc.name }}</span>
+                <span class="item-balance">
+                  NT$ {{ numberFormat(acc.balance, 0) }}
+                </span>
+              </div>
+              
+              <div class="item-body">
+                <div class="col">
+                  <label>持有</label>
+                  <span>{{ numberFormat(acc.quantity, 0) }}</span>
+                </div>
+                <div class="col">
+                  <label>成本均價</label>
+                  <span v-if="acc.cost_basis > 0">
+                    {{ numberFormat(acc.cost_basis / acc.quantity, 1) }}
+                  </span>
+                  <span v-else class="text-gray">-</span>
+                </div>
+                <div class="col right">
+                  <label>損益</label>
+                  <div v-if="acc.cost_basis > 0">
+                      <span :class="getTrendClass(acc.balance - acc.cost_basis)" class="pl-val">
+                          {{ (acc.balance - acc.cost_basis) > 0 ? '+' : '' }}{{ numberFormat(acc.balance - acc.cost_basis, 0) }}
+                      </span>
+                      <div :class="getTrendClass(acc.balance - acc.cost_basis)" class="pl-pct">
+                          {{ ((acc.balance - acc.cost_basis) / acc.cost_basis * 100).toFixed(1) }}%
+                      </div>
+                  </div>
+                  <span v-else class="text-gray text-xs">無成本紀錄</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+        </div>
     </div>
 
   </div>
@@ -708,6 +778,29 @@ const ratePlaceholder = computed(() => {
     }
     return "Auto (依目前市價)";
 });
+
+// --- 🟢 新增：持倉明細彈窗邏輯 ---
+const isDetailModalOpen = ref(false);
+const selectedStockSymbol = ref('');
+const selectedStockAccounts = ref([]); // 該標的下的所有帳戶列表
+const selectedStockSummary = ref({});  // 該標的的彙總資訊
+
+function openStockDetail(stockGroup) {
+    selectedStockSymbol.value = stockGroup.symbol;
+    selectedStockSummary.value = stockGroup;
+    
+    // 從所有帳戶中篩選出代碼符合的帳戶
+    selectedStockAccounts.value = accounts.value.filter(acc => 
+        (acc.symbol || '').toUpperCase() === stockGroup.symbol
+    );
+    
+    isDetailModalOpen.value = true;
+}
+
+function closeDetailModal() {
+    isDetailModalOpen.value = false;
+    selectedStockAccounts.value = [];
+}
 
 // 導覽邏輯
 function runHasDataTutorial() {
@@ -1872,6 +1965,102 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
     font-weight: 700;
     margin-bottom: 2px;
 }
+
+/* 讓矩陣卡片有可點擊的感覺 */
+.clickable {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.clickable:active {
+  transform: scale(0.98);
+}
+
+/* 明細彈窗專用樣式 */
+.detail-modal {
+  max-width: 450px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0; /* 讓 header 貼邊 */
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.symbol-badge-lg {
+  background: #264653;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+.header-title { font-weight: bold; color: #555; }
+
+/* 彙總區塊 */
+.detail-summary-box {
+  background: #f8f9fa;
+  padding: 16px 20px;
+  border-bottom: 1px dashed #e0e0e0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.d-row { display: flex; flex-direction: column; }
+.d-row label { font-size: 0.75rem; color: #888; margin-bottom: 2px; }
+.d-row span { font-size: 1rem; color: #333; }
+.fw-bold { font-weight: 800; }
+
+/* 列表區塊 (可捲動) */
+.detail-list {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.detail-item {
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: white;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+}
+.item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f9f9f9;
+}
+.acc-name-tag {
+  font-weight: bold;
+  color: #666;
+  font-size: 0.95rem;
+}
+.item-balance {
+  font-weight: bold;
+  color: #333;
+}
+
+.item-body { display: flex; justify-content: space-between; }
+.item-body .col { display: flex; flex-direction: column; flex: 1; }
+.item-body .col.right { align-items: flex-end; text-align: right; }
+.item-body label { font-size: 0.7rem; color: #aaa; margin-bottom: 2px; }
+.item-body span { font-size: 0.9rem; color: #444; }
+
+.pl-val { font-weight: bold; font-size: 0.95rem; }
+.pl-pct { font-size: 0.75rem; font-weight: bold; }
+.text-gray { color: #ccc; }
 
 </style>
 
