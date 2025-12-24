@@ -928,6 +928,48 @@ try {
                     $response = ['status' => 'error', 'message' => '綁定失敗'];
                 }
                 break;
+            case 'financial_snapshot':
+                // 1. 取得流動資產 (作為頭期款參考)
+                // 排除房產，只算 現金(cash), 股票(stock), 加密貨幣(crypto)
+                $assets = $assetService->getAssets($dbUserId);
+                $liquidAssets = 0;
+                
+                foreach ($assets as $asset) {
+                    if (in_array($asset['type'], ['cash', 'stock', 'crypto'])) {
+                        $liquidAssets += $asset['value_twd'] ?? 0;
+                    }
+                }
+
+                // 2. 計算月平均結餘 (作為負擔能力參考)
+                // 取過去 6 個月
+                $monthlyStats = $transactionService->getMonthlyStats($dbUserId, 6);
+                $avgSavings = 0;
+                $avgIncome = 0;
+                
+                if (!empty($monthlyStats)) {
+                    $totalIncome = 0;
+                    $totalExpense = 0;
+                    foreach ($monthlyStats as $stat) {
+                        $totalIncome += $stat['income'];
+                        $totalExpense += $stat['expense'];
+                    }
+                    $months = count($monthlyStats);
+                    if ($months > 0) {
+                        $avgSavings = ($totalIncome - $totalExpense) / $months;
+                        $avgIncome = $totalIncome / $months;
+                    }
+                }
+
+                $response = [
+                    'status' => 'success', 
+                    'data' => [
+                        'liquid_assets' => round($liquidAssets),
+                        'avg_monthly_savings' => round($avgSavings),
+                        'avg_monthly_income' => round($avgIncome)
+                    ]
+                ];
+                break;
+
             default:
                 $response = ['status' => 'error', 'message' => 'Invalid action.'];
                 break;

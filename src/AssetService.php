@@ -345,8 +345,17 @@ class AssetService {
             $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             $summary = []; 
-            $totalCash = 0.0; $totalInvest = 0.0; $totalAssets = 0.0; $totalLiabilities = 0.0;
-            $totalStock = 0.0; $totalBond = 0.0; $totalTwInvest = 0.0; $totalOverseasInvest = 0.0; 
+            
+            // 🟢 [修改 1] 初始化變數時，新增 $totalCrypto
+            $totalCash = 0.0; 
+            $totalInvest = 0.0; 
+            $totalAssets = 0.0; 
+            $totalLiabilities = 0.0;
+            $totalStock = 0.0; 
+            $totalBond = 0.0; 
+            $totalCrypto = 0.0; // 新增這行：獨立統計加密貨幣
+            $totalTwInvest = 0.0; 
+            $totalOverseasInvest = 0.0; 
             $globalNetWorthTWD = 0.0;
 
             foreach ($accounts as $row) {
@@ -358,19 +367,16 @@ class AssetService {
                 $twdValue = 0.0;
                 $usdValue = 0.0;
 
-                // 🟢 [核心價值計算] 
+                // [核心價值計算邏輯保持不變] 
                 if ($customRate && $customRate > 0) {
                     if (in_array($currency, self::DIRECT_TWD_RATE_CURRENCIES)) {
-                        // 情況 A (USD/USDT): CustomRate 是 TWD 匯率
                         $twdValue = $balance * $customRate;
                         $usdValue = ($usdTwdRate > 0) ? ($twdValue / $usdTwdRate) : 0;
                     } else {
-                        // 情況 B (BTC/ETH): CustomRate 是 USD 價格
                         $usdValue = $balance * $customRate;
                         $twdValue = $usdValue * $usdTwdRate;
                     }
                 } else {
-                    // 自動匯率
                     if ($currency === 'TWD') {
                         $twdValue = $balance;
                         $usdValue = ($usdTwdRate > 0) ? ($balance / $usdTwdRate) : 0;
@@ -398,12 +404,20 @@ class AssetService {
                     $globalNetWorthTWD += $twdValue;
                     $totalAssets += $twdValue;
                     
-                    if ($type === 'Cash') $totalCash += $twdValue;
-                    else {
+                    if ($type === 'Cash') {
+                        $totalCash += $twdValue;
+                    } else {
                         $totalInvest += $twdValue;
-                        if ($type === 'Stock') $totalStock += $twdValue; 
-                        elseif ($type === 'Bond') $totalBond += $twdValue;
-                        elseif ($type === 'Investment') $totalStock += $twdValue;
+                        
+                        // 🟢 [修改 2] 分流統計邏輯
+                        if ($type === 'Stock') {
+                            $totalStock += $twdValue; 
+                        } elseif ($type === 'Bond') {
+                            $totalBond += $twdValue;
+                        } elseif ($type === 'Investment') {
+                            // 原本加到 $totalStock，現在改加到 $totalCrypto
+                            $totalCrypto += $twdValue; 
+                        }
                         
                         if ($currency === 'TWD') $totalTwInvest += $twdValue; 
                         else $totalOverseasInvest += $twdValue;
@@ -418,9 +432,15 @@ class AssetService {
                 'global_twd_net_worth' => $globalNetWorthTWD, 
                 'usdTwdRate' => $usdTwdRate,
                 'charts' => [
-                    'cash' => $totalCash, 'investment' => $totalInvest, 'total_assets' => $totalAssets, 
-                    'total_liabilities' => $totalLiabilities, 'stock' => $totalStock, 'bond' => $totalBond, 
-                    'tw_invest' => $totalTwInvest, 'overseas_invest' => $totalOverseasInvest
+                    'cash' => $totalCash, 
+                    'investment' => $totalInvest, // 這是總投資 (Stock + Bond + Crypto)
+                    'total_assets' => $totalAssets, 
+                    'total_liabilities' => $totalLiabilities, 
+                    'stock' => $totalStock,       // 現在這裡只剩純股票
+                    'bond' => $totalBond, 
+                    'crypto' => $totalCrypto,     // 🟢 [修改 3] 新增此欄位供前端繪圖
+                    'tw_invest' => $totalTwInvest, 
+                    'overseas_invest' => $totalOverseasInvest
                 ]
             ];
         } catch (PDOException $e) { 
