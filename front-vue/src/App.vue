@@ -157,7 +157,7 @@ import DashboardView from './views/DashboardView.vue';
 import AccountManagerView from './views/AccountManagerView.vue';
 import CryptoView from './views/CryptoView.vue'; 
 
-import PropertyVsStockView from './views/PropertyVsStockView.vue';
+import CalculatorMain from './views/CalculatorMain.vue';
 
 const LIFF_ID = import.meta.env.VITE_LIFF_ID || "2008601432-OmoVrl0l";
 const API_URL = import.meta.env.VITE_API_BASE_URL || window.API_BASE_URL;
@@ -185,7 +185,7 @@ const currentView = computed(() => {
   if (currentTab.value === 'Accounts') return AccountManagerView;
   if (currentTab.value === 'Crypto') return CryptoView;
   if (currentTab.value === 'Subscription') return SubscriptionView;
-  if (currentTab.value === 'Calculator') return PropertyVsStockView;
+  if (currentTab.value === 'Calculator') return CalculatorMain;
   return null;
 });
 

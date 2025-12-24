@@ -3,7 +3,7 @@
     
     <div class="card-section">
       <div class="section-header">
-        <h2>🏠 陪跑模擬器</h2>
+        <h2>陪跑模擬器</h2>
       </div>
       <div class="data-box intro-card">
         <p class="intro-text">
@@ -91,7 +91,7 @@
                 <span class="d-value">{{ formatCurrency(calculated.initialMisc) }}</span>
              </div>
              <div class="detail-row sub-total">
-                <span class="d-label">🔥 總初始資金</span>
+                <span class="d-label">總初始資金</span>
                 <span class="d-value">{{ formatCurrency(calculated.totalInitialBuyCost) }}</span>
              </div>
              
@@ -168,7 +168,7 @@
              <div class="separator-dashed"></div>
              
              <div class="detail-row sub-total">
-                <span class="d-label">🔥 每月投入股市</span>
+                <span class="d-label">每月投入股市</span>
                 <span class="d-value highlight-value" :class="calculated.monthlyInvest > 0 ? 'text-income' : 'text-expense'">
                     {{ formatCurrency(calculated.monthlyInvest) }}
                 </span>
@@ -178,7 +178,7 @@
                  租房較省！請將此差額紀律性投入 <strong>{{ params.stockReturnRate }}%</strong> 的標的。
              </p>
              <p class="field-hint text-expense" v-else>
-                 ⚠️ 房租比買房還貴！每月需從本金扣除 {{ formatCurrency(Math.abs(calculated.monthlyInvest)) }} 才能維持生活。
+                 房租比買房還貴！每月需從本金扣除 {{ formatCurrency(Math.abs(calculated.monthlyInvest)) }} 才能維持生活。
              </p>
           </div>
 
@@ -211,21 +211,21 @@
 
           <div class="advice-content">
              <p class="advice-text" v-if="result.rentRatioVal < 3.5">
-               ✅ <strong>租房買股勝出！</strong><br>
+               <strong>租房買股勝出！</strong><br>
                目前的租金成本相對低廉。若您能維持紀律，將 <strong>{{ formatCurrency(params.rentInitialCapital) }}</strong> 的本金與每月價差投入 <strong>{{ params.stockReturnRate }}%</strong> 的標的，40 年後資產將高於買房。
              </p>
              <p class="advice-text" v-else>
-               🏠 <strong>買房自住勝出！</strong><br>
+               <strong>買房自住勝出！</strong><br>
                目前的租金成本過高（或房價相對低）。在這種情況下，買房不僅能強迫儲蓄，資產累積速度也可能超過租房投資。
              </p>
 
              <div class="alert-box" v-if="monthlyMortgage > userData.avgSavings + params.monthlyRent">
-               ⚠️ <strong>現金流警告</strong><br>
+               <strong>現金流警告</strong><br>
                寬限期後，每月需支出約 <strong>{{ formatCurrency(monthlyMortgage) }}</strong> (含稅/維護)，這已超過您目前的「月結餘 + 房租」，可能會造成生活拮据！
              </div>
              
              <div class="safe-box" v-else>
-               👌 <strong>現金流安全</strong><br>
+                <strong>現金流安全</strong><br>
                以您目前的儲蓄能力，負擔寬限期後的房貸應該游刃有餘。
              </div>
           </div>
