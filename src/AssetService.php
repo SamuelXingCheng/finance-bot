@@ -337,7 +337,7 @@ class AssetService {
         $rateService = new ExchangeRateService($this->pdo);
         $usdTwdRate = $rateService->getUsdTwdRate();
         
-        $sql = "SELECT a.name, a.balance, a.currency_unit, a.type, 
+        $sql = "SELECT a.name, a.balance, a.currency_unit, a.type, a.cost_basis, 
                        (SELECT exchange_rate 
                         FROM account_balance_history h 
                         WHERE h.user_id = a.user_id AND h.account_name = a.name 
@@ -365,19 +365,34 @@ class AssetService {
             $totalLiabilities = 0.0;
             $totalStock = 0.0; 
             $totalBond = 0.0; 
-            $totalCrypto = 0.0; // 新增這行：獨立統計加密貨幣
+            $totalCrypto = 0.0; 
             $totalTwInvest = 0.0; 
             $totalOverseasInvest = 0.0; 
+            
+            // 🟢 [補回漏掉的這一行]
             $globalNetWorthTWD = 0.0;
+            
+            // 🟢 [修改 2] 新增變數：統計股票總成本 (TWD)
+            $totalStockCost = 0.0;
 
             foreach ($accounts as $row) {
                 $currency = strtoupper($row['currency_unit']); 
                 $type = $row['type']; 
                 $balance = (float)$row['balance'];
+                $costBasis = (float)($row['cost_basis'] ?? 0); // 🟢 取得成本
                 $customRate = !empty($row['custom_rate']) ? (float)$row['custom_rate'] : null;
                 
                 $twdValue = 0.0;
                 $usdValue = 0.0;
+
+                // 🟢 [修改 3] 計算該帳戶的 "台幣成本"
+                // 邏輯：利用算出的台幣市值與原幣市值的比例 (隱含匯率) 來推算台幣成本，確保匯率一致
+                $impliedRate = ($balance != 0) ? ($twdValue / $balance) : 0;
+                // 如果餘額為0 (剛賣光)，但有匯率，則嘗試用匯率算 (邊緣情況)
+                if ($impliedRate == 0 && $usdTwdRate > 0) $impliedRate = ($currency === 'TWD') ? 1 : $usdTwdRate;
+                
+                $costTwd = $costBasis * $impliedRate;
+
 
                 // [核心價值計算邏輯保持不變] 
                 if ($customRate && $customRate > 0) {
@@ -423,7 +438,9 @@ class AssetService {
                         
                         // 🟢 [修改 2] 分流統計邏輯
                         if ($type === 'Stock') {
-                            $totalStock += $twdValue; 
+                            $totalStock += $twdValue;
+                            // 🟢 [修改 4] 累加股票成本
+                            $totalStockCost += $costTwd;
                         } elseif ($type === 'Bond') {
                             $totalBond += $twdValue;
                         } elseif ($type === 'Investment') {
@@ -445,12 +462,13 @@ class AssetService {
                 'usdTwdRate' => $usdTwdRate,
                 'charts' => [
                     'cash' => $totalCash, 
-                    'investment' => $totalInvest, // 這是總投資 (Stock + Bond + Crypto)
+                    'investment' => $totalInvest, 
                     'total_assets' => $totalAssets, 
                     'total_liabilities' => $totalLiabilities, 
-                    'stock' => $totalStock,       // 現在這裡只剩純股票
+                    'stock' => $totalStock,       
+                    'stock_cost' => $totalStockCost, // 🟢 [修改 5] 回傳總成本給前端
                     'bond' => $totalBond, 
-                    'crypto' => $totalCrypto,     // 🟢 [修改 3] 新增此欄位供前端繪圖
+                    'crypto' => $totalCrypto,     
                     'tw_invest' => $totalTwInvest, 
                     'overseas_invest' => $totalOverseasInvest
                 ]

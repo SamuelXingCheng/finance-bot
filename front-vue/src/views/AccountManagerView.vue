@@ -77,7 +77,15 @@
           </div>
           <div class="summary-card">
             <label>股票市值</label>
-            <div class="amount">NT$ {{ numberFormat(chartData.stock, 0) }}</div>
+            <div class="amount">
+              NT$ {{ numberFormat(chartData.stock, 0) }}
+              
+              <span v-if="chartData.stock_cost > 0" class="pl-badge" :class="getTrendClass(chartData.stock - chartData.stock_cost)">
+                ({{ (chartData.stock - chartData.stock_cost) > 0 ? '+' : '' }}
+                {{ numberFormat(chartData.stock - chartData.stock_cost, 0) }} 
+                {{ ((chartData.stock - chartData.stock_cost) / chartData.stock_cost * 100).toFixed(1) }}%)
+              </span>
+            </div>
           </div>
           <div class="summary-card">
             <label>其他投資</label>
@@ -200,17 +208,30 @@
                   <span class="label">預估市值</span>
                   <span class="value">NT$ {{ numberFormat(stock.balance, 0) }}</span>
                 </div>
+                
                 <div class="divider"></div>
+                
                 <div class="sub-value-row">
                   <div class="sub-item">
                     <span class="sub-label">持有股數</span>
                     <span class="sub-value">{{ numberFormat(stock.quantity, 0) }}</span>
                   </div>
+
+                  <div class="sub-item center" v-if="stock.total_cost > 0">
+                    <span class="sub-label">損益試算</span>
+                    <span class="matrix-pl" :class="getTrendClass(stock.balance - stock.total_cost)">
+                      {{ (stock.balance - stock.total_cost) > 0 ? '+' : '' }}
+                      {{ numberFormat(stock.balance - stock.total_cost, 0) }}
+                    </span>
+                    <span :class="getTrendClass(stock.balance - stock.total_cost)" style="font-size: 0.75rem;">
+                      {{ ((stock.balance - stock.total_cost) / stock.total_cost * 100).toFixed(1) }}%
+                    </span>
+                  </div>
+
                   <div class="sub-item right">
                     <span class="sub-label">
                       {{ stock.total_cost > 0 ? '成本均價' : '參考市價' }}
                     </span>
-                    
                     <span class="sub-value">
                       {{ 
                         stock.quantity > 0 
@@ -1320,6 +1341,13 @@ defineExpose({ refreshAllData });
 onMounted(() => {
     refreshAllData();
 });
+
+// 取得損益顏色 Class (紅漲綠跌)
+function getTrendClass(value) {
+    if (value > 0) return 'trend-up';
+    if (value < 0) return 'trend-down';
+    return 'trend-flat';
+}
 </script>
 
 <style scoped>
@@ -1822,6 +1850,27 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
   font-weight: normal;
   margin-top: 2px;
   font-family: monospace; /* 讓數字更整齊 */
+}
+
+/* 股市漲跌顏色 (台灣習慣：紅漲綠跌) */
+.trend-up { color: #e63946; font-weight: bold; } /* 紅色 */
+.trend-down { color: #2a9d8f; font-weight: bold; } /* 綠色 */
+.trend-flat { color: #999; }
+
+/* 損益標籤樣式 */
+.pl-badge {
+    font-size: 0.85rem;
+    margin-left: 8px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.5); /* 淡淡的背景 */
+}
+
+/* 矩陣卡片內的損益顯示 */
+.matrix-pl {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 2px;
 }
 
 </style>
