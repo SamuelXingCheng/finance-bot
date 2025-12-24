@@ -714,7 +714,7 @@ try {
             
                 // 🟢 新增：從 API 輸入中獲取標的與數量
                 $symbol = !empty($input['symbol']) ? strtoupper(trim($input['symbol'])) : null;
-
+    
                 if ($symbol !== null) {
                     // 🟢 如果代碼以數字開頭且沒點號，儲存時自動補上 .TW
                     // 這樣可以同時處理 2330 -> 2330.TW 和 00631L -> 00631L.TW
@@ -723,15 +723,28 @@ try {
                     }
                 }
                 $quantity = isset($input['quantity']) && $input['quantity'] !== '' ? (float)$input['quantity'] : null;
+                
+                // 🟢 [修改] 接收前端傳來的 cost_basis (總投入成本)
+                $costBasis = isset($input['cost_basis']) && $input['cost_basis'] !== '' ? (float)$input['cost_basis'] : 0.0;
             
                 if (empty($name)) {
                     $response = ['status' => 'error', 'message' => '帳戶名稱不能為空'];
                     break;
                 }
             
-                // 🟢 呼叫更新後的 Service 方法
+                // 🟢 [修改] 呼叫更新後的 Service 方法 (新增最後一個參數 costBasis)
                 $success = $assetService->upsertAccountBalance(
-                    $dbUserId, $name, $balance, $type, $currency, $date, $ledgerId, $customRate, $symbol, $quantity
+                    $dbUserId, 
+                    $name, 
+                    $balance, 
+                    $type, 
+                    $currency, 
+                    $date, 
+                    $ledgerId, 
+                    $customRate, 
+                    $symbol, 
+                    $quantity,
+                    $costBasis // 新增這行
                 );
             
                 if ($success) {

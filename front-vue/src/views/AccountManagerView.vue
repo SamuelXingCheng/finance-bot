@@ -301,7 +301,6 @@
           <div class="form-group">
             <label>快照日期 (生效日)</label>
             <input type="date" v-model="form.date" required class="input-std">
-            <p class="hint">系統將以這天作為此餘額的記錄時間點。</p>
           </div>
 
           <div class="form-group">
@@ -315,21 +314,42 @@
             </select>
           </div>
 
-          <div v-if="form.type === 'Stock' || form.type === 'Bond'" class="special-fields-box">
+          <div v-if="isStockType" class="special-fields-box">
+            
             <div class="form-row">
-              <div class="form-group half">
+              <div class="form-group" style="flex: 2;">
                 <label>標的代碼 (Symbol)</label>
-                <input type="text" v-model="form.symbol" class="input-std" placeholder="如 AAPL 或 2330.TW">
+                <input type="text" v-model="form.symbol" class="input-std" placeholder="例如: 2330 或 AAPL">
               </div>
-              <div class="form-group half">
-                <label>持股數量</label>
-                <input type="number" v-model.number="form.quantity" step="any" class="input-std" placeholder="股數/單位">
+              
+              <div class="form-group" style="flex: 1;">
+                <label>幣種 (自動)</label>
+                <div class="auto-currency-display">
+                    {{ form.currency }}
+                </div>
               </div>
             </div>
-            <p class="hint">填寫後，未來系統可嘗試為您自動更新市價。</p>
+
+            <div class="form-row mt-2">
+              <div class="form-group half">
+                <label>持股數量</label>
+                <input type="number" v-model.number="form.quantity" step="any" class="input-std" placeholder="股數">
+              </div>
+              <div class="form-group half">
+                <label>平均單價</label>
+                <input type="number" v-model.number="form.unitCost" step="any" class="input-std highlight-input" placeholder="每股成本">
+              </div>
+            </div>
+
+            <div class="calc-info" v-if="form.quantity && form.unitCost">
+                <span>≈ 總投入成本: </span>
+                <span class="calc-value">
+                    {{ numberFormat(form.quantity * form.unitCost, 0) }} {{ form.currency }}
+                </span>
+            </div>
           </div>
 
-          <div class="form-row">
+          <div class="form-row" v-if="!isStockType">
             <div class="form-group half">
               <label>快照餘額</label>
               <input type="number" v-model.number="form.balance" step="any" required class="input-std">
@@ -339,7 +359,7 @@
               <label>幣種</label>
               <div v-if="isCustomCurrency" class="custom-currency-wrapper">
                  <input type="text" v-model="form.currency" class="input-std" placeholder="代碼" required @input="forceUppercase">
-                 <button type="button" class="back-btn" @click="resetCurrency" title="返回選單">↩</button>
+                 <button type="button" class="back-btn" @click="resetCurrency" title="返回">↩</button>
               </div>
               <select v-else v-model="currencySelectValue" class="input-std" @change="handleCurrencyChange">
                 <option v-for="c in currencyList" :key="c.code" :value="c.code">
@@ -363,10 +383,7 @@
               :placeholder="ratePlaceholder"
             >
             <p v-if="isPastDate" class="hint-warn">
-              ⚠️ 您選擇了過去的日期。若留空，系統將使用「今日」匯率，可能導致歷史價值失真。
-            </p>
-            <p v-else class="hint">
-              留空則自動抓取 CoinGecko/市場 當下參考匯率。
+              ⚠️ 您選擇了過去的日期。若留空，系統將使用「今日」匯率。
             </p>
           </div>
 
@@ -484,8 +501,10 @@ const form = ref({
     currency: 'TWD',
     date: new Date().toISOString().substring(0, 10),
     custom_rate: null,
-    symbol: '',    // 🟢 新增
-    quantity: null // 🟢 新增
+    symbol: '',
+    quantity: null,
+    cost_basis: 0,   // 🟢 新增: 對應資料庫欄位
+    unitCost: null   // 🟢 新增: 前端輔助欄位
 });
 
 const currencySelectValue = ref('TWD');
@@ -525,6 +544,71 @@ const groupedAccounts = computed(() => {
     });
     return result;
 });
+
+const isStockType = computed(() => {
+    return form.value.type === 'Stock' || form.value.type === 'Bond';
+});
+
+// 🟢 [新增] 自動判斷幣種的函式
+function autoDetectCurrency(symbol) {
+    if (!symbol) return;
+    
+    const upperSym = symbol.toUpperCase();
+
+    // 1. 台股判斷：以 .TW 結尾，或是 3-4 位純數字 (預設為台股)
+    // Regex: 結尾是.TW 或 .TWO，或者 是純數字
+    if (upperSym.endsWith('.TW') || upperSym.endsWith('.TWO') || /^\d{3,4}$/.test(upperSym)) {
+        currencySelectValue.value = 'TWD';
+        form.value.currency = 'TWD';
+        isCustomCurrency.value = false;
+        return;
+    }
+
+    // 2. 加密貨幣判斷 (簡單列表)
+    const cryptoList = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE'];
+    if (cryptoList.includes(upperSym)) {
+        currencySelectValue.value = 'USD'; // 或 USDT，視你習慣
+        form.value.currency = 'USD';
+        isCustomCurrency.value = false;
+        return;
+    }
+
+    // 3. 美股判斷：純英文字母 (如 AAPL, TSLA, VOO) -> 預設 USD
+    if (/^[A-Z]+$/.test(upperSym)) {
+        currencySelectValue.value = 'USD';
+        form.value.currency = 'USD';
+        isCustomCurrency.value = false;
+        return;
+    }
+}
+
+// 🟢 [新增] 監聽代碼輸入，自動切換幣種
+watch(() => form.value.symbol, (newVal) => {
+    if (newVal && isStockType.value) {
+        autoDetectCurrency(newVal);
+    }
+});
+
+// 2. 新增計算邏輯 (放在 openModal 附近即可)
+function calculateTotalCost() {
+    if (form.value.quantity && form.value.unitCost) {
+        const total = Math.round(form.value.quantity * form.value.unitCost * 100) / 100;
+        form.value.cost_basis = total;
+        
+        // 🟢 如果是股票類型，預設 "市值(Balance)" = "總成本"
+        // 這樣使用者就不用再填一次快照餘額
+        if (isStockType.value) {
+            form.value.balance = total;
+        }
+    }
+}
+
+function onCostBasisInput() {
+    // 如果使用者手動改了總成本，也同步更新市值
+    if (isStockType.value) {
+        form.value.balance = form.value.cost_basis;
+    }
+}
 
 // 🟢 核心邏輯：合併相同 Symbol 的股票
 const stockAccounts = computed(() => {
@@ -877,14 +961,40 @@ async function fetchAIAnalysis() {
 async function handleSave() {
   isSaving.value = true;
   
+  // 1. 自動補全台股代碼 (如果只填數字)
+  let finalSymbol = form.value.symbol;
+  if (finalSymbol && /^\d{3,4}$/.test(finalSymbol)) {
+      finalSymbol += '.TW';
+  }
+
+  // 2. 自動計算總成本 (Cost Basis) = 數量 * 單價
+  // 如果使用者有填單價，就用算的；沒填就維持 0
+  let finalCostBasis = form.value.cost_basis;
+  if (isStockType.value && form.value.quantity && form.value.unitCost) {
+      finalCostBasis = form.value.quantity * form.value.unitCost;
+  }
+  
+  // 3. 自動設定快照餘額 (Balance)
+  // 如果是股票且剛建立(或更新)，預設 市值(Balance) = 總成本
+  // 除非使用者有特別去改 Balance (但在新介面我們把它藏起來了)
+  let finalBalance = form.value.balance;
+  if (isStockType.value) {
+      finalBalance = finalCostBasis; 
+  }
+
   const payload = { 
       ...form.value,
+      symbol: finalSymbol,
+      cost_basis: finalCostBasis,
+      balance: finalBalance,
       custom_rate: form.value.custom_rate 
   };
+  
   if (props.ledgerId) {
       payload.ledger_id = props.ledgerId;
   }
 
+  // ... (原本的 fetch 邏輯不變) ...
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { 
       method: 'POST', 
       body: JSON.stringify(payload) 
@@ -1014,14 +1124,23 @@ function handleCurrencyChange() {
 function resetCurrency() { isCustomCurrency.value = false; currencySelectValue.value = 'TWD'; form.value.currency = 'TWD'; }
 function forceUppercase() { form.value.currency = form.value.currency.toUpperCase(); }
 
+
 function openModal(account = null) {
   if (!liff.isLoggedIn()) {
       liff.login({ redirectUri: window.location.href });
       return;
   }
   const today = new Date().toISOString().substring(0, 10);
+  
   if (account) {
     isEditMode.value = true;
+    
+    // 計算平均單價 (防呆：分母不能為0)
+    let calcUnitCost = null;
+    if (account.quantity > 0 && account.cost_basis > 0) {
+        calcUnitCost = parseFloat((account.cost_basis / account.quantity).toFixed(2));
+    }
+
     form.value = { 
         name: account.name, 
         type: account.type, 
@@ -1029,9 +1148,12 @@ function openModal(account = null) {
         currency: account.currency_unit, 
         date: today,
         custom_rate: null,
-        symbol: account.symbol || '',    // 🟢 帶入現有代碼
-        quantity: account.quantity || null // 🟢 帶入現有數量
+        symbol: account.symbol || '',
+        quantity: account.quantity || null,
+        cost_basis: parseFloat(account.cost_basis) || 0, // 🟢 載入總成本
+        unitCost: calcUnitCost // 🟢 載入推算的單價
     };
+    
     const knownCurrency = currencyList.find(c => c.code === account.currency_unit);
     if (knownCurrency) { currencySelectValue.value = account.currency_unit; isCustomCurrency.value = false; } else { currencySelectValue.value = 'CUSTOM'; isCustomCurrency.value = true; }
   } else {
@@ -1043,13 +1165,16 @@ function openModal(account = null) {
         currency: 'TWD', 
         date: today,
         custom_rate: null,
-        symbol: '',    // 🟢 重設
-        quantity: null // 🟢 重設
+        symbol: '',
+        quantity: null,
+        cost_basis: 0,    // 🟢 重設
+        unitCost: null    // 🟢 重設
     };
     resetCurrency(); 
   }
   isModalOpen.value = true;
 }
+
 function closeModal() { isModalOpen.value = false; }
 
 async function handleDelete(name) {
@@ -1622,6 +1747,15 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
 /* 簡單的淡入動畫 */
 .fade-in { animation: fadeIn 0.3s ease-in-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+.highlight-input {
+  background-color: #fffbf0; /* 淺黃色背景提示這是輔助輸入 */
+  border-color: #eaddc5;
+}
+.mt-2 {
+  margin-top: 12px;
+}
+
 </style>
 
 <style>

@@ -38,12 +38,7 @@ class AssetService {
     }
 
     /**
-     * 更新或新增帳戶餘額 (快照) - 支援股票與債券欄位
-     * * @param string|null $symbol 股票代碼 (例如 AAPL, 2330.TW)
-     * @param float|null $quantity 持股數量
-     */
-    /**
-     * 更新或新增帳戶餘額 (快照) - 修正版：支援 Symbol, Quantity 與 LedgerID 防呆
+     * 更新或新增帳戶餘額 (快照) - 修正版：加入 Cost Basis (成本)
      */
     public function upsertAccountBalance(
         int $userId, 
@@ -54,15 +49,16 @@ class AssetService {
         ?string $snapshotDate = null, 
         ?int $ledgerId = null, 
         ?float $customRate = null,
-        ?string $symbol = null,    // 🟢 修正1: 新增參數
-        ?float $quantity = null    // 🟢 修正1: 新增參數
+        ?string $symbol = null,
+        ?float $quantity = null,
+        ?float $costBasis = 0.0  // 🟢 [修改 1] 新增此參數，預設為 0
     ): bool {
         
         $assetType = $this->sanitizeAssetType($type); 
         $date = $snapshotDate ?? date('Y-m-d');
         $currentTime = date('Y-m-d H:i:s');
     
-        // 判斷是否已經在交易中 (避免巢狀交易錯誤)
+        // 判斷是否已經在交易中
         $shouldStartTransaction = !$this->pdo->inTransaction();
 
         if ($shouldStartTransaction) {
@@ -70,57 +66,72 @@ class AssetService {
         }
     
         try {
-            // 1. 查詢該帳戶目前紀錄的最新日期
+            // ... (原本的查日期邏輯保持不變) ...
             $maxDateSql = "SELECT MAX(snapshot_date) FROM account_balance_history WHERE user_id = :userId AND account_name = :name";
             $stmtMax = $this->pdo->prepare($maxDateSql);
             $stmtMax->execute([':userId' => $userId, ':name' => $name]);
             $latestHistoryDate = $stmtMax->fetchColumn() ?: '0000-00-00';
             
-            // 如果 傳入日期 >= 目前最新日期，代表這是最新的狀態，需要更新 accounts 表
             $shouldUpdateMainAccount = ($date >= $latestHistoryDate);
     
-            // 2. 檢查帳戶是否存在 (🟢 修正2: 多撈 ledger_id 來做防呆)
+            // ... (原本的檢查帳戶邏輯保持不變) ...
             $checkSql = "SELECT id, ledger_id FROM accounts WHERE user_id = :userId AND name = :name";
             $stmtCheck = $this->pdo->prepare($checkSql);
             $stmtCheck->execute([':userId' => $userId, ':name' => $name]);
             $existingAccount = $stmtCheck->fetch(PDO::FETCH_ASSOC);
             
-            // 🟢 修正2: Ledger ID 防呆邏輯
-            // 如果傳入的是 null，但資料庫原本就有值，就沿用原本的 ID
             $finalLedgerId = $ledgerId;
             if ($existingAccount && $ledgerId === null) {
                 $finalLedgerId = $existingAccount['ledger_id'];
             }
     
             if (!$existingAccount) {
-                // 若帳戶不存在，建立新帳戶 (🟢 修正3: 寫入 symbol 和 quantity)
-                $insertSql = "INSERT INTO accounts (user_id, ledger_id, name, type, balance, currency_unit, symbol, quantity, last_updated_at)
-                              VALUES (:userId, :ledgerId, :name, :type, :balance, :unit, :symbol, :quantity, :time)";
+                // 🟢 [修改 2] INSERT 語句加入 cost_basis
+                $insertSql = "INSERT INTO accounts 
+                                (user_id, ledger_id, name, type, balance, currency_unit, symbol, quantity, cost_basis, last_updated_at)
+                              VALUES 
+                                (:userId, :ledgerId, :name, :type, :balance, :unit, :symbol, :quantity, :costBasis, :time)";
+                
                 $stmtInsert = $this->pdo->prepare($insertSql);
                 $stmtInsert->execute([
                     ':userId' => $userId, ':ledgerId' => $finalLedgerId, ':name' => $name,
                     ':type' => $assetType, ':balance' => $balance, ':unit' => strtoupper($currencyUnit), 
-                    ':symbol' => $symbol, ':quantity' => $quantity, // 綁定參數
+                    ':symbol' => $symbol, 
+                    ':quantity' => $quantity,
+                    ':costBasis' => $costBasis, // 綁定新參數
                     ':time' => $currentTime
                 ]);
             } else {
-                // 若帳戶存在，且這次輸入的日期比較新 (或等於)，就更新主表
+                // 若帳戶存在，更新主表
                 if ($shouldUpdateMainAccount) {
-                    // (🟢 修正3: 更新 symbol 和 quantity)
-                    $updateSql = "UPDATE accounts SET ledger_id = :ledgerId, type = :type, balance = :balance, 
-                                  currency_unit = :unit, symbol = :symbol, quantity = :quantity, last_updated_at = :time WHERE id = :id";
+                    // 🟢 [修改 3] UPDATE 語句加入 cost_basis
+                    $updateSql = "UPDATE accounts SET 
+                                    ledger_id = :ledgerId, 
+                                    type = :type, 
+                                    balance = :balance, 
+                                    currency_unit = :unit, 
+                                    symbol = :symbol, 
+                                    quantity = :quantity, 
+                                    cost_basis = :costBasis,  -- 更新成本
+                                    last_updated_at = :time 
+                                  WHERE id = :id";
+                                  
                     $stmtUpdate = $this->pdo->prepare($updateSql);
                     $stmtUpdate->execute([
                         ':ledgerId' => $finalLedgerId, ':type' => $assetType, ':balance' => $balance,
                         ':unit' => strtoupper($currencyUnit), 
-                        ':symbol' => $symbol, ':quantity' => $quantity, // 綁定參數
-                        ':time' => $currentTime, ':id' => $existingAccount['id']
+                        ':symbol' => $symbol, 
+                        ':quantity' => $quantity,
+                        ':costBasis' => $costBasis, // 綁定新參數
+                        ':time' => $currentTime, 
+                        ':id' => $existingAccount['id']
                     ]);
                 }
             }
     
             // 3. 寫入 account_balance_history (歷史快照)
-            // (🟢 修正3: 歷史紀錄也寫入 symbol 和 quantity)
+            // 注意：如果你的 history 表沒有 cost_basis 欄位，這段維持原樣即可
+            // 如果 history 表也有 cost_basis，這裡也要跟著加，目前假設只有 accounts 表有
             $sqlHistory = "INSERT INTO account_balance_history 
                             (user_id, ledger_id, account_name, balance, currency_unit, exchange_rate, symbol, quantity, snapshot_date)
                            VALUES 
@@ -136,13 +147,13 @@ class AssetService {
             $stmtHist = $this->pdo->prepare($sqlHistory);
             $stmtHist->execute([
                 ':userId' => $userId, 
-                ':ledgerId' => $finalLedgerId, // 使用防呆後的 ID
+                ':ledgerId' => $finalLedgerId,
                 ':name' => $name,
                 ':balance' => $balance, 
                 ':unit' => strtoupper($currencyUnit), 
                 ':rate' => $customRate, 
-                ':symbol' => $symbol,     // 綁定參數
-                ':quantity' => $quantity, // 綁定參數
+                ':symbol' => $symbol,
+                ':quantity' => $quantity,
                 ':date' => $date
             ]);
     
@@ -152,11 +163,10 @@ class AssetService {
             return true;
     
         } catch (PDOException $e) {
+            // ... (錯誤處理保持不變) ...
             if ($shouldStartTransaction) {
                 if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             }
-            
-            // 將錯誤拋出，以便 API 層級能捕捉或記錄
             if (!$shouldStartTransaction) {
                 throw $e; 
             }
@@ -315,67 +325,6 @@ class AssetService {
         } catch (PDOException $e) { 
             return ['labels' => [], 'data' => []]; 
         }
-    }
-
-    /**
-     * 🟢 [新增] 取得所有資產列表 (包含 TWD 估值)
-     * 用於 API get_pacing_status 計算總流動資產
-     */
-    public function getAssets(int $userId): array {
-        $rateService = new ExchangeRateService($this->pdo);
-        $usdTwdRate = $rateService->getUsdTwdRate();
-
-        // 1. 取得所有帳戶與最新匯率
-        $sql = "SELECT a.*, 
-                       (SELECT exchange_rate 
-                        FROM account_balance_history h 
-                        WHERE h.user_id = a.user_id AND h.account_name = a.name 
-                        ORDER BY h.snapshot_date DESC LIMIT 1) as custom_rate
-                FROM accounts a 
-                WHERE a.user_id = :userId";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':userId' => $userId]);
-        $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $results = [];
-        foreach ($accounts as $row) {
-            $currency = strtoupper($row['currency_unit']);
-            $balance = (float)$row['balance'];
-            $customRate = !empty($row['custom_rate']) ? (float)$row['custom_rate'] : null;
-            $twdValue = 0.0;
-
-            // 匯率計算邏輯 (與 getNetWorthSummary 保持一致)
-            if ($customRate && $customRate > 0) {
-                if (in_array($currency, self::DIRECT_TWD_RATE_CURRENCIES)) {
-                    // 情況 A (USD/USDT): CustomRate 是 TWD 匯率
-                    $twdValue = $balance * $customRate;
-                } else {
-                    // 情況 B (BTC/ETH): CustomRate 是 USD 價格 -> 轉 TWD
-                    $usdValue = $balance * $customRate;
-                    $twdValue = $usdValue * $usdTwdRate;
-                }
-            } else {
-                // 自動匯率
-                if ($currency === 'TWD') {
-                    $twdValue = $balance;
-                } else {
-                    try {
-                        $rateToUSD = $rateService->getRateToUSD($currency);
-                        $twdValue = $balance * $rateToUSD * $usdTwdRate;
-                    } catch (Exception $e) { $twdValue = 0; }
-                }
-            }
-
-            $row['value_twd'] = $twdValue;
-            
-            // 將 type 轉為小寫 (如 'Cash' -> 'cash')，以便 api.php 判斷
-            $row['type'] = strtolower($row['type']); 
-            
-            $results[] = $row;
-        }
-
-        return $results;
     }
     
     /**
