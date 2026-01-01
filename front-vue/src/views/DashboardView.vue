@@ -898,7 +898,11 @@ async function handleDeleteTx(id) {
 }
 
 function openEditModal(tx) {
-    editForm.value = { ...tx, amount: parseFloat(tx.amount) }; // 簡化寫法
+    editForm.value = { 
+        ...tx, 
+        amount: parseFloat(tx.amount),
+        date: tx.transaction_date // ★ 加上這行，日期就會自動帶入了
+    };
 
     // 檢查這個類別是否已經在我們的「動態清單」中
     // (dynamicFilterCategories 包含預設類別 + 歷史紀錄中出現過的自訂類別)

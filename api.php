@@ -1066,6 +1066,12 @@ try {
                     ];
                 }
                 break;
+            
+            case 'get_strategy_analysis':
+                $data = $assetService->getStrategyAnalysis($dbUserId);
+                // 🟢 改成這樣：只設定 $response，讓最後面統一輸出
+                $response = ['status' => 'success', 'data' => $data];
+                break;
 
             default:
                 $response = ['status' => 'error', 'message' => 'Invalid action.'];

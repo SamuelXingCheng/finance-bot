@@ -404,9 +404,9 @@ class TransactionService {
      */
     public function getInvestmentSumSince($userId, $startDate) {
         // [Debug]
-        error_log("🔍 [Debug] getInvestmentSumSince Start");
-        error_log("   User ID: " . $userId);
-        error_log("   Start Date: " . $startDate);
+        // error_log("🔍 [Debug] getInvestmentSumSince Start");
+        // error_log("   User ID: " . $userId);
+        // error_log("   Start Date: " . $startDate);
 
         // SQL 邏輯：
         // 1. 必須是該使用者的 (user_id)

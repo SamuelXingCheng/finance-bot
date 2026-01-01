@@ -371,7 +371,7 @@ class AssetService {
             
             // 🟢 [補回漏掉的這一行]
             $globalNetWorthTWD = 0.0;
-            
+
             // 🟢 [修改 2] 新增變數：統計股票總成本 (TWD)
             $totalStockCost = 0.0;
 
@@ -566,6 +566,83 @@ class AssetService {
             error_log("deleteSnapshot failed: " . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * 取得「租房買股」策略分析數據 (修正版：加入匯率換算)
+     */
+    public function getStrategyAnalysis(int $userId): array {
+        error_log("--- getStrategyAnalysis Start (User ID: $userId) ---");
+
+        // 1. 初始化匯率服務
+        $rateService = new ExchangeRateService($this->pdo);
+        $usdTwdRate = $rateService->getUsdTwdRate(); // 取得美金對台幣匯率
+
+        // 2. 撈取投資部位 (不直接 SUM，而是撈出明細以便換算)
+        // 這裡只撈 Stock, Bond, Investment
+        $sql = "SELECT balance, cost_basis, currency_unit, type, symbol
+                FROM accounts 
+                WHERE user_id = :userId 
+                  AND type IN ('Stock', 'Bond', 'Investment')
+                  AND balance > 0";
+        
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':userId' => $userId]);
+        $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 初始化累加變數 (TWD)
+        $totalPrincipalTwd = 0.0;
+        $currentValueTwd = 0.0;
+
+        // 3. 逐筆遍歷並換算匯率
+        foreach ($accounts as $acc) {
+            $currency = strtoupper($acc['currency_unit']);
+            $balance = (float)$acc['balance'];
+            $costBasis = (float)($acc['cost_basis'] ?? 0);
+
+            // --- 計算匯率 (Rate to TWD) ---
+            $rateToTwd = 1.0; // 預設 TWD
+
+            if ($currency === 'TWD') {
+                $rateToTwd = 1.0;
+            } elseif (in_array($currency, ['USD', 'USDT', 'USDC', 'BUSD', 'DAI'])) {
+                // 美金與穩定幣直接用 USD 匯率
+                $rateToTwd = $usdTwdRate;
+            } else {
+                // 其他外幣 (JPY, EUR...)：先轉 USD 再轉 TWD
+                // 這裡做個 try-catch 避免查不到匯率時報錯
+                try {
+                    $rateToUsd = $rateService->getRateToUSD($currency);
+                    $rateToTwd = $rateToUsd * $usdTwdRate;
+                } catch (Exception $e) {
+                    $rateToTwd = 0; // 查不到匯率暫時略過
+                    error_log("Rate Error for $currency: " . $e->getMessage());
+                }
+            }
+
+            // --- 累加到總計 (換算後) ---
+            $totalPrincipalTwd += ($costBasis * $rateToTwd);
+            $currentValueTwd   += ($balance * $rateToTwd);
+        }
+
+        $totalProfit = $currentValueTwd - $totalPrincipalTwd;
+
+        error_log("Calculated (TWD) -> Principal: $totalPrincipalTwd, Value: $currentValueTwd, Profit: $totalProfit");
+
+        // 4. 撈取房租總支出 (預留)
+        $totalRentPaid = 0;
+
+        $result = [
+            'invest_principal' => round($totalPrincipalTwd), // 總投入本金 (TWD)
+            'invest_value'     => round($currentValueTwd),   // 目前市值 (TWD)
+            'invest_profit'    => round($totalProfit),       // 投資損益 (TWD)
+            'invest_roi'       => $totalPrincipalTwd > 0 ? ($totalProfit / $totalPrincipalTwd) * 100 : 0,
+            'total_rent_paid'  => $totalRentPaid
+        ];
+
+        error_log("Final Return Data: " . json_encode($result));
+
+        return $result;
     }
 }
 ?>

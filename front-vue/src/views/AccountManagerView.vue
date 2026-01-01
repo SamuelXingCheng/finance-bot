@@ -201,14 +201,17 @@
             <div v-for="stock in stockAccounts" :key="stock.symbol" 
               class="stock-item-card clickable" 
               @click="openStockDetail(stock)">
-              <div class="stock-card-header">
-                <div class="stock-symbol-badge">{{ stock.symbol }}</div>
+              <div class="stock-card-header dark-header"> <div class="header-main">
+                  <span class="stock-symbol-title">{{ stock.symbol }}</span>
+                </div>
                 <div class="stock-source-count" v-if="stock.count > 1">{{ stock.count }} 筆來源</div>
               </div>
               <div class="stock-card-body">
                 <div class="main-value-group">
                   <span class="label">預估市值</span>
-                  <span class="value">NT$ {{ numberFormat(stock.balance, 0) }}</span>
+                  <span class="value">
+                    {{ stock.currency }} {{ numberFormat(stock.balance, getPrecision(stock.currency)) }}
+                  </span>
                 </div>
                 
                 <div class="divider"></div>
@@ -450,7 +453,9 @@
             </div>
             <div class="d-row">
               <label>總市值</label>
-              <span class="fw-bold">NT$ {{ numberFormat(selectedStockSummary.balance, 0) }}</span>
+              <span class="fw-bold">
+                {{ selectedStockSummary.currency }} {{ numberFormat(selectedStockSummary.balance, getPrecision(selectedStockSummary.currency)) }}
+              </span>
             </div>
             <div class="d-row" v-if="selectedStockSummary.total_cost > 0">
               <label>總損益</label>
@@ -467,7 +472,7 @@
               <div class="item-header">
                 <span class="acc-name-tag">{{ acc.name }}</span>
                 <span class="item-balance">
-                  NT$ {{ numberFormat(acc.balance, 0) }}
+                  {{ acc.currency_unit }} {{ numberFormat(acc.balance, getPrecision(acc.currency_unit)) }}
                 </span>
               </div>
               
@@ -737,17 +742,16 @@ const stockAccounts = computed(() => {
             symbol: sym, 
             balance: 0, 
             quantity: 0, 
-            total_cost: 0, // 🟢 新增：用來累加成本
-            count: 0 
+            total_cost: 0, 
+            count: 0,
+            // 🟢 新增：抓取該股票的幣別 (預設 TWD)
+            currency: acc.currency_unit || 'TWD' 
         };
       }
       
       groups[sym].balance += parseFloat(acc.balance || 0);
       groups[sym].quantity += parseFloat(acc.quantity || 0);
-      
-      // 🟢 新增：累加成本 (防呆：如果沒有 cost_basis 則加 0)
       groups[sym].total_cost += parseFloat(acc.cost_basis || 0);
-      
       groups[sym].count += 1;
     }
   });
@@ -2062,6 +2066,33 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
 .pl-pct { font-size: 0.75rem; font-weight: bold; }
 .text-gray { color: #ccc; }
 
+
+/* 方案 B：左側飾條樣式 */
+.stock-card-header {
+  background-color: #fff; /* 改回白色或極淺灰 */
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #f0f0f0;
+  border-left: 6px solid #d4a373; /* 🟢 左側加上你的主色金條 */
+}
+
+/* 移除原本的 badge 樣式，改用大文字 */
+.stock-symbol-badge {
+  background: transparent; /* 移除背景色 */
+  color: #264653;          /* 深色文字 */
+  font-size: 1.3rem;       /* 大字體 */
+  font-weight: 900;
+  padding: 0;
+  letter-spacing: 0.5px;
+}
+
+.stock-source-count {
+  background-color: #f0f0f0;
+  color: #888;
+  border: none;
+}
 </style>
 
 <style>

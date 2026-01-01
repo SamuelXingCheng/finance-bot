@@ -46,6 +46,112 @@
       </div>
     </div>
 
+    <div class="card-section">
+      <div class="section-header"><h2>2. 策略追蹤設定</h2></div>
+      <div class="data-box tracking-card">
+        
+        <div class="tracking-config">
+            <div class="config-item">
+                <label>策略起始年月</label>
+                <input type="month" v-model="params.strategyStartDate" class="input-std">
+            </div>
+            <div class="config-item">
+                <label>當時投入本金</label>
+                <input type="number" v-model.number="params.rentInitialCapital" class="input-std highlight-input">
+            </div>
+            <div class="config-item readonly">
+                <label>每月應投 (由參數試算)</label>
+                <div class="value-display" :class="calculated.monthlyInvest > 0 ? 'text-income' : 'text-gray'">
+                    {{ formatCurrency(calculated.monthlyInvest) }}
+                </div>
+            </div>
+        </div>
+
+        <div class="divider-dashed"></div>
+
+        <div class="tracking-result" v-if="progressData.hasStarted">
+            
+            <div class="timeline-badge">
+                <span class="icon">⏱️</span> 已執行 <strong>{{ progressData.durationText }}</strong>
+            </div>
+
+            <div class="comparison-grid">
+                
+                <div class="compare-box">
+                    <div class="c-header">
+                        <span class="c-title">💰 儲蓄紀律 (累積本金)</span>
+                        <span class="c-badge" :class="progressData.savingGap >= 0 ? 'bg-success' : 'bg-warn'">
+                            {{ progressData.savingGap >= 0 ? '達標' : '未達標' }}
+                        </span>
+                    </div>
+                    <div class="c-body">
+                        <div class="c-row">
+                            <span>理論應投入</span>
+                            <span class="font-mono">{{ formatCurrency(progressData.theoreticalPrincipal) }}</span>
+                        </div>
+                        <div class="c-row highlight">
+                            <span>實際已投入</span>
+                            <span class="font-mono font-bold" :class="progressData.savingGap >= 0 ? 'text-income' : 'text-expense'">
+                                {{ formatCurrency(progressData.actualPrincipal) }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="c-progress">
+                        <div class="p-bar-bg">
+                            <div class="p-bar-fill" 
+                                 :class="progressData.savingGap >= 0 ? 'fill-success' : 'fill-warn'"
+                                 :style="{ width: Math.min(progressData.savingProgress, 100) + '%' }">
+                            </div>
+                        </div>
+                        <div class="p-text">達成率 {{ progressData.savingProgress }}%</div>
+                    </div>
+                </div>
+
+                <div class="compare-box">
+                    <div class="c-header">
+                        <span class="c-title">📈 投資成果 (總市值)</span>
+                        <span class="c-badge" :class="progressData.isAhead ? 'bg-success' : 'bg-warn'">
+                            {{ progressData.isAhead ? '超前' : '落後' }}
+                        </span>
+                    </div>
+                    <div class="c-body">
+                        <div class="c-row">
+                            <span>理論應累積</span>
+                            <span class="font-mono">{{ formatCurrency(progressData.targetAsset) }}</span>
+                        </div>
+                        <div class="c-row highlight">
+                            <span>實際總市值</span>
+                            <span class="font-mono font-bold" :class="progressData.isAhead ? 'text-income' : 'text-expense'">
+                                {{ formatCurrency(progressData.actualAsset) }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="c-progress">
+                        <div class="p-bar-bg">
+                            <div class="p-bar-fill" 
+                                 :class="progressData.isAhead ? 'fill-success' : 'fill-warn'"
+                                 :style="{ width: Math.min(progressData.assetProgress, 100) + '%' }">
+                            </div>
+                        </div>
+                        <div class="p-text">達成率 {{ progressData.assetProgress }}%</div>
+                    </div>
+                </div>
+
+            </div>
+            
+            <div class="summary-message" :class="progressData.isAhead ? 'msg-success' : 'msg-warn'">
+                <span v-if="progressData.isAhead">
+                    🚀 表現優異！您的資產比預期多出了 <strong>{{ formatCurrency(progressData.actualAsset - progressData.targetAsset) }}</strong>。
+                </span>
+                <span v-else>
+                    🔧 需要調整！目前資產落後預期 <strong>{{ formatCurrency(progressData.targetAsset - progressData.actualAsset) }}</strong>，建議檢查是否少存了錢或投資標的表現不佳。
+                </span>
+            </div>
+
+        </div>
+      </div>
+    </div>
+
     <div class="two-col-grid">
       
       <div class="card-section">
@@ -365,39 +471,62 @@ const params = reactive({
   ledgerAdded: 0 
 });
 
-// 載入資料 (包含策略與記帳數據)
+
+// 修改 PropertyVsStockView.vue 裡面的 loadData
+
 const loadData = async () => {
   loading.value = true;
   try {
     const API_URL = import.meta.env.VITE_API_BASE_URL || window.API_BASE_URL || 'https://finbot.tw/api.php';
-    const response = await fetchWithLiffToken(`${API_URL}?action=get_pacing_status&strategy_type=rent_vs_buy`);
     
-    if (response && response.ok) {
-      const json = await response.json();
-      const result = json.data;
-      
-      if (result) {
-        userData.liquidAssets = result.liquid_assets || 0;
-        userData.avgSavings = result.avg_monthly_savings || 0;
-        userData.avgIncome = result.avg_monthly_income || 0;
-      }
-
-      if (json.mode === 'dashboard' && result.strategy) {
-        const savedParams = result.strategy.params;
-        const savedStrategy = result.strategy;
-
-        Object.assign(params, savedParams);
-        
-        if (result.progress && result.progress.added_principal_from_ledger !== undefined) {
-            params.ledgerAdded = parseFloat(result.progress.added_principal_from_ledger);
-            params.actualCost = parseFloat(savedStrategy.initial_capital) + params.ledgerAdded;
-        } else {
-            params.actualCost = parseFloat(savedStrategy.initial_capital);
-        }
+    // 1. 讀取策略設定 (Pacing Status)
+    const responsePacing = await fetchWithLiffToken(`${API_URL}?action=get_pacing_status&strategy_type=rent_vs_buy`);
+    if (responsePacing && responsePacing.ok) {
+      const json = await responsePacing.json();
+      if (json.mode === 'dashboard' && json.data.strategy) {
+        // 注意：這裡可能會覆蓋掉 actualCost，所以順序很重要
+        Object.assign(params, json.data.strategy.params);
       }
     }
+
+    // 2. 🟢 呼叫策略分析 API
+    console.log("🚀 開始呼叫 get_strategy_analysis..."); 
+    
+    const responseAnalysis = await fetchWithLiffToken(`${API_URL}?action=get_strategy_analysis`);
+    
+    // 檢查回應狀態
+    console.log("📡 API 回應狀態:", responseAnalysis.status);
+
+    if (responseAnalysis && responseAnalysis.ok) {
+      const jsonAnalysis = await responseAnalysis.json();
+      
+      // 印出前端收到的完整 JSON，確認格式
+      console.log("📦 前端收到的 JSON:", jsonAnalysis);
+
+      if (jsonAnalysis.status === 'success') {
+          const realData = jsonAnalysis.data;
+          
+          console.log("💰 準備更新數據:");
+          console.log("   - 市值 (Before):", userData.liquidAssets, " -> (After):", realData.invest_value);
+          console.log("   - 本金 (Before):", params.actualCost, " -> (After):", realData.invest_principal);
+
+          // A. 更新市值
+          userData.liquidAssets = parseFloat(realData.invest_value);
+
+          // B. 更新本金
+          params.actualCost = parseFloat(realData.invest_principal);
+          
+          // 強制重置記帳投入，避免干擾
+          params.ledgerAdded = 0; 
+      } else {
+          console.error("❌ API 回傳錯誤:", jsonAnalysis.message);
+      }
+    } else {
+        console.error("❌ 網絡請求失敗");
+    }
+
   } catch (error) { 
-    console.error("無法取得資料:", error); 
+    console.error("🔥 loadData 發生例外錯誤:", error); 
   } finally { 
     loading.value = false; 
   }
@@ -467,38 +596,48 @@ watchEffect(() => {
 const monthlyMortgage = computed(() => calculated.value.monthlyBuyTotal);
 
 const progressData = computed(() => {
+    // 1. 基礎檢查
     if (!params.strategyStartDate) return { hasStarted: false };
 
     const start = new Date(params.strategyStartDate);
     const now = new Date();
+    // 計算經過的月數 (如果不滿一個月算 0)
     let monthsDiff = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
     
     if (monthsDiff < 0) monthsDiff = 0;
 
-    let theoreticalPrincipal = params.rentInitialCapital; 
-    let targetAsset = params.rentInitialCapital;        
+    // 2. 計算「理論目標值」 (The Goal)
+    let theoreticalPrincipal = params.rentInitialCapital; // 初始本金
+    let targetAsset = params.rentInitialCapital;          // 初始市值
     
-    const monthlyInvest = calculated.value.monthlyInvest;
+    // 這是系統算出你「每個月應該要拿去投資」的錢
+    const monthlyInvest = calculated.value.monthlyInvest; 
+    const monthlyRate = params.stockReturnRate / 100 / 12;
 
+    // 逐月模擬複利
     if (monthsDiff >= 1) {
         for (let m = 1; m <= monthsDiff; m++) {
             theoreticalPrincipal += monthlyInvest;
-            targetAsset = targetAsset * (1 + params.stockReturnRate / 100 / 12) + monthlyInvest;
+            // 下個月市值 = (上個月市值 * 成長) + 本月新投入
+            targetAsset = targetAsset * (1 + monthlyRate) + monthlyInvest;
         }
     }
 
+    // 3. 獲取「真實數據」 (The Reality)
+    // 如果 API 還沒回傳實際值，為了不讓介面壞掉，暫時用理論值頂替 (或顯示 0)
+    const actualPrincipal = params.actualCost; 
     const actualAsset = userData.liquidAssets;
-    const actualPrincipal = params.actualCost > 0 ? params.actualCost : theoreticalPrincipal;
 
-    const savingGap = actualPrincipal - theoreticalPrincipal; 
-    const actualProfit = actualAsset - actualPrincipal;
-    const actualRoi = actualPrincipal > 0 ? ((actualProfit / actualPrincipal) * 100).toFixed(2) : 0;
+    // 4. 計算落差與進度
+    const savingGap = actualPrincipal - theoreticalPrincipal; // 存錢缺口
+    const profitGap = (actualAsset - actualPrincipal) - (targetAsset - theoreticalPrincipal); // 獲利能力缺口
     
-    const theoreticalProfit = targetAsset - theoreticalPrincipal;
-    const roiGap = actualProfit - theoreticalProfit;
-    
-    const percent = targetAsset > 0 ? Math.round((actualAsset / targetAsset) * 100) : 0;
+    // 計算達成率 (百分比)
+    // 防呆：如果理論值是 0 (剛開始)，達成率算 100%
+    const savingProgress = theoreticalPrincipal > 0 ? Math.round((actualPrincipal / theoreticalPrincipal) * 100) : 100;
+    const assetProgress = targetAsset > 0 ? Math.round((actualAsset / targetAsset) * 100) : 100;
 
+    // 格式化時間顯示
     let durationText = "";
     if (monthsDiff === 0) {
         durationText = "剛開始 (第 1 個月)";
@@ -509,16 +648,25 @@ const progressData = computed(() => {
     }
 
     return {
-        hasStarted: true, 
+        hasStarted: true,
+        monthsDiff,
         durationText,
-        targetAsset,
+        
+        // 數值
         theoreticalPrincipal,
+        targetAsset,
+        actualPrincipal,
+        actualAsset,
+        
+        // 差異
         savingGap,
-        actualProfit,
-        actualRoi,
-        roiGap,
-        percent,
-        ledgerAdded: params.ledgerAdded,
+        profitGap,
+        
+        // 進度百分比 (用於繪製進度條)
+        savingProgress,
+        assetProgress,
+        
+        // 狀態判斷
         isAhead: actualAsset >= targetAsset
     };
 });
@@ -726,5 +874,165 @@ const formatCurrency = (val) => '$' + numberFormat(val, 0);
   .analysis-grid { grid-template-columns: 1fr; }
   .action-card { flex-direction: column; text-align: center; gap: 15px; }
   .btn-save { width: 100%; margin-left: 0; }
+}
+
+/* 策略追蹤卡片樣式 */
+.tracking-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    padding: 20px;
+}
+
+/* 上半部設定區 */
+.tracking-config {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr; /* 三欄排列 */
+    gap: 16px;
+    align-items: end;
+}
+
+.config-item label {
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.value-display {
+    padding: 10px 12px;
+    background: #f7f7f7;
+    border-radius: 10px;
+    border: 1px dashed #ddd;
+    font-weight: bold;
+    color: #555;
+    height: 44px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+}
+
+.text-gray { color: #aaa; }
+
+.divider-dashed {
+    height: 1px;
+    border-top: 1px dashed #eee;
+    margin: 20px 0;
+}
+
+/* 下半部結果區 */
+.timeline-badge {
+    background: #fdf6ec;
+    color: #d97706;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+    font-weight: 500;
+}
+
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.compare-box {
+    background: #fcfcfc;
+    border: 1px solid #f0f0f0;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.c-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.c-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #555;
+}
+
+.c-badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    color: white;
+}
+.bg-success { background: #10b981; }
+.bg-warn { background: #f59e0b; }
+
+.c-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.c-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.c-row.highlight {
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+    margin-top: 4px;
+}
+
+.c-progress {
+    margin-top: 4px;
+}
+
+.p-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: #eee;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+
+.p-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+.fill-success { background: #10b981; }
+.fill-warn { background: #f59e0b; }
+
+.p-text {
+    font-size: 0.75rem;
+    text-align: right;
+    color: #999;
+}
+
+.summary-message {
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+.msg-success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.msg-warn { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+
+/* RWD */
+@media (max-width: 600px) {
+    .tracking-config {
+        grid-template-columns: 1fr; /* 手機版變單欄 */
+    }
+    .comparison-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
