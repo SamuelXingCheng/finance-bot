@@ -59,7 +59,7 @@
             <button @click="currentTab = 'Accounts'" :class="['nav-item', currentTab === 'Accounts' ? 'active' : '']">帳戶</button>
             <button @click="currentTab = 'Dashboard'" :class="['nav-item', currentTab === 'Dashboard' ? 'active' : '']">收支</button>
             <button @click="currentTab = 'Subscription'" :class="['nav-item', currentTab === 'Subscription' ? 'active' : '']">週期設定</button>
-            <!-- <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto專區</button> -->
+            <button @click="currentTab = 'Crypto'" :class="['nav-item', currentTab === 'Crypto' ? 'active' : '']">Crypto專區</button>
             <button @click="currentTab = 'Calculator'" :class="['nav-item', currentTab === 'Calculator' ? 'active' : '']">陪跑試算</button>
           </div>
           <div class="nav-user" @click="showUserMenu = !showUserMenu">

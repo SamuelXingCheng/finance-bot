@@ -178,7 +178,7 @@ class AssetService {
     }
 
     /**
-     * [圖表計算邏輯 - 修正版]
+     * [圖表計算邏輯 - 修正版 + 支援 2w 半月顯示]
      * 🟢 混合模式：
      * 1. 若是 USD/USDT -> CustomRate 視為 TWD 匯率 (直接乘)
      * 2. 若是 BTC/ETH  -> CustomRate 視為 USD 價格 (乘完再乘 TWD 匯率)
@@ -186,7 +186,23 @@ class AssetService {
     public function getAssetHistory(int $userId, string $range = '1y', ?int $ledgerId = null): array {
         $now = new DateTime();
         $today = $now->format('Y-m-d');
-        $intervalStr = ($range === '1m') ? '-1 month' : (($range === '6m') ? '-6 months' : '-1 year');
+        
+        // 🟢 修改 1: 使用 switch 處理日期區間，加入 2w 邏輯
+        switch ($range) {
+            case '2w':
+                $intervalStr = '-2 weeks';
+                break;
+            case '1m':
+                $intervalStr = '-1 month';
+                break;
+            case '6m':
+                $intervalStr = '-6 months';
+                break;
+            case '1y':
+            default:
+                $intervalStr = '-1 year';
+                break;
+        }
         $startDate = (new DateTime())->modify($intervalStr)->format('Y-m-d');
 
         // 1. 白名單 (Accounts)
@@ -242,6 +258,7 @@ class AssetService {
                 $historyByDate[$d][] = $row;
             }
 
+            // 確保回放起點正確 (取 資料最早日期 與 查詢起始日 的較小者，避免前面斷掉)
             $replayStart = $firstDateInData ? min($firstDateInData, $startDate) : $startDate;
             $period = new DatePeriod(new DateTime($replayStart), new DateInterval('P1D'), (new DateTime($today))->modify('+1 day'));
 
@@ -254,6 +271,7 @@ class AssetService {
                 $currentDate = $dt->format('Y-m-d');
                 $dayOfMonth = $dt->format('d');
 
+                // 更新當日餘額狀態
                 if (isset($historyByDate[$currentDate])) {
                     foreach ($historyByDate[$currentDate] as $record) {
                         $name = $record['account_name'];
@@ -267,8 +285,15 @@ class AssetService {
                     }
                 }
 
+                // 只記錄在查詢範圍內的數據
                 if ($currentDate >= $startDate) {
-                    $shouldRecord = ($range === '1m' || $dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
+                    
+                    // 🟢 修改 2: 圖表採樣邏輯
+                    // 如果是 '2w' 或 '1m' (短週期)，則「每天」都要記錄點
+                    // 如果是 '6m' 或 '1y' (長週期)，則只取 1號、15號 及 今天，避免圖表太擠
+                    $isShortRange = ($range === '2w' || $range === '1m');
+                    $shouldRecord = ($isShortRange || $dayOfMonth === '01' || $dayOfMonth === '15' || $currentDate === $today);
+
                     if ($shouldRecord) {
                         $dailyTotalTwd = 0.0;
                         
@@ -293,12 +318,10 @@ class AssetService {
                             if ($customRate && $customRate > 0) {
                                 // 判斷是否為 USD/USDT 類型 (這些存的是 TWD 匯率)
                                 if (in_array($unit, self::DIRECT_TWD_RATE_CURRENCIES)) {
-                                    // 情況 A (USD/USDT): CustomRate 是 "對台幣匯率" (e.g. 32.5)
-                                    // 公式：餘額 * 匯率
+                                    // 情況 A (USD/USDT): CustomRate 是 "對台幣匯率"
                                     $val = $bal * $customRate;
                                 } else {
-                                    // 情況 B (BTC/ETH): CustomRate 是 "USD 價格" (e.g. 96000)
-                                    // 公式：餘額 * 美金價 * 美金對台幣匯率
+                                    // 情況 B (BTC/ETH): CustomRate 是 "USD 價格"
                                     $val = $bal * $customRate * $usdTwdRate;
                                 }
                             } else {

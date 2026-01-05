@@ -98,11 +98,13 @@
         </div>
 
         <div class="charts-wrapper mb-6">
-          
+  
           <div class="chart-card wide-card">
             <div class="chart-header-row">
               <h3>資產成長趨勢 (歷史淨值)</h3>
               <div class="date-controls">
+                <button @click="fetchAssetHistory('2w')" class="filter-btn-sm" :class="{active: historyRange==='2w'}">半月</button>
+                
                 <button @click="fetchAssetHistory('1m')" class="filter-btn-sm" :class="{active: historyRange==='1m'}">1月</button>
                 <button @click="fetchAssetHistory('6m')" class="filter-btn-sm" :class="{active: historyRange==='6m'}">6月</button>
                 <button @click="fetchAssetHistory('1y')" class="filter-btn-sm" :class="{active: historyRange==='1y'}">1年</button>
@@ -134,50 +136,58 @@
                       </div>
                       <div class="control-group">
                         <div class="control-header">
-                           <label class="label-professional">現金持有比例</label>
-                           <span class="control-value text-primary">{{ simulatedCashRatio }}%</span>
+                          <label class="label-professional">現金持有比例</label>
+                          <span class="control-value text-primary">{{ simulatedCashRatio }}%</span>
                         </div>
                         <input type="range" v-model.number="simulatedCashRatio" min="0" max="100" step="5" class="slider slider-primary" @input="updateSimulationChart">
                       </div>
-                   </div>
-                   <div class="simulation-info-card professional-card">
+                  </div>
+                  <div class="simulation-info-card professional-card">
                       <div class="sim-result-box" :class="isBeatingInflation ? 'border-success' : 'border-danger'">
-                         <div class="result-text">
+                        <div class="result-text">
                             <h4>{{ isBeatingInflation ? '資產成功增值' : '購買力將縮水' }}</h4>
                             <p>20年後預估: <strong>NT$ {{ numberFormat(finalWealth, 0) }}</strong></p>
-                         </div>
+                        </div>
                       </div>
-                   </div>
+                  </div>
                 </div>
-             </div>
+            </div>
           </div>
 
-          <div class="chart-card">
-            <h3>現金流配置</h3>
-            <div class="chart-box"><canvas ref="allocationChartCanvas"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>地區配置</h3>
-            <div class="chart-box"><canvas ref="twUsChartCanvas"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>股債配置</h3>
-            <div class="chart-box"><canvas ref="stockBondChartCanvas"></canvas></div>
-          </div>
-          <div class="chart-card">
-             <h3>法幣 vs 加密貨幣</h3>
-             <div class="chart-box"><canvas ref="currencyChartCanvas"></canvas></div>
-          </div>
-          <div class="chart-card">
-             <h3>加密貨幣分佈</h3>
-             <div class="chart-box"><canvas ref="holdingValueChartCanvas"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>資產負債總覽</h3>
-            <div class="chart-box"><canvas ref="netWorthChartCanvas"></canvas></div>
+          <div class="chart-carousel-wrapper wide-card">
+            <div class="carousel-header">
+              <h3>資產配置分析</h3>
+              <span class="carousel-hint">左右滑動查看更多 👉</span>
+            </div>
+            <div class="carousel-track">
+              <div class="chart-card carousel-item">
+                <h3>現金流配置</h3>
+                <div class="chart-box"><canvas ref="allocationChartCanvas"></canvas></div>
+              </div>
+              <div class="chart-card carousel-item">
+                <h3>地區配置</h3>
+                <div class="chart-box"><canvas ref="twUsChartCanvas"></canvas></div>
+              </div>
+              <div class="chart-card carousel-item">
+                <h3>股債配置</h3>
+                <div class="chart-box"><canvas ref="stockBondChartCanvas"></canvas></div>
+              </div>
+              <div class="chart-card carousel-item">
+                <h3>法幣 vs 加密貨幣</h3>
+                <div class="chart-box"><canvas ref="currencyChartCanvas"></canvas></div>
+              </div>
+              <div class="chart-card carousel-item">
+                <h3>加密貨幣分佈</h3>
+                <div class="chart-box"><canvas ref="holdingValueChartCanvas"></canvas></div>
+              </div>
+              <div class="chart-card carousel-item">
+                <h3>資產負債總覽</h3>
+                <div class="chart-box"><canvas ref="netWorthChartCanvas"></canvas></div>
+              </div>
+            </div>
           </div>
 
-          <div class="chart-card wide-card">
+          <!-- <div class="chart-card wide-card">
             <div class="chart-header-row">
               <h3>收支趨勢</h3>
               <div class="date-controls">
@@ -188,7 +198,7 @@
             <div class="chart-box-lg">
               <canvas ref="trendChartCanvas"></canvas>
             </div>
-          </div>
+          </div> -->
 
         </div>
       </div>
@@ -576,7 +586,7 @@ const netWorthChartCanvas = ref(null);
 const trendChartCanvas = ref(null);
 const assetHistoryChartCanvas = ref(null);
 let assetHistoryChart = null;
-const historyRange = ref('1y');
+const historyRange = ref('2w');
 
 // Chart Instances
 let allocChart = null; 
@@ -1061,7 +1071,7 @@ async function fetchTrendData() {
   }
 }
 
-async function fetchAssetHistory(range = '1y') {
+async function fetchAssetHistory(range = '2w') {
     if (accounts.value.length === 0) return;
     historyRange.value = range;
     let url = `${window.API_BASE_URL}?action=asset_history&range=${range}`;
@@ -1449,12 +1459,19 @@ function getTrendClass(value) {
 
 <style scoped>
 /* 共用樣式 */
-.accounts-container { 
-  padding: 16px; 
-  padding-bottom: 80px; /* 預留底部空間給手機操作 */
-  max-width: 1000px; 
-  margin: 0 auto; 
-  overflow: visible;
+.accounts-container {
+  /* 關鍵修正：確保 padding 不會把寬度撐破 100% */
+  box-sizing: border-box; 
+  
+  padding: 16px;
+  padding-bottom: 80px;
+  
+  /* 設定最大寬度，您可以試著改為 100% 測試是否受父層限制 */
+  width: 100%;
+  max-width: 1280px; /* 稍微加大一點 */
+  
+  /* 置中 */
+  margin: 0 auto;
 }
 
 /* 🌟 標題列 Sticky 設定 */
@@ -2093,6 +2110,142 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
   color: #888;
   border: none;
 }
+
+/* =========================================
+   1. 輪播區塊樣式 (Carousel Styles)
+   ========================================= */
+.chart-carousel-wrapper {
+  margin-bottom: 0;
+  min-width: 0; /* ★ 這是解決 Grid 溢出的魔法指令 */
+  width: 100%;
+}
+
+.carousel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.carousel-header h3 {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #8c7b75;
+  margin: 0;
+}
+
+.carousel-hint {
+  font-size: 0.75rem;
+  color: #aaa;
+  animation: pulse 2s infinite;
+  display: block; /* 手機版顯示 */
+}
+
+.carousel-track {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto; /* 啟用橫向捲動 */
+  padding-bottom: 16px; /* 預留捲軸空間或手指滑動空間 */
+  scroll-snap-type: x mandatory; /* 滑動時自動對齊 */
+  -webkit-overflow-scrolling: touch; /* iOS 滑動慣性 */
+  
+  /* 修正左右邊距，讓第一個卡片不會貼死螢幕邊緣 */
+  margin: 0 -16px; 
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.carousel-item {
+  min-width: 85%; /* 手機版：讓下一張卡片露出一點點，提示可滑動 */
+  scroll-snap-align: center; /* 滑動停止時置中 */
+  flex-shrink: 0; /* 防止被壓縮 */
+  margin-bottom: 0 !important; /* 覆寫原本 grid 的 margin */
+  height: auto; /* 確保高度自適應 */
+}
+
+/* 2. 電腦版輪播軌道的修正 */
+@media (min-width: 768px) {
+  .carousel-track {
+    display: grid;
+    /* 強制三欄等寬 */
+    grid-template-columns: repeat(3, minmax(0, 1fr)); 
+    gap: 20px;
+    
+    /* 重置手機版設定 */
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .carousel-hint {
+    display: none !important; /* 加上 !important 確保絕對隱藏 */
+  }
+
+  .carousel-item {
+    width: auto; /* 讓 Grid 控制寬度 */
+    min-width: 0; /* 防止內部 Canvas 撐開 */
+  }
+}
+
+/* 如果螢幕特大 (例如超過 1400px)，也許可以考慮變 4 欄 (選用) */
+@media (min-width: 1400px) {
+  .accounts-container {
+     max-width: 1400px;
+  }
+  /* 如果覺得圓餅圖變 4 個太小，可以不加這段，維持 3 欄 */
+}
+
+@keyframes pulse {
+  0% { opacity: 0.6; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(3px); }
+  100% { opacity: 0.6; transform: translateX(0); }
+}
+
+/* =========================================
+   2. 膠囊標籤樣式 (Pill Badge for Stock Matrix)
+   ========================================= */
+
+/* 覆寫原本單純的文字顏色，改為色塊 */
+.matrix-pl {
+    display: inline-block;
+    padding: 3px 10px;       /* 增加內距 */
+    border-radius: 20px;     /* 圓角 */
+    font-size: 0.85rem;
+    font-weight: 700;        /* 粗體 */
+    margin-bottom: 2px;
+    line-height: 1.2;
+    transition: all 0.2s;
+}
+
+/* 漲 (台灣習慣：紅) - 淡紅底+深紅字 */
+.matrix-pl.trend-up {
+    background-color: #ffecec; /* 極淡紅 */
+    color: #cc0000;            /* 深紅 */
+    border: 1px solid rgba(204, 0, 0, 0.1);
+}
+
+/* 跌 (台灣習慣：綠) - 淡綠底+深綠字 */
+.matrix-pl.trend-down {
+    background-color: #e8f5e9; /* 極淡綠 */
+    color: #1b5e20;            /* 深綠 */
+    border: 1px solid rgba(27, 94, 32, 0.1);
+}
+
+/* 平盤 - 淡灰底+深灰字 */
+.matrix-pl.trend-flat {
+    background-color: #f5f5f5;
+    color: #757575;
+}
+
+/* 在持股矩陣卡片中，稍微調整百分比文字的樣式 */
+.sub-item.center span:last-child {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 </style>
 
 <style>
