@@ -356,48 +356,73 @@
 
           <div class="form-group">
             <label>資產類型</label>
-            <select v-model="form.type" class="input-std">
-              <option value="Cash">現金/活存</option>
-              <option value="Stock">股票 (台灣/海外)</option>
-              <option value="Bond">債券</option>
-              <option value="Investment">其他投資</option>
-              <option value="Liability">負債</option>
-            </select>
+            <div class="type-selector-grid">
+              <div 
+                v-for="opt in [
+                  {val:'Cash', label:'現金'},
+                  {val:'Crypto', label:'加密貨幣'},
+                  {val:'Stock', label:'股票'}, 
+                  {val:'Bond', label:'債券'},
+                  {val:'Insurance', label:'保單'},
+                  {val:'RealEstate', label:'不動產'},
+                  {val:'Property', label:'動產'},
+                  {val:'Investment', label:'其他'},
+                  {val:'Liability', label:'負債'}
+                ]" 
+                :key="opt.val"
+                class="type-option"
+                :class="{ active: form.type === opt.val }"
+                @click="form.type = opt.val"
+              >
+                <span class="opt-icon">{{ opt.icon }}</span>
+                <span class="opt-label">{{ opt.label }}</span>
+              </div>
+            </div>
           </div>
 
-          <div v-if="isStockType" class="special-fields-box">
+          <div v-if="isTradeable" class="special-fields-box">
             
             <div class="form-row">
               <div class="form-group" style="flex: 2;">
                 <label>標的代碼 (Symbol)</label>
-                <input type="text" v-model="form.symbol" class="input-std" placeholder="例如: 2330 或 AAPL">
+                <input type="text" v-model="form.symbol" class="input-std" placeholder="例如: 2330 或 BTC">
               </div>
-              
               <div class="form-group" style="flex: 1;">
-                <label>幣種 (自動)</label>
-                <div class="auto-currency-display">
-                    {{ form.currency }}
-                </div>
+                <label>數量 / 股數</label>
+                <input type="number" v-model.number="form.quantity" step="any" class="input-std" placeholder="數量">
               </div>
             </div>
 
             <div class="form-row mt-2">
-              <div class="form-group half">
-                <label>持股數量</label>
-                <input type="number" v-model.number="form.quantity" step="any" class="input-std" placeholder="股數">
-              </div>
-              <div class="form-group half">
-                <label>{{ priceLabel }}</label> 
-                <input type="number" v-model.number="form.unitCost" step="any" class="input-std highlight-input" placeholder="單價">
-              </div>
+              
+              <template v-if="isCryptoType">
+                  <div class="form-group half">
+                    <label>平均買入單價 <span class="text-primary">(USD)</span></label>
+                    <input type="number" v-model.number="form.unitCost" step="any" class="input-std highlight-input" placeholder="例如: 65000">
+                  </div>
+                  <div class="form-group half">
+                    <label>當時美金匯率 <span class="text-xs text-gray">(USD/TWD)</span></label>
+                    <input type="number" v-model.number="form.custom_rate" step="any" class="input-std" placeholder="例如: 32.5">
+                  </div>
+              </template>
+
+              <template v-else>
+                  <div class="form-group half">
+                    <label>平均買入單價 <span class="text-xs text-gray">({{ form.currency }})</span></label>
+                    <input type="number" v-model.number="form.unitCost" step="any" class="input-std highlight-input" placeholder="成本單價">
+                  </div>
+                  <div class="form-group half">
+                     <label>匯率 (選填)</label>
+                    <input type="number" v-model.number="form.custom_rate" step="any" class="input-std" placeholder="預設 1.0 或自動">
+                  </div>
+              </template>
+
             </div>
 
             <div class="calc-info" v-if="form.quantity && form.unitCost">
-                <span v-if="form.cost_basis > 0">≈ 總投入成本: </span>
-                <span v-else>≈ 當時總市值: </span>
-                
+                <span>≈ 換算總成本 (TWD): </span>
                 <span class="calc-value">
-                    {{ numberFormat(form.quantity * form.unitCost, 0) }} {{ form.currency }}
+                    NT$ {{ numberFormat(calculatePreviewCost(), 0) }}
                 </span>
             </div>
           </div>
@@ -550,11 +575,16 @@ const loading = ref(true);
 const aiLoading = ref(false);
 const aiAnalysis = ref('');
 
+// 1. 類型名稱映射 (Badge 顯示用)
 const typeNameMap = { 
     'Cash': '現金', 
-    'Investment': '投資', 
     'Stock': '股票', 
-    'Bond': '債券', 
+    'Bond': '債券',
+    'Crypto': '加密貨幣',  // 🟢 新增
+    'RealEstate': '不動產', // 🟢 新增
+    'Property': '動產',     // 🟢 新增
+    'Insurance': '保險',    // 🟢 新增
+    'Investment': '其他', 
     'Liability': '負債' 
 };
 
@@ -634,15 +664,31 @@ const currencySelectValue = ref('TWD');
 const isCustomCurrency = ref(false);
 
 const fiatCurrencies = ['TWD', 'USD', 'JPY', 'CNY', 'EUR', 'GBP', 'HKD', 'AUD', 'CAD', 'SGD', 'KRW'];
+// 2. 列表分組標題 (詳細列表的 Header)
 const typeDisplayMap = {
     'Cash': '現金及活存',
     'Stock': '股票資產 (股權)',
     'Bond': '債券資產 (債權)',
-    'Investment': '其他投資及加密資產',
+    'Crypto': '加密貨幣 (錢包/交易所)', // 🟢 新增
+    'RealEstate': '不動產 (房產/土地)', // 🟢 新增
+    'Property': '動產 (車輛/收藏)',     // 🟢 新增
+    'Insurance': '保險資產 (現價/解約金)', // 🟢 新增
+    'Investment': '其他投資',
     'Liability': '總負債'
 };
-const typeOrder = ['Cash', 'Stock', 'Bond', 'Investment', 'Liability'];
-
+// 3. 排序順序 (決定列表顯示先後)
+// 建議邏輯：流動性高 -> 流動性低 -> 固定資產 -> 負債
+const typeOrder = [
+    'Cash', 
+    'Crypto',     // 高波動/高流動
+    'Stock', 
+    'Bond', 
+    'Insurance',  // 儲蓄險通常視為類債券或現金
+    'RealEstate', // 固定資產
+    'Property', 
+    'Investment', 
+    'Liability'
+];
 // 排序和分組
 const groupedAccounts = computed(() => {
     const grouped = {};
@@ -668,8 +714,19 @@ const groupedAccounts = computed(() => {
     return result;
 });
 
+// 1. 定義誰是 "交易型資產" (需要輸入代碼、數量)
+const isTradeable = computed(() => {
+    return ['Stock', 'Bond', 'Crypto'].includes(form.value.type);
+});
+
+// 2. 判斷是否為 "股票/債券" (傳統邏輯)
 const isStockType = computed(() => {
-    return form.value.type === 'Stock' || form.value.type === 'Bond';
+    return ['Stock', 'Bond'].includes(form.value.type);
+});
+
+// 3. 判斷是否為 "加密貨幣" (特殊邏輯：強制 USD 計價)
+const isCryptoType = computed(() => {
+    return form.value.type === 'Crypto';
 });
 
 const priceLabel = computed(() => {
@@ -798,6 +855,23 @@ const isDetailModalOpen = ref(false);
 const selectedStockSymbol = ref('');
 const selectedStockAccounts = ref([]); // 該標的下的所有帳戶列表
 const selectedStockSummary = ref({});  // 該標的的彙總資訊
+
+
+// 1. 計算預覽成本 (UI顯示用)
+function calculatePreviewCost() {
+    const qty = form.value.quantity || 0;
+    const price = form.value.unitCost || 0; // 這裡是 USD(加密幣) 或 原幣(股票)
+    
+    if (isCryptoType.value) {
+        // 加密幣公式: 數量 * 美金價 * 匯率
+        const rate = form.value.custom_rate || 32.5; // 預設給個參考匯率，避免顯示 0
+        return qty * price * rate;
+    } else {
+        // 股票公式: 數量 * 單價 (假設台股就是台幣，美股後端會再算，這裡先簡單顯示)
+        // 如果是美股，這裡的預覽可能需要乘上預設匯率，但為了簡單，先直接顯示乘積
+        return qty * price; 
+    }
+}
 
 function openStockDetail(stockGroup) {
     selectedStockSymbol.value = stockGroup.symbol;
@@ -1110,30 +1184,54 @@ async function fetchAIAnalysis() {
 async function handleSave() {
   isSaving.value = true;
   
-  // 1. 自動補全台股代碼 (如果只填數字)
+  // 1. 自動補全台股代碼 (邏輯修正：只有「股票」類型且是數字才加 .TW，加密幣不加)
   let finalSymbol = form.value.symbol;
-  if (finalSymbol && /^\d{3,4}$/.test(finalSymbol)) {
+  if (isStockType.value && finalSymbol && /^\d{3,4}$/.test(finalSymbol)) {
       finalSymbol += '.TW';
   }
 
-  // 2. 自動計算總成本 (Cost Basis) = 數量 * 單價
-  // 如果使用者有填單價，就用算的；沒填就維持 0
+  // 2. 自動計算總成本 (Cost Basis)
+  // 這裡要分流：加密貨幣 vs 一般股票
   let finalCostBasis = form.value.cost_basis;
-  if (isStockType.value && form.value.quantity && form.value.unitCost) {
+
+  if (isCryptoType.value) {
+      // 🟢 [加密貨幣新邏輯]
+      // 總成本 (TWD) = 數量 * USD單價 * 美金匯率
+      const qty = form.value.quantity || 0;
+      const usdPrice = form.value.unitCost || 0;
+      const rate = form.value.custom_rate || 1; // 若沒填匯率，預設 1 (避免乘出來是 0，雖不精準但比 0 好)
+      
+      finalCostBasis = qty * usdPrice * rate;
+
+  } else if (isStockType.value && form.value.quantity && form.value.unitCost) {
+      // 🟢 [股票原有邏輯]
+      // 總成本 = 數量 * 單價 (假設單價已是計價幣別，如台幣)
       finalCostBasis = form.value.quantity * form.value.unitCost;
   }
   
   // 3. 自動設定快照餘額 (Balance)
-  // 如果是股票且剛建立(或更新)，預設 市值(Balance) = 總成本
-  // 除非使用者有特別去改 Balance (但在新介面我們把它藏起來了)
+  // 對於「交易型資產 (股票/加密幣)」，若使用者沒手填 Balance (新介面中隱藏了)，
+  // 我們預設「初始市值 = 總成本」。
   let finalBalance = form.value.balance;
-  if (isStockType.value) {
+  
+  // 檢查是否為交易型資產 (包含 Crypto, Stock, Bond)
+  if (isTradeable.value) {
+      // 如果是用戶新增/編輯，通常我們就用算出來的成本當作目前的市值
       finalBalance = finalCostBasis; 
+  }
+
+  // 4. 針對 Crypto 的幣種防呆
+  // 如果是加密幣，但使用者沒選幣種，為了讓系統知道這是美金計價資產，建議強制或預設為 USD/USDT
+  let finalCurrency = form.value.currency;
+  if (isCryptoType.value && (!finalCurrency || finalCurrency === 'TWD')) {
+      // 這裡看您的需求，通常加密幣計價單位是 USDT 或 USD
+      finalCurrency = 'USDT'; 
   }
 
   const payload = { 
       ...form.value,
       symbol: finalSymbol,
+      currency: finalCurrency, // 使用修正後的幣種
       cost_basis: finalCostBasis,
       balance: finalBalance,
       custom_rate: form.value.custom_rate 
@@ -1143,7 +1241,7 @@ async function handleSave() {
       payload.ledger_id = props.ledgerId;
   }
 
-  // ... (原本的 fetch 邏輯不變) ...
+  // ... (發送請求 fetch 保持不變) ...
   const response = await fetchWithLiffToken(`${window.API_BASE_URL}?action=save_account`, { 
       method: 'POST', 
       body: JSON.stringify(payload) 
@@ -2245,6 +2343,44 @@ select.input-std { appearance: none; -webkit-appearance: none; background-image:
   font-size: 0.75rem;
   font-weight: 600;
 }
+
+/* 🟢 [新增] 資產類型選擇器的樣式 */
+.type-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* 一行三個 */
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.type-option {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 10px 4px;
+  text-align: center;
+  cursor: pointer;
+  background: #fdfdfd;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.type-option:hover {
+  background: #f0f0f0;
+}
+
+/* 選中時的樣式 (配合您的主題色) */
+.type-option.active {
+  border-color: #d4a373;
+  background-color: #fffbf0;
+  color: #d4a373;
+  font-weight: bold;
+  box-shadow: 0 2px 5px rgba(212, 163, 115, 0.2);
+}
+
+.opt-icon { font-size: 1.4rem; line-height: 1; }
+.opt-label { font-size: 0.8rem; }
 
 </style>
 
